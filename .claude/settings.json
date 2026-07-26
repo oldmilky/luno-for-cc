@@ -1,0 +1,72 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun run lint:*)",
+      "Bash(bun run test:*)",
+      "Bash(bun run build:*)",
+      "Bash(bun run format:*)",
+      "Bash(bun run fix:*)",
+      "Bash(bun run package:*)",
+      "Bash(bun run dev:webview:*)",
+      "Bash(bunx tsc:*)",
+      "Bash(bunx eslint:*)",
+      "Bash(bunx stylelint:*)",
+      "Bash(bunx prettier:*)",
+      "Bash(bunx vitest:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git show:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(git add:*)",
+      "Bash(git stash:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(mkdir:*)",
+      "Edit",
+      "Write"
+    ],
+    "deny": [
+      "Bash(rm -rf /*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -f*)",
+      "Read(./ghost.one/**)",
+      "Edit(./ghost.one/**)",
+      "Write(./ghost.one/**)",
+      "Read(./.env*)",
+      "Read(./**/.env*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/format-on-edit.mjs\""
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-comments.mjs\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-compact-brief.mjs\""
+          }
+        ]
+      }
+    ]
+  }
+}

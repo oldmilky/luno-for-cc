@@ -56,9 +56,17 @@ export default tseslint.config(
     }
   },
 
-  // ── Extension host ──────────────────────────────────────────
+  // ── Everything that runs on Node ────────────────────────────
+  // The extension host, the build scripts, and the agent hooks — the hooks are
+  // linted like any other source here, which is the point: they are the thing
+  // enforcing the rules and have no business being exempt from them.
   {
-    files: ["src/**/*.ts", "esbuild.config.mjs", "vitest.config.ts"],
+    files: [
+      "src/**/*.ts",
+      "esbuild.config.mjs",
+      "vitest.config.ts",
+      ".claude/hooks/*.mjs"
+    ],
     languageOptions: {
       globals: { ...globals.node }
     }

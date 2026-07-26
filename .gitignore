@@ -32,3 +32,10 @@ TESTING.md
 # no business being a default for anyone who clones this. `launch.json` and
 # `tasks.json` stay: those are the dev loop, and they are the same for everyone.
 .vscode/settings.json
+
+# The agent environment IS committed — CLAUDE.md, rules, hooks, skills and the
+# shared permission list are project tooling and belong with the project. Only
+# the per-machine layer stays out: `settings.local.json` accumulates a personal
+# allow-list, and the codex-threads directory is scratch state.
+.claude/settings.local.json
+.claude/codex-threads/

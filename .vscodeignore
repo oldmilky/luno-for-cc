@@ -11,8 +11,17 @@ esbuild.config.mjs
 tsconfig.json
 vitest.config.*
 .gitignore
-.claude/**
 *.vsix
+# The agent environment. Dev-only in every part: the rules and hooks are for
+# whoever works on the extension, not for anyone running it.
+.claude/**
+CLAUDE.md
+.claudeignore
+.prettierrc.json
+.prettierignore
+.prettierrc
+eslint.config.mjs
+.stylelintrc.json
 # Lockfiles are dev-only — they were leaking into the package
 # (bun.lock and webview/package-lock.json both shipped before).
 **/*.lock
