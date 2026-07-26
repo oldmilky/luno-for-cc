@@ -47,33 +47,38 @@ export function ThemePicker() {
 
       <AnimatePresence>
         {open && (
-          <motion.div className={s.menu} role="listbox" aria-label="Theme" {...POPOVER}>
-          {THEMES.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="option"
-              aria-selected={t.id === active}
-              className={s.item}
-              onClick={() => {
-                setTheme(t.id);
-                setOpen(false);
-              }}
-            >
-              {/* Carries the palette it previews — the swatch styles read
+          <motion.div
+            className={s.menu}
+            role="listbox"
+            aria-label="Theme"
+            {...POPOVER}
+          >
+            {THEMES.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="option"
+                aria-selected={t.id === active}
+                className={s.item}
+                onClick={() => {
+                  setTheme(t.id);
+                  setOpen(false);
+                }}
+              >
+                {/* Carries the palette it previews — the swatch styles read
                   that palette's own tokens rather than copied values. */}
-              <span className={s.swatch} data-theme={t.id} aria-hidden />
-              <span className={s.text}>
-                <span className={s.label}>{t.label}</span>
-                <span className={s.note}>{t.note}</span>
-              </span>
-              {t.id === active && (
-                <span className={s.check}>
-                  <Icon name="check" size={12} />
+                <span className={s.swatch} data-theme={t.id} aria-hidden />
+                <span className={s.text}>
+                  <span className={s.label}>{t.label}</span>
+                  <span className={s.note}>{t.note}</span>
                 </span>
-              )}
-            </button>
-          ))}
+                {t.id === active && (
+                  <span className={s.check}>
+                    <Icon name="check" size={12} />
+                  </span>
+                )}
+              </button>
+            ))}
           </motion.div>
         )}
       </AnimatePresence>

@@ -249,7 +249,8 @@
   border: 1px solid var(--b2);
   border-radius: var(--round-sm);
   background: var(--s1);
-  box-shadow: 0 14px 32px color-mix(in srgb, var(--shadow-color) 55%, transparent);
+  box-shadow: 0 14px 32px
+    color-mix(in srgb, var(--shadow-color) 55%, transparent);
 }
 
 .planItem {

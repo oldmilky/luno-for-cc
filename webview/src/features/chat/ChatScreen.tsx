@@ -56,7 +56,6 @@ import type { PlanRevisionView } from "../plan";
 import s from "./ChatScreen.module.scss";
 
 export interface ChatScreenProps {
-
   model: string;
   /** alias → resolved concrete id for every picker entry, so each row can
    *  show its real version. */
@@ -99,7 +98,10 @@ export interface ChatScreenProps {
   onDismissError: () => void;
   /** The pending tool-permission prompt to render above the composer, if any. */
   pendingPermission: PermissionRequestView | null;
-  onPermissionRespond: (behavior: "allow" | "deny", restOfTurn?: boolean) => void;
+  onPermissionRespond: (
+    behavior: "allow" | "deny",
+    restOfTurn?: boolean
+  ) => void;
 }
 
 export function ChatScreen({
@@ -207,9 +209,9 @@ export function ChatScreen({
   /** Per-turn user override. If absent, collapsed state is derived from the
    *  turn shape: completed turns auto-collapse, the active streaming turn
    *  stays expanded. User clicks set an explicit override that wins. */
-  const [manualToggles, setManualToggles] = useState<Map<string, "expanded" | "collapsed">>(
-    new Map()
-  );
+  const [manualToggles, setManualToggles] = useState<
+    Map<string, "expanded" | "collapsed">
+  >(new Map());
   const toggleTurn = (turnId: string, currentlyCollapsed: boolean): void => {
     setManualToggles((m) => {
       const next = new Map(m);
@@ -252,7 +254,7 @@ export function ChatScreen({
     // microtask focus via the DOM.
     queueMicrotask(() => {
       const el = document.querySelector<HTMLElement>(
-        "[contenteditable=\"true\"]"
+        '[contenteditable="true"]'
       );
       el?.focus();
     });
@@ -268,7 +270,7 @@ export function ChatScreen({
     onInput(prefix + chunk + "\n");
     queueMicrotask(() => {
       const el = document.querySelector<HTMLElement>(
-        "[contenteditable=\"true\"]"
+        '[contenteditable="true"]'
       );
       el?.focus();
     });
@@ -279,7 +281,6 @@ export function ChatScreen({
     const el = logRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [grouped, streaming, showThinking]);
-
 
   const onScroll = () => {
     const el = logRef.current;
@@ -292,7 +293,6 @@ export function ChatScreen({
   return (
     <>
       <Header
-
         permissionMode={permissionMode}
         busy={busy}
         conventions={conventions}
@@ -302,9 +302,7 @@ export function ChatScreen({
         onOpenConnectors={() => setConnectorsOpen(true)}
       />
 
-      {bannerVisible && (
-        <ConventionsBanner onHideForSession={onHideBanner} />
-      )}
+      {bannerVisible && <ConventionsBanner onHideForSession={onHideBanner} />}
 
       {skillSuggestion && (
         <SkillSuggestion
@@ -317,72 +315,68 @@ export function ChatScreen({
       )}
 
       <div className={s.screen}>
-      <div
-        ref={logRef}
-        onScroll={onScroll}
-        className={s.log}
-      >
-        <AnimatePresence mode="wait" initial={false}>
-          {grouped.groups.length === 0 && !streaming && (
-            <motion.div
-              key={`empty-${sessionEpoch}`}
-              {...ENTER_CARD}
-              // Kept: the hero lifts away as the first message lands, and
-              // `mode="wait"` needs an exit. ENTER_CARD has none of its own.
-              exit={{ opacity: 0, y: -TRAVEL.md }}
-              className={s.center}
-            >
-              <EmptyState />
-            </motion.div>
-          )}
-        </AnimatePresence>
-        {grouped.groups.map((g, i) => {
-          const isLatestTurn =
-            g.kind === "turn" &&
-            !grouped.groups.slice(i + 1).some((x) => x.kind === "turn");
-          const isEditing = g.kind === "user" && g.id === editingTurnId;
-          if (isEditing && g.kind === "user") {
-            const messagesAfter = grouped.groups.length - i - 1;
-            return (
-              <InlineMessageEditor
-                key={g.id}
-                initialText={g.text}
-                busy={busy}
-                model={model}
-                permissionMode={permissionMode}
-                models={models}
-                skills={skills}
-        
-                onCancel={() => setEditingTurnId(null)}
-                onSubmit={(text) => {
-                  setPendingEdit({ turnId: g.id, text, messagesAfter });
-                }}
-              />
+        <div ref={logRef} onScroll={onScroll} className={s.log}>
+          <AnimatePresence mode="wait" initial={false}>
+            {grouped.groups.length === 0 && !streaming && (
+              <motion.div
+                key={`empty-${sessionEpoch}`}
+                {...ENTER_CARD}
+                // Kept: the hero lifts away as the first message lands, and
+                // `mode="wait"` needs an exit. ENTER_CARD has none of its own.
+                exit={{ opacity: 0, y: -TRAVEL.md }}
+                className={s.center}
+              >
+                <EmptyState />
+              </motion.div>
+            )}
+          </AnimatePresence>
+          {grouped.groups.map((g, i) => {
+            const isLatestTurn =
+              g.kind === "turn" &&
+              !grouped.groups.slice(i + 1).some((x) => x.kind === "turn");
+            const isEditing = g.kind === "user" && g.id === editingTurnId;
+            if (isEditing && g.kind === "user") {
+              const messagesAfter = grouped.groups.length - i - 1;
+              return (
+                <InlineMessageEditor
+                  key={g.id}
+                  initialText={g.text}
+                  busy={busy}
+                  model={model}
+                  permissionMode={permissionMode}
+                  models={models}
+                  skills={skills}
+
+                  onCancel={() => setEditingTurnId(null)}
+                  onSubmit={(text) => {
+                    setPendingEdit({ turnId: g.id, text, messagesAfter });
+                  }}
+                />
+              );
+            }
+            return renderGroup(
+              g,
+              i,
+              grouped.groups,
+              planContext,
+              (turnId, messagesAfter) =>
+                setPendingRewind({ turnId, messagesAfter }),
+              (turnId) => setEditingTurnId(turnId),
+              isTurnCollapsed,
+              toggleTurn,
+              isLatestTurn,
+              handleContinueFromHere,
+              handleAddDiffNote
             );
-          }
-          return renderGroup(
-            g,
-            i,
-            grouped.groups,
-            planContext,
-            (turnId, messagesAfter) =>
-              setPendingRewind({ turnId, messagesAfter }),
-            (turnId) => setEditingTurnId(turnId),
-            isTurnCollapsed,
-            toggleTurn,
-            isLatestTurn,
-            handleContinueFromHere,
-            handleAddDiffNote
-          );
-        })}
-        {streaming && (
-          <div className={s.rail}>
-            <AssistantMessage text={streaming} streaming showAvatar={false} />
-          </div>
-        )}
-        {showThinking && <ThinkingIndicator />}
-        {error && <ErrorBanner text={error} onDismiss={onDismissError} />}
-      </div>
+          })}
+          {streaming && (
+            <div className={s.rail}>
+              <AssistantMessage text={streaming} streaming showAvatar={false} />
+            </div>
+          )}
+          {showThinking && <ThinkingIndicator />}
+          {error && <ErrorBanner text={error} onDismiss={onDismissError} />}
+        </div>
 
         <AnimatePresence>
           {userScrolled.current && (
@@ -414,7 +408,8 @@ export function ChatScreen({
               onClick={() => {
                 userScrolled.current = false;
                 const el = logRef.current;
-                if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                if (el)
+                  el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
                 force((n) => n + 1);
               }}
             >
@@ -527,8 +522,7 @@ export function ChatScreen({
             if (!editorContext) return;
             _onPin({
               path: editorContext.file,
-              label:
-                editorContext.file.split("/").pop() ?? editorContext.file
+              label: editorContext.file.split("/").pop() ?? editorContext.file
             });
           }}
           onUnpin={() => editorContext && onUnpin(editorContext.file)}
@@ -601,7 +595,11 @@ type TurnBlock =
  * ToolCard. Filter applies even on historic sessions saved before plan
  * interception was wired (defensive — orchestrator already suppresses live).
  */
-const PLAN_TOOL_NAMES = new Set(["ExitPlanMode", "TodoWrite", "AskUserQuestion"]);
+const PLAN_TOOL_NAMES = new Set([
+  "ExitPlanMode",
+  "TodoWrite",
+  "AskUserQuestion"
+]);
 const WRITE_TOOL_NAMES = new Set([
   "Write",
   "Create",
@@ -610,8 +608,10 @@ const WRITE_TOOL_NAMES = new Set([
   "fs_write",
   "str_replace_editor"
 ]);
-const WRITE_TOOL_NAME_RE_PREFIX = /^(write|edit|create|save|update|put|insert)(?:$|[_-]|[A-Z])/i;
-const WRITE_TOOL_NAME_RE_BOUNDARY = /[_-](write|edit|create|save|update|put|insert)(?:$|[_-]|[A-Z])/i;
+const WRITE_TOOL_NAME_RE_PREFIX =
+  /^(write|edit|create|save|update|put|insert)(?:$|[_-]|[A-Z])/i;
+const WRITE_TOOL_NAME_RE_BOUNDARY =
+  /[_-](write|edit|create|save|update|put|insert)(?:$|[_-]|[A-Z])/i;
 
 function isPlanFileWriteEvent(name: string, body: string | undefined): boolean {
   if (
@@ -830,7 +830,11 @@ function renderGroup(
   ctx: { views: Map<string, PlanRevisionView>; ordered: PlanRevisionView[] },
   onRewindRequest: (turnId: string, messagesAfter: number) => void,
   onEditRequest: (turnId: string) => void,
-  isTurnCollapsed: (turnId: string, hasWork: boolean, isLatest: boolean) => boolean,
+  isTurnCollapsed: (
+    turnId: string,
+    hasWork: boolean,
+    isLatest: boolean
+  ) => boolean,
   toggleTurn: (turnId: string, currentlyCollapsed: boolean) => void,
   isLatestTurn: boolean,
   onContinue: (text: string) => void,
@@ -859,14 +863,13 @@ function renderGroup(
   // is rendered after responseBlocks so it sits at the end of the turn, just
   // before the next user message.
   const allToolItems: ToolGroupItem[] = [];
-  for (const b of g.blocks) if (b.kind === "toolGroup") allToolItems.push(...b.items);
-  for (const b of g.responseBlocks) if (b.kind === "toolGroup") allToolItems.push(...b.items);
+  for (const b of g.blocks)
+    if (b.kind === "toolGroup") allToolItems.push(...b.items);
+  for (const b of g.responseBlocks)
+    if (b.kind === "toolGroup") allToolItems.push(...b.items);
   const fileEdits = extractFileEdits(allToolItems);
   return (
-    <div
-      key={g.turnId}
-      className={s.rail}
-    >
+    <div key={g.turnId} className={s.rail}>
       {hasWork && (
         <>
           <TurnHeader
@@ -889,8 +892,15 @@ function renderGroup(
           {g.responseBlocks.map((b, i) => {
             const isLastNarrative =
               b.kind === "narrative" &&
-              !g.responseBlocks.slice(i + 1).some((x) => x.kind === "narrative");
-            return renderTurnBlock(b, i, ctx, isLastNarrative ? onContinue : undefined);
+              !g.responseBlocks
+                .slice(i + 1)
+                .some((x) => x.kind === "narrative");
+            return renderTurnBlock(
+              b,
+              i,
+              ctx,
+              isLastNarrative ? onContinue : undefined
+            );
           })}
         </div>
       )}
@@ -919,10 +929,7 @@ function renderTurnBlock(
       );
     }
     return (
-      <div
-        key={`n-${i}`}
-        className={`md ${s.narrative}`}
-      >
+      <div key={`n-${i}`} className={`md ${s.narrative}`}>
         {renderMarkdown(b.text)}
       </div>
     );
@@ -1013,7 +1020,7 @@ function InlineMessageEditor({
           onSubmit={onSubmit}
           onCancel={onCancel}
           busy={busy}
-  
+
           model={model}
           permissionMode={permissionMode}
           models={models}

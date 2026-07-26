@@ -19,11 +19,18 @@ describe("Session basics", () => {
     const session = new Session();
     session.emitToolCall("t1", "Edit", { path: "a.ts" });
     session.addToolResult("t1", "done", false);
-    expect(session.timeline.map((e) => e.kind)).toEqual(["tool_call", "tool_result"]);
+    expect(session.timeline.map((e) => e.kind)).toEqual([
+      "tool_call",
+      "tool_result"
+    ]);
     const last = session.messages.at(-1)!;
     expect(Array.isArray(last.content)).toBe(true);
     const block = (last.content as ContentBlock[])[0];
-    expect(block).toMatchObject({ type: "tool_result", tool_use_id: "t1", content: "done" });
+    expect(block).toMatchObject({
+      type: "tool_result",
+      tool_use_id: "t1",
+      content: "done"
+    });
   });
 
   it("summarizes a plan answer into a readable body", () => {
@@ -69,7 +76,11 @@ describe("Session.truncateAt", () => {
     await session.addUser("first");
     session.emitToolCall("t1", "Edit", { path: "a.ts" });
     session.addToolResult("t1", "edited a.ts");
-    session.emit({ kind: "assistant", title: "Assistant", body: "I edited a.ts" });
+    session.emit({
+      kind: "assistant",
+      title: "Assistant",
+      body: "I edited a.ts"
+    });
     const u2 = await session.addUser("second");
 
     session.truncateAt(u2.id);
@@ -89,20 +100,23 @@ describe("Session.truncateAt", () => {
     expect(hasToolBlocks).toBe(false);
   });
 
-  it.fails("messages should preserve tool context after truncateAt", async () => {
-    const session = new Session();
-    await session.addUser("first");
-    session.emitToolCall("t1", "Edit", { path: "a.ts" });
-    session.addToolResult("t1", "edited a.ts");
-    const u2 = await session.addUser("second");
-    session.truncateAt(u2.id);
-    const hasToolBlocks = session.messages.some(
-      (m) =>
-        Array.isArray(m.content) &&
-        (m.content as ContentBlock[]).some(
-          (b) => b.type === "tool_use" || b.type === "tool_result"
-        )
-    );
-    expect(hasToolBlocks).toBe(true);
-  });
+  it.fails(
+    "messages should preserve tool context after truncateAt",
+    async () => {
+      const session = new Session();
+      await session.addUser("first");
+      session.emitToolCall("t1", "Edit", { path: "a.ts" });
+      session.addToolResult("t1", "edited a.ts");
+      const u2 = await session.addUser("second");
+      session.truncateAt(u2.id);
+      const hasToolBlocks = session.messages.some(
+        (m) =>
+          Array.isArray(m.content) &&
+          (m.content as ContentBlock[]).some(
+            (b) => b.type === "tool_use" || b.type === "tool_result"
+          )
+      );
+      expect(hasToolBlocks).toBe(true);
+    }
+  );
 });

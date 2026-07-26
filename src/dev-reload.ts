@@ -26,7 +26,11 @@ const DEBOUNCE_MS = 250;
 
 export function registerDevAutoRestart(ctx: vscode.ExtensionContext): void {
   if (ctx.extensionMode !== vscode.ExtensionMode.Development) return;
-  if (!vscode.workspace.getConfiguration("luno").get<boolean>("devAutoRestart", true)) {
+  if (
+    !vscode.workspace
+      .getConfiguration("luno")
+      .get<boolean>("devAutoRestart", true)
+  ) {
     return;
   }
 
@@ -44,8 +48,13 @@ export function registerDevAutoRestart(ctx: vscode.ExtensionContext): void {
       if (disposed || filename !== "extension.js") return;
       clearTimeout(timer);
       timer = setTimeout(() => {
-        vscode.window.setStatusBarMessage("Luno: reloading extension host…", 1500);
-        void vscode.commands.executeCommand("workbench.action.restartExtensionHost");
+        vscode.window.setStatusBarMessage(
+          "Luno: reloading extension host…",
+          1500
+        );
+        void vscode.commands.executeCommand(
+          "workbench.action.restartExtensionHost"
+        );
       }, DEBOUNCE_MS);
     });
   } catch (err) {

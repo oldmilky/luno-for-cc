@@ -45,7 +45,13 @@ export function ToolGroupCard({ bucket, items }: ToolGroupCardProps) {
   return (
     <motion.div
       {...ENTER}
-      className={[s.group, status === "pending" ? s.groupPending : "", status === "error" ? s.groupError : ""].filter(Boolean).join(" ")}
+      className={[
+        s.group,
+        status === "pending" ? s.groupPending : "",
+        status === "error" ? s.groupError : ""
+      ]
+        .filter(Boolean)
+        .join(" ")}
     >
       <button
         type="button"
@@ -58,8 +64,16 @@ export function ToolGroupCard({ bucket, items }: ToolGroupCardProps) {
         <span className={s.groupLabel}>{headerLabel}</span>
         <span className={s.groupStatus}>
           {status === "pending" && <span className={tool.spinner} />}
-          {status === "ok" && <span className={s.groupOk}><Icon name="check" size={11} /></span>}
-          {status === "error" && <span className={s.groupErr}><Icon name="x" size={11} /></span>}
+          {status === "ok" && (
+            <span className={s.groupOk}>
+              <Icon name="check" size={11} />
+            </span>
+          )}
+          {status === "error" && (
+            <span className={s.groupErr}>
+              <Icon name="x" size={11} />
+            </span>
+          )}
         </span>
         {/* The chevron is part of the same open/collapse gesture as the body,
             so it takes EXPAND's timing — but it rotates rather than growing,
@@ -102,7 +116,8 @@ function shortTarget(item: ToolGroupItem): string {
     const path = obj.path ?? obj.file_path ?? obj.filePath;
     if (typeof path === "string" && path) return shortenPath(path);
     const cmd = obj.command;
-    if (typeof cmd === "string" && cmd) return cmd.length > 60 ? cmd.slice(0, 60) + "…" : cmd;
+    if (typeof cmd === "string" && cmd)
+      return cmd.length > 60 ? cmd.slice(0, 60) + "…" : cmd;
     const pattern = obj.pattern ?? obj.query;
     if (typeof pattern === "string" && pattern) return pattern;
     const url = obj.url;

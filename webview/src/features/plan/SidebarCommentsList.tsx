@@ -36,7 +36,11 @@ interface Props {
   onJumpToHighlight: (commentId: string) => void;
 }
 
-export function SidebarCommentsList({ comments, locked, onJumpToHighlight }: Props) {
+export function SidebarCommentsList({
+  comments,
+  locked,
+  onJumpToHighlight
+}: Props) {
   // Inline-anchored comments now render directly inside the document via
   // InlineCommentThreads — show only whole-plan comments here so the
   // sidebar isn't a redundant duplicate. Whole-plan comments don't have
@@ -129,7 +133,11 @@ function CommentRow({ comment, index, locked, onJumpToHighlight }: RowProps) {
 
   const save = () => {
     if (!valid || !dirty || !editable) return;
-    send({ type: "planEditComment", commentId: comment.commentId, body: draft.trim() });
+    send({
+      type: "planEditComment",
+      commentId: comment.commentId,
+      body: draft.trim()
+    });
     setEditing(false);
   };
 
@@ -362,21 +370,13 @@ function CommentRow({ comment, index, locked, onJumpToHighlight }: RowProps) {
             </button>
           )}
           {!locked && !isResolvedAuto && (
-            <button
-              type="button"
-              className={s.footBtn}
-              onClick={toggleResolve}
-            >
+            <button type="button" className={s.footBtn} onClick={toggleResolve}>
               <Icon name={isResolvedManual ? "refresh" : "check"} size={10} />
               {isResolvedManual ? "Reopen" : "Resolve"}
             </button>
           )}
           {editable && (
-            <button
-              type="button"
-              className={s.footDelete}
-              onClick={remove}
-            >
+            <button type="button" className={s.footDelete} onClick={remove}>
               <Icon name="x" size={10} />
               Delete
             </button>
@@ -386,4 +386,3 @@ function CommentRow({ comment, index, locked, onJumpToHighlight }: RowProps) {
     </motion.li>
   );
 }
-

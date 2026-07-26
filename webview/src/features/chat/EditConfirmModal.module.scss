@@ -34,7 +34,8 @@
   border: 1px solid var(--b2);
   border-radius: var(--round-lg);
   background: var(--s1);
-  box-shadow: 0 24px 60px color-mix(in srgb, var(--shadow-color) 55%, transparent);
+  box-shadow: 0 24px 60px
+    color-mix(in srgb, var(--shadow-color) 55%, transparent);
 }
 
 .title {

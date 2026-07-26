@@ -99,11 +99,7 @@ export function KeyboardHints({ onClose }: { onClose: () => void }) {
 
         <div className={s.body}>
           {GROUPS.map((g, gi) => (
-            <motion.section
-              key={g.label}
-              {...enterAt(gi)}
-              className={s.group}
-            >
+            <motion.section key={g.label} {...enterAt(gi)} className={s.group}>
               <div className={s.groupLabel}>{g.label}</div>
               <ul className={s.rows}>
                 {g.rows.map((r, i) => (

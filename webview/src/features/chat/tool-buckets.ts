@@ -27,15 +27,35 @@ export interface BucketMeta {
 }
 
 const META: Record<ToolBucket, BucketMeta> = {
-  read:    { verb: "Read",     noun: "file",    nounPlural: "files",     icon: "file" },
-  search:  { verb: "Searched", noun: "pattern", nounPlural: "patterns",  icon: "search" },
-  explore: { verb: "Explored", noun: "folder",  nounPlural: "folders",   icon: "folder" },
-  edit:    { verb: "Edited",   noun: "file",    nounPlural: "files",     icon: "edit" },
-  run:     { verb: "Ran",      noun: "command", nounPlural: "commands",  icon: "terminal" },
-  web:     { verb: "Fetched",  noun: "page",    nounPlural: "pages",     icon: "cloud" },
-  task:    { verb: "Dispatched", noun: "agent", nounPlural: "agents",    icon: "layers" },
-  skill:   { verb: "Used",     noun: "skill",   nounPlural: "skills",    icon: "bolt" },
-  other:   { verb: "Ran",      noun: "tool",    nounPlural: "tools",     icon: "code" }
+  read: { verb: "Read", noun: "file", nounPlural: "files", icon: "file" },
+  search: {
+    verb: "Searched",
+    noun: "pattern",
+    nounPlural: "patterns",
+    icon: "search"
+  },
+  explore: {
+    verb: "Explored",
+    noun: "folder",
+    nounPlural: "folders",
+    icon: "folder"
+  },
+  edit: { verb: "Edited", noun: "file", nounPlural: "files", icon: "edit" },
+  run: {
+    verb: "Ran",
+    noun: "command",
+    nounPlural: "commands",
+    icon: "terminal"
+  },
+  web: { verb: "Fetched", noun: "page", nounPlural: "pages", icon: "cloud" },
+  task: {
+    verb: "Dispatched",
+    noun: "agent",
+    nounPlural: "agents",
+    icon: "layers"
+  },
+  skill: { verb: "Used", noun: "skill", nounPlural: "skills", icon: "bolt" },
+  other: { verb: "Ran", noun: "tool", nounPlural: "tools", icon: "code" }
 };
 
 export function bucketMeta(b: ToolBucket): BucketMeta {
@@ -67,8 +87,16 @@ export function classifyTool(name: string, input?: string): ToolBucket {
     if (!cmd) return "run";
     const head = cmd.split(/\s+/)[0];
     if (head === "find" || head === "ls" || head === "tree") return "explore";
-    if (head === "grep" || head === "rg" || head === "ack" || head === "ag") return "search";
-    if (head === "cat" || head === "head" || head === "tail" || head === "less" || head === "more") return "read";
+    if (head === "grep" || head === "rg" || head === "ack" || head === "ag")
+      return "search";
+    if (
+      head === "cat" ||
+      head === "head" ||
+      head === "tail" ||
+      head === "less" ||
+      head === "more"
+    )
+      return "read";
     return "run";
   }
 

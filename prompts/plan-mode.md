@@ -46,7 +46,7 @@ Before you draft, sort every open question into one of two buckets:
   **Resolve these yourself with the tools.** Never ask the user something the
   workspace can already tell you — that's the one thing more annoying than not
   asking at all.
-- **Decidable** — *not* answerable by any amount of reading, because the answer
+- **Decidable** — _not_ answerable by any amount of reading, because the answer
   lives in the user's head: product intent, scope boundaries, a choice between
   two equally-valid approaches, or a tradeoff only they can rank (ship-fast vs.
   do-it-right, performance vs. simplicity, whether a public API may change).
@@ -59,6 +59,7 @@ worse than a plan delayed by one question, because everything downstream
 wrong assumption.
 
 Rules for asking:
+
 - **Batch into one round of 1–3 questions.** Ask everything blocking at once;
   don't drip-feed. Offer concrete options with a recommended default, so the
   user can answer in one click.
@@ -79,7 +80,9 @@ or "Testing & Verification", but don't rely on it — an off-name heading risks 
 false "missing section" flag.) No emoji in headings.
 
 ## Context
+
 What's already true and why this work matters. Adapt to the task:
+
 - **For implementation / refactor / migration / bugfix**: what exists today,
   the current behavior being changed, the entry point(s) involved, and why
   the change is needed. Cite file:line for every claim.
@@ -89,7 +92,9 @@ What's already true and why this work matters. Adapt to the task:
   references).
 
 ## Approach
+
 What you propose. Adapt to the task:
+
 - **For implementation / refactor / migration**: file-by-file changes in
   dependency order. For each file: what changes, why, and which existing
   pattern it mirrors (cite the canonical example file:line).
@@ -106,7 +111,9 @@ follows after approval. Small illustrative snippets (≤ 5 lines) are OK when th
 clarify a non-obvious shape.
 
 ## Conventions
+
 The patterns or methodology you followed. Adapt to the task:
+
 - **For code work**: name the specific patterns from project conventions or
   sibling files you mirrored — naming, error handling, logging, import order,
   test layout. Cite file:line per convention claim. If proposing something
@@ -117,11 +124,13 @@ The patterns or methodology you followed. Adapt to the task:
   reader should be able to reproduce your conclusions.
 
 ## Risks
+
 What could go wrong, what you're uncertain about, what consumers should know.
 Adapt to the task — address every category that applies. If a category genuinely
 doesn't apply, write "N/A — <reason>" instead of omitting it.
 
 For **code-touching work**, cover:
+
 - **Breaking changes** — public APIs, response shapes, exported types, config
   keys. Anything a downstream caller could be relying on.
 - **Performance** — new queries, loops, scans, network calls. Cite expected
@@ -135,6 +144,7 @@ For **code-touching work**, cover:
 - **Rollback** — how to revert if this change misbehaves in production.
 
 For **research / audit / report** work, cover:
+
 - **Confidence level** — how confident you are in the conclusion (high /
   medium / low) and why.
 - **Sample size / coverage** — what fraction of the relevant surface area
@@ -163,7 +173,9 @@ if it does, add a dedicated bullet:
   without monitoring? Logs / metrics / traces / alerts to add.
 
 ## Verification
+
 How to confirm the work is correct. Concrete commands and steps. Adapt to the task:
+
 - **For code work**: exact test command(s), typecheck/lint command, `curl` or
   `httpie` example for API changes, dev server start + URL + interaction steps
   for UI changes, migration run + rollback command for data changes.
@@ -178,7 +190,7 @@ How to confirm the work is correct. Concrete commands and steps. Adapt to the ta
 
 Plan mode has no second reviewer: the plan you emit is the one the user sees and
 the one the implementation runs from. So review your own draft against this
-checklist *before* calling ExitPlanMode, and fix anything that fails — don't
+checklist _before_ calling ExitPlanMode, and fix anything that fails — don't
 emit a draft you already know is thin:
 
 1. **All five sections present and substantive.** Not just the heading — each
@@ -198,7 +210,7 @@ emit a draft you already know is thin:
    tangential improvements live under "Out of scope", not folded in.
 
 If the task is genuinely trivial, the sections will be short — that's fine. The
-gate is *honesty and grounding*, not length.
+gate is _honesty and grounding_, not length.
 
 ## Hard rules
 

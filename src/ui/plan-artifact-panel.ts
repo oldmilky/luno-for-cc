@@ -24,7 +24,9 @@ export class PlanArtifactManager {
 
   constructor(private readonly ctx: vscode.ExtensionContext) {}
 
-  setMessageHandler(handler: (msg: { type: string; [k: string]: unknown }) => void) {
+  setMessageHandler(
+    handler: (msg: { type: string; [k: string]: unknown }) => void
+  ) {
     this.onMessage = handler;
   }
 

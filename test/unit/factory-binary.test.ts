@@ -2,7 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { mkdtempSync, rmSync, writeFileSync, statSync, chmodSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  statSync,
+  chmodSync
+} from "node:fs";
 import { execFileSync } from "node:child_process";
 
 // resolveClaudeBinary() reads `luno.claudeBinaryPath` from VS Code config.
@@ -53,7 +59,10 @@ import {
 // (process.platform is a getter, so we redefine it rather than assign.)
 function withPlatform(platform: NodeJS.Platform, fn: () => void): void {
   const orig = Object.getOwnPropertyDescriptor(process, "platform")!;
-  Object.defineProperty(process, "platform", { value: platform, configurable: true });
+  Object.defineProperty(process, "platform", {
+    value: platform,
+    configurable: true
+  });
   try {
     fn();
   } finally {
@@ -417,7 +426,10 @@ describe("discoverClaudeBinary — PATH and the known install dirs", () => {
       isolate([]);
       // ~/.claude/local — where Claude Code's own installer puts it. `isolate`
       // has already pointed the home dir inside tmpRoot.
-      const exe = touch(path.join(tmpRoot, "home", ".claude", "local"), "claude.exe");
+      const exe = touch(
+        path.join(tmpRoot, "home", ".claude", "local"),
+        "claude.exe"
+      );
 
       expect(discoverClaudeBinary()).toBe(exe);
     });
@@ -556,7 +568,10 @@ describe("ensureExecutable — end-to-end against the real bundled binary", () =
         // Simulate a freshly installed .vsix that lost the exec bit.
         chmodSync(REAL_BIN, 0o644);
         expect(() =>
-          execFileSync(REAL_BIN, ["--version"], { stdio: "ignore", timeout: 30_000 })
+          execFileSync(REAL_BIN, ["--version"], {
+            stdio: "ignore",
+            timeout: 30_000
+          })
         ).toThrow(); // OS refuses to exec → spawn EACCES / exit 126
 
         // The fix: ensureExecutable restores +x...

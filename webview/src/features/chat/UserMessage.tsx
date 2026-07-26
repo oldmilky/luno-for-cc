@@ -53,8 +53,7 @@ type Part =
 // Variable-length code fence with backreference: matches `` `**label**\n```lang\ncode\n``` `` AND
 // `` `**label**\n````lang\ncode (containing ``` blocks)\n```` `` etc., so tagging a markdown
 // file whose contents include ``` doesn't collapse the badge at the first inner fence.
-const BADGE_RE =
-  /\*\*([^*\n]+)\*\*\n(`{3,})([^\n]*)\n([\s\S]*?)\n\2(?=\s|$)/g;
+const BADGE_RE = /\*\*([^*\n]+)\*\*\n(`{3,})([^\n]*)\n([\s\S]*?)\n\2(?=\s|$)/g;
 const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s][^)]*)\)/g;
 
 // Collapse user-message bubbles taller than this (px), with a slack margin so
@@ -318,9 +317,7 @@ function renderTextPart(text: string, key: number): ReactNode {
  */
 function MsgImage({ name, src }: { name: string; src: string }) {
   const isData = src.startsWith("data:");
-  const [resolved, setResolved] = useState<string | null>(
-    isData ? src : null
-  );
+  const [resolved, setResolved] = useState<string | null>(isData ? src : null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [requestId, setRequestId] = useState<string | null>(null);

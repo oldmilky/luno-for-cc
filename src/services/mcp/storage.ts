@@ -144,7 +144,10 @@ export async function clearConnectionRecord(
 // ── Token + client-credential keychain ──────────────────────
 
 /** Secret keys are namespaced so they don't collide with other Luno secrets. */
-function secretKey(connectorId: string, kind: "access" | "refresh" | "client"): string {
+function secretKey(
+  connectorId: string,
+  kind: "access" | "refresh" | "client"
+): string {
   return `luno.mcp.${connectorId}.${kind}.v1`;
 }
 
@@ -175,10 +178,16 @@ export async function saveTokens(
     await ctx.secrets.store(secretKey(connectorId, "access"), toks.accessToken);
   }
   if (toks.refreshToken !== undefined) {
-    await ctx.secrets.store(secretKey(connectorId, "refresh"), toks.refreshToken);
+    await ctx.secrets.store(
+      secretKey(connectorId, "refresh"),
+      toks.refreshToken
+    );
   }
   if (toks.clientSecret !== undefined) {
-    await ctx.secrets.store(secretKey(connectorId, "client"), toks.clientSecret);
+    await ctx.secrets.store(
+      secretKey(connectorId, "client"),
+      toks.clientSecret
+    );
   }
 }
 
@@ -218,7 +227,9 @@ export async function loadStdioEnv(
   if (!raw) return undefined;
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : undefined;
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, string>)
+      : undefined;
   } catch {
     return undefined;
   }
@@ -242,7 +253,10 @@ export function resolveConnector(
   ctx: vscode.ExtensionContext,
   id: string,
   catalog: ReadonlyArray<CatalogEntry>
-): CatalogEntry | (CustomConnector & { categories: string[]; icon: string; builtIn: false }) | null {
+):
+  | CatalogEntry
+  | (CustomConnector & { categories: string[]; icon: string; builtIn: false })
+  | null {
   const builtin = catalog.find((c) => c.id === id);
   if (builtin) return builtin;
   const custom = loadCustomConnectors(ctx).find((c) => c.id === id);

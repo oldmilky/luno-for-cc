@@ -24,7 +24,11 @@ export function activate(ctx: vscode.ExtensionContext) {
       const order: PermissionMode[] = ["default", "plan", "auto"];
       const cur = cfg.get<PermissionMode>("permissionMode", "default");
       const next = order[(order.indexOf(cur) + 1) % order.length];
-      await cfg.update("permissionMode", next, vscode.ConfigurationTarget.Global);
+      await cfg.update(
+        "permissionMode",
+        next,
+        vscode.ConfigurationTarget.Global
+      );
       vscode.window.setStatusBarMessage(`Luno mode: ${next}`, 2000);
     }),
     vscode.commands.registerCommand("luno.sendSelection", () =>
@@ -43,4 +47,3 @@ export function activate(ctx: vscode.ExtensionContext) {
 }
 
 export function deactivate() {}
-

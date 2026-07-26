@@ -47,7 +47,10 @@ function makeCtx(): any {
   };
 }
 
-const conn = (id: string, url = "https://example.com/mcp"): CustomConnector => ({
+const conn = (
+  id: string,
+  url = "https://example.com/mcp"
+): CustomConnector => ({
   id,
   name: id,
   url,
@@ -84,7 +87,10 @@ describe("custom connector storage", () => {
 describe("connection records", () => {
   it("stores, reads, and clears a connection record by id", async () => {
     const ctx = makeCtx();
-    const rec: ConnectionRecord = { id: "linear", connectedAt: 1 } as ConnectionRecord;
+    const rec: ConnectionRecord = {
+      id: "linear",
+      connectedAt: 1
+    } as ConnectionRecord;
     await setConnectionRecord(ctx, rec);
     expect(loadConnections(ctx).linear).toMatchObject({ id: "linear" });
     await clearConnectionRecord(ctx, "linear");
@@ -126,7 +132,10 @@ describe("stdio env keychain (security #5 — secrets, not plaintext globalState
   it("round-trips and deletes a stdio env blob via ctx.secrets", async () => {
     const ctx = makeCtx();
     await saveStdioEnv(ctx, "srv", { API_KEY: "sk-123", OTHER: "v" });
-    expect(await loadStdioEnv(ctx, "srv")).toEqual({ API_KEY: "sk-123", OTHER: "v" });
+    expect(await loadStdioEnv(ctx, "srv")).toEqual({
+      API_KEY: "sk-123",
+      OTHER: "v"
+    });
     await deleteStdioEnv(ctx, "srv");
     expect(await loadStdioEnv(ctx, "srv")).toBeUndefined();
   });
@@ -163,7 +172,9 @@ describe("stdio env keychain (security #5 — secrets, not plaintext globalState
     expect(await loadStdioEnv(ctx, view.id)).toBeDefined();
     await removeCustom(ctx, view.id);
     expect(await loadStdioEnv(ctx, view.id)).toBeUndefined();
-    expect(loadCustomConnectors(ctx).find((c) => c.id === view.id)).toBeUndefined();
+    expect(
+      loadCustomConnectors(ctx).find((c) => c.id === view.id)
+    ).toBeUndefined();
   });
 });
 

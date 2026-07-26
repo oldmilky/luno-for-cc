@@ -31,7 +31,10 @@ interface InlineEditPreviewProps {
 
 const PREVIEW_LIMIT = 8;
 
-export function InlineEditPreview({ entry, onOpenFull }: InlineEditPreviewProps) {
+export function InlineEditPreview({
+  entry,
+  onOpenFull
+}: InlineEditPreviewProps) {
   const [expanded, setExpanded] = useState(false);
   const allRows = useMemo(() => buildRows(entry), [entry]);
   const stats = useMemo(() => countStats(allRows), [allRows]);
@@ -43,35 +46,27 @@ export function InlineEditPreview({ entry, onOpenFull }: InlineEditPreviewProps)
   const name = baseName(entry.path);
 
   return (
-    <motion.div
-      {...ENTER_CARD}
-      className={s.card}
-    >
+    <motion.div {...ENTER_CARD} className={s.card}>
       <button
         type="button"
         onClick={(e) => {
-          const rect = (e.currentTarget as HTMLElement)
-            .closest("[data-edit-preview]")
-            ?.getBoundingClientRect() ?? null;
+          const rect =
+            (e.currentTarget as HTMLElement)
+              .closest("[data-edit-preview]")
+              ?.getBoundingClientRect() ?? null;
           onOpenFull(rect);
         }}
         data-edit-preview
         className={s.head}
       >
         <FileBadge path={entry.path} />
-        <span className={s.name}>
-          {name}
-        </span>
+        <span className={s.name}>{name}</span>
         {entry.pending && <PendingPill />}
         {!entry.pending && entry.errored && (
-          <span className={s.failed}>
-            failed
-          </span>
+          <span className={s.failed}>failed</span>
         )}
         <span className={s.stats}>
-          {stats.added > 0 && (
-            <span className={s.added}>+{stats.added}</span>
-          )}
+          {stats.added > 0 && <span className={s.added}>+{stats.added}</span>}
           {stats.removed > 0 && (
             <span className={s.removed}>−{stats.removed}</span>
           )}
@@ -163,9 +158,10 @@ function diffLines(a: string, b: string): RawRow[] {
   );
   for (let i = m - 1; i >= 0; i--) {
     for (let j = n - 1; j >= 0; j--) {
-      dp[i][j] = aLines[i] === bLines[j]
-        ? dp[i + 1][j + 1] + 1
-        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      dp[i][j] =
+        aLines[i] === bLines[j]
+          ? dp[i + 1][j + 1] + 1
+          : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
   const rows: RawRow[] = [];

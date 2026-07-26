@@ -10,7 +10,11 @@ interface RewindModalProps {
   onConfirm: () => void;
 }
 
-export function RewindModal({ messagesAfter, onCancel, onConfirm }: RewindModalProps) {
+export function RewindModal({
+  messagesAfter,
+  onCancel,
+  onConfirm
+}: RewindModalProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();

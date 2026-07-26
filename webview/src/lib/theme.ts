@@ -14,13 +14,7 @@
 import { loadState, patchState } from "./rpc";
 
 export type ThemeId =
-  | "copper"
-  | "purple"
-  | "red"
-  | "blue"
-  | "green"
-  | "pink"
-  | "white";
+  "copper" | "purple" | "red" | "blue" | "green" | "pink" | "white";
 
 export interface ThemeDef {
   id: ThemeId;
@@ -83,7 +77,9 @@ export function applyTheme(id: ThemeId, { animate = true } = {}): void {
 
 /** Read `--theme-transition` off the root so CSS stays the single source. */
 function morphDurationMs(root: HTMLElement): number {
-  const raw = getComputedStyle(root).getPropertyValue("--theme-transition").trim();
+  const raw = getComputedStyle(root)
+    .getPropertyValue("--theme-transition")
+    .trim();
   const ms = raw.endsWith("ms")
     ? parseFloat(raw)
     : raw.endsWith("s")

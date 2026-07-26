@@ -18,7 +18,12 @@ export interface MentionPopoverProps {
   onClose: () => void;
 }
 
-export function MentionPopover({ query, open, onPick, onClose }: MentionPopoverProps) {
+export function MentionPopover({
+  query,
+  open,
+  onPick,
+  onClose
+}: MentionPopoverProps) {
   const [results, setResults] = useState<FileSearchResult[]>([]);
   const [active, setActive] = useState(0);
   const requestId = useRef<string>("");
@@ -27,7 +32,10 @@ export function MentionPopover({ query, open, onPick, onClose }: MentionPopoverP
     if (!open) return;
     const id = newId();
     requestId.current = id;
-    const t = setTimeout(() => send({ type: "requestFileSearch", id, query }), 60);
+    const t = setTimeout(
+      () => send({ type: "requestFileSearch", id, query }),
+      60
+    );
     return () => clearTimeout(t);
   }, [query, open]);
 
@@ -75,7 +83,9 @@ export function MentionPopover({ query, open, onPick, onClose }: MentionPopoverP
         >
           <div className={s.head}>
             <Icon name="at" size={11} />
-            <span>{query ? `Files matching "${query}"` : "Mention a file"}</span>
+            <span>
+              {query ? `Files matching "${query}"` : "Mention a file"}
+            </span>
             <span className={s.hint}>↑↓ navigate · ↵ select · Esc</span>
           </div>
           {results.length === 0 ? (

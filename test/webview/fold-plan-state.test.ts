@@ -26,13 +26,21 @@ const comment = (commentId: string, revisionId: string, extra: any = {}) =>
     kind: "plan_comment",
     title: "Plan comment",
     body: "a comment",
-    meta: { commentId, revisionId, taskId: "__general__", body: "a comment", ...extra }
+    meta: {
+      commentId,
+      revisionId,
+      taskId: "__general__",
+      body: "a comment",
+      ...extra
+    }
   });
 
 describe("looksLikePlanFile", () => {
   it("accepts *.md under a plans/ segment", () => {
     expect(looksLikePlanFile("/x/plans/foo.md")).toBe(true);
-    expect(looksLikePlanFile("/home/.claude/projects/abc/plans/p.markdown")).toBe(true);
+    expect(
+      looksLikePlanFile("/home/.claude/projects/abc/plans/p.markdown")
+    ).toBe(true);
     expect(looksLikePlanFile("plans/p.md")).toBe(true);
   });
   it("rejects non-plan paths and non-markdown files", () => {
@@ -70,7 +78,9 @@ describe("foldPlanState", () => {
       comment("c2", "r1", { parentCommentId: "c1" })
     ]);
     expect(views[0].rootComments).toHaveLength(1);
-    expect(views[0].rootComments[0].replies.map((r) => r.commentId)).toEqual(["c2"]);
+    expect(views[0].rootComments[0].replies.map((r) => r.commentId)).toEqual([
+      "c2"
+    ]);
   });
 
   it("promotes orphan replies (missing parent) to root so they aren't lost", () => {
@@ -88,7 +98,10 @@ describe("foldPlanState", () => {
         ts: 1,
         kind: "tool_call",
         title: "Tool: Write",
-        body: JSON.stringify({ path: "/x/plans/impl.md", content: "# Synth Plan\n\nbody" }),
+        body: JSON.stringify({
+          path: "/x/plans/impl.md",
+          content: "# Synth Plan\n\nbody"
+        }),
         meta: { id: "tool-1", name: "Write" }
       })
     ]);
@@ -120,7 +133,12 @@ describe("foldPlanState", () => {
         kind: "plan_question",
         title: "Q",
         body: "?",
-        meta: { questionId: "qid", toolUseId: "t", revisionId: "r1", questions: [] }
+        meta: {
+          questionId: "qid",
+          toolUseId: "t",
+          revisionId: "r1",
+          questions: []
+        }
       }),
       ev({
         id: "a1",

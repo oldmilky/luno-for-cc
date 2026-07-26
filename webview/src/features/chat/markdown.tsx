@@ -127,7 +127,9 @@ const COMPONENTS: Components = {
     const match = /language-(\w+)/.exec(className || "");
     const raw = nodeToText(children);
     if (match || raw.includes("\n")) {
-      return <CodeBlock lang={match?.[1] ?? ""} code={raw.replace(/\n$/, "")} />;
+      return (
+        <CodeBlock lang={match?.[1] ?? ""} code={raw.replace(/\n$/, "")} />
+      );
     }
     return (
       <code className="md-ic" {...rest(p)}>
@@ -168,14 +170,13 @@ function nodeToText(node: ReactNode): string {
   if (typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(nodeToText).join("");
   if (typeof node === "object" && "props" in node) {
-    return nodeToText((node as { props?: { children?: ReactNode } }).props?.children);
+    return nodeToText(
+      (node as { props?: { children?: ReactNode } }).props?.children
+    );
   }
   return "";
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

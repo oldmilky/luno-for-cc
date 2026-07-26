@@ -15,7 +15,12 @@ import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
 import { AnimatePresence, motion } from "framer-motion";
 import { Icon, IconName } from "../../design/icons";
 import { Tooltip } from "../../design/primitives";
-import { send, onMessage, ConnectorView, CustomConnectorDraft } from "../../lib/rpc";
+import {
+  send,
+  onMessage,
+  ConnectorView,
+  CustomConnectorDraft
+} from "../../lib/rpc";
 import s from "./ConnectorsModal.module.scss";
 
 export interface ConnectorsModalProps {
@@ -97,7 +102,8 @@ export function ConnectorsModal({ open, onClose }: ConnectorsModalProps) {
     return connectors.filter((c) => {
       // "Connected" means servers the user connected *in Luno* — managed
       // (Claude Code) servers are always-active but live under their own pill.
-      if (tab === "connected" && (c.status !== "connected" || c.managed)) return false;
+      if (tab === "connected" && (c.status !== "connected" || c.managed))
+        return false;
       if (tab === "custom" && c.builtIn) return false;
       if (!q) return true;
       return (
@@ -227,7 +233,11 @@ export function ConnectorsModal({ open, onClose }: ConnectorsModalProps) {
                       // Local API-token presets (e.g. Figma) prompt for the token
                       // first, then connect via connectorConnectWithApiKey.
                       if (c.apiKeyEnv) {
-                        setApiKeyPrompt({ id: c.id, name: c.name, ...c.apiKeyEnv });
+                        setApiKeyPrompt({
+                          id: c.id,
+                          name: c.name,
+                          ...c.apiKeyEnv
+                        });
                         return;
                       }
                       setBusyId(c.id);
@@ -283,7 +293,11 @@ export function ConnectorsModal({ open, onClose }: ConnectorsModalProps) {
                   onCancel={() => setApiKeyPrompt(null)}
                   onSubmit={(apiKey) => {
                     setBusyId(apiKeyPrompt.id);
-                    send({ type: "connectorConnectWithApiKey", id: apiKeyPrompt.id, apiKey });
+                    send({
+                      type: "connectorConnectWithApiKey",
+                      id: apiKeyPrompt.id,
+                      apiKey
+                    });
                     setApiKeyPrompt(null);
                   }}
                 />
@@ -291,7 +305,9 @@ export function ConnectorsModal({ open, onClose }: ConnectorsModalProps) {
             </AnimatePresence>
 
             {toast && (
-              <div className={`${s.toast} ${toast.ok ? s.toastOk : s.toastErr}`}>
+              <div
+                className={`${s.toast} ${toast.ok ? s.toastOk : s.toastErr}`}
+              >
                 <Icon name={toast.ok ? "check" : "x"} size={11} />
                 <span>{toast.text}</span>
               </div>
@@ -299,8 +315,8 @@ export function ConnectorsModal({ open, onClose }: ConnectorsModalProps) {
 
             <footer className={s.foot}>
               <span>
-                Connectors authenticate via OAuth. Tokens are stored in VS Code's
-                SecretStorage.
+                Connectors authenticate via OAuth. Tokens are stored in VS
+                Code's SecretStorage.
               </span>
             </footer>
           </motion.div>
@@ -337,7 +353,8 @@ function ConnectorCard({
   const ccConnected = !!connector.connectedViaClaudeCode;
   // Vendor blocks third-party OAuth registration (e.g. Figma) — can't Connect
   // directly; must be authenticated through Claude Code.
-  const claudeCodeAuth = !!connector.requiresClaudeCodeAuth && !connected && !ccConnected;
+  const claudeCodeAuth =
+    !!connector.requiresClaudeCodeAuth && !connected && !ccConnected;
   const iconName = (connector.icon as IconName) ?? "cloud";
   // Removing a managed server edits the user's Claude Code config, so it takes
   // a deliberate two-click confirm.
@@ -376,7 +393,8 @@ function ConnectorCard({
                 <>
                   <span className={s.cardDot} />
                   <span className={s.cardTools}>
-                    {connector.toolCount} tool{connector.toolCount === 1 ? "" : "s"}
+                    {connector.toolCount} tool
+                    {connector.toolCount === 1 ? "" : "s"}
                   </span>
                 </>
               )}
@@ -390,7 +408,9 @@ function ConnectorCard({
         )}
 
         {errored && connector.lastError && (
-          <p className={`${s.cardDesc} ${s.cardError}`}>{connector.lastError}</p>
+          <p className={`${s.cardDesc} ${s.cardError}`}>
+            {connector.lastError}
+          </p>
         )}
 
         {claudeCodeAuth && (
@@ -550,7 +570,10 @@ function ConnectorCard({
                   className={`${s.btn} ${s.primary}`}
                   onClick={onConnect}
                 >
-                  <Icon name={isStdio && !connector.apiKeyEnv ? "play" : "arrow"} size={11} />
+                  <Icon
+                    name={isStdio && !connector.apiKeyEnv ? "play" : "arrow"}
+                    size={11}
+                  />
                   {isStdio && !connector.apiKeyEnv ? "Start" : "Connect"}
                 </button>
               )}
@@ -746,13 +769,18 @@ function AddCustomForm({
                 <textarea
                   value={argsText}
                   onChange={(e) => setArgsText(e.target.value)}
-                  placeholder={"-y\n@modelcontextprotocol/server-filesystem\n/path/to/allowed/dir"}
+                  placeholder={
+                    "-y\n@modelcontextprotocol/server-filesystem\n/path/to/allowed/dir"
+                  }
                   spellCheck={false}
                   rows={3}
                   className={`${s.input} ${s.textarea}`}
                 />
               </Field>
-              <Field label="Environment" hint="KEY=VALUE, one per line. Optional.">
+              <Field
+                label="Environment"
+                hint="KEY=VALUE, one per line. Optional."
+              >
                 <textarea
                   value={envText}
                   onChange={(e) => setEnvText(e.target.value)}
@@ -845,11 +873,17 @@ function ApiKeyPrompt({
           <div className={s.headTitles}>
             <h2 className={s.title}>Connect {name}</h2>
             <p className={s.sub}>
-              Runs locally — no browser sign-in. The token is stored in VS Code's
-              SecretStorage and never leaves your machine except to {name}.
+              Runs locally — no browser sign-in. The token is stored in VS
+              Code's SecretStorage and never leaves your machine except to{" "}
+              {name}.
             </p>
           </div>
-          <button type="button" className={s.close} onClick={onCancel} aria-label="Close">
+          <button
+            type="button"
+            className={s.close}
+            onClick={onCancel}
+            aria-label="Close"
+          >
             <Icon name="x" size={14} />
           </button>
         </header>
@@ -869,7 +903,11 @@ function ApiKeyPrompt({
             />
           </Field>
           <div className={s.actions}>
-            <button type="button" className={`${s.btn} ${s.ghost}`} onClick={onCancel}>
+            <button
+              type="button"
+              className={`${s.btn} ${s.ghost}`}
+              onClick={onCancel}
+            >
               Cancel
             </button>
             <button

@@ -10,7 +10,9 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { ChatPanelProvider } from "../ui/panel.js";
 
-export async function generateConventionsCommand(panel: ChatPanelProvider): Promise<void> {
+export async function generateConventionsCommand(
+  panel: ChatPanelProvider
+): Promise<void> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
     vscode.window.showWarningMessage("Luno: open a folder first.");
@@ -82,11 +84,19 @@ async function scanWorkspace(root: string): Promise<ScanSummary> {
 
   const entries = await fs.readdir(root, { withFileTypes: true });
   const topLevelDirs = entries
-    .filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules" && e.name !== "dist")
+    .filter(
+      (e) =>
+        e.isDirectory() &&
+        !e.name.startsWith(".") &&
+        e.name !== "node_modules" &&
+        e.name !== "dist"
+    )
     .map((e) => e.name)
     .slice(0, 30);
 
-  const hasTests = topLevelDirs.some((d) => /^(tests?|spec|__tests__)$/i.test(d));
+  const hasTests = topLevelDirs.some((d) =>
+    /^(tests?|spec|__tests__)$/i.test(d)
+  );
   let hasReadme = false;
   try {
     await fs.access(path.join(root, "README.md"));
@@ -138,10 +148,16 @@ For 2-3 most common change types in this repo, give the exact steps (which files
 Write the full CLAUDE.md content as your response. After you've drafted it, the user will copy it into CLAUDE.md at the workspace root.`;
 }
 
-async function isCurrentlyGitignored(root: string, file: string): Promise<boolean> {
+async function isCurrentlyGitignored(
+  root: string,
+  file: string
+): Promise<boolean> {
   try {
     const ignored = await fs.readFile(path.join(root, ".gitignore"), "utf8");
-    const lines = ignored.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const lines = ignored
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
     return lines.some(
       (l) => l === file || l === `/${file}` || l === `${file}/`
     );

@@ -194,7 +194,15 @@ export function Icon({
 
 import burstMask from "../assets/luno-burst-48.png";
 
-export function BrandMark({ size = 14, className, style }: { size?: number; className?: string; style?: CSSProperties }) {
+export function BrandMark({
+  size = 14,
+  className,
+  style
+}: {
+  size?: number;
+  className?: string;
+  style?: CSSProperties;
+}) {
   // Two BrandMarks can be mounted at once (header + welcome card), and two
   // elements cannot share an id. `useId` colons are legal in an attribute
   // reference but not in a CSS selector, so strip them and keep both options.
@@ -216,7 +224,12 @@ export function BrandMark({ size = 14, className, style }: { size?: number; clas
           <image href={burstMask} width="48" height="48" />
         </mask>
       </defs>
-      <rect width="48" height="48" fill="currentColor" mask={`url(#${maskId})`} />
+      <rect
+        width="48"
+        height="48"
+        fill="currentColor"
+        mask={`url(#${maskId})`}
+      />
     </svg>
   );
 }

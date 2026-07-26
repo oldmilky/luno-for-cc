@@ -73,7 +73,9 @@ export class CheckpointService {
     await this.captureBefore(revisionEventId);
   }
 
-  async restore(turnId: string): Promise<{ restored: number; deleted: number }> {
+  async restore(
+    turnId: string
+  ): Promise<{ restored: number; deleted: number }> {
     const cp = this.checkpoints.get(turnId);
     if (!cp) return { restored: 0, deleted: 0 };
     let restored = 0;
@@ -259,7 +261,11 @@ export class CheckpointService {
       .map((id) => {
         const cp = this.checkpoints.get(id);
         return cp
-          ? { turnId: cp.turnId, createdAt: cp.createdAt, fileCount: cp.files.length }
+          ? {
+              turnId: cp.turnId,
+              createdAt: cp.createdAt,
+              fileCount: cp.files.length
+            }
           : null;
       })
       .filter((x): x is NonNullable<typeof x> => !!x);

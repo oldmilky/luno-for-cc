@@ -13,7 +13,9 @@ interface ConventionsBannerProps {
   onHideForSession: () => void;
 }
 
-export function ConventionsBanner({ onHideForSession }: ConventionsBannerProps) {
+export function ConventionsBanner({
+  onHideForSession
+}: ConventionsBannerProps) {
   return (
     <motion.div {...ENTER_CARD} className={bits.banner} role="status">
       <div className={bits.bannerBody}>
@@ -35,7 +37,11 @@ export function ConventionsBanner({ onHideForSession }: ConventionsBannerProps) 
         >
           Generate
         </button>
-        <button type="button" className={bits.bannerGhost} onClick={onHideForSession}>
+        <button
+          type="button"
+          className={bits.bannerGhost}
+          onClick={onHideForSession}
+        >
           Not now
         </button>
         <button

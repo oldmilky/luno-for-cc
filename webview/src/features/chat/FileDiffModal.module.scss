@@ -553,7 +553,8 @@
   border: 1px solid var(--accent-mid);
   border-radius: var(--round-lg);
   background: var(--s2);
-  box-shadow: 0 14px 36px color-mix(in srgb, var(--shadow-color) 50%, transparent);
+  box-shadow: 0 14px 36px
+    color-mix(in srgb, var(--shadow-color) 50%, transparent);
   // `translate`, not `transform`: framer-motion writes an inline `transform`
   // for the enter/exit, which would wipe out a transform-based centering.
   translate: -50%;

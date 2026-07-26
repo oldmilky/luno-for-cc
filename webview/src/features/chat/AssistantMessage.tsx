@@ -58,9 +58,7 @@ export function AssistantMessage({
           <motion.div
             className={s.avatar}
             whileHover={{ scale: 1.08, rotate: -6 }}
-            animate={
-              streaming ? { opacity: [0.78, 1, 0.78] } : { opacity: 1 }
-            }
+            animate={streaming ? { opacity: [0.78, 1, 0.78] } : { opacity: 1 }}
             transition={streaming ? STREAM_PULSE : SPRING_PRESS}
           >
             <Icon name="sparkle" size={13} />
@@ -100,7 +98,10 @@ export function AssistantMessage({
 function excerpt(text: string): string {
   // Pull the last ~140 chars of plain text, trimmed at a clause boundary, so
   // the seed prompt has tight context without dragging in formatting.
-  const flat = text.replace(/`{3}[\s\S]*?`{3}/g, "").replace(/\s+/g, " ").trim();
+  const flat = text
+    .replace(/`{3}[\s\S]*?`{3}/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
   const tail = flat.slice(-140);
   const cut = tail.lastIndexOf(". ");
   return cut > 40 ? tail.slice(cut + 2) : tail;

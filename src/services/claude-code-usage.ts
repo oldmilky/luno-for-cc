@@ -226,7 +226,14 @@ export async function aggregateClaudeCodeUsage(
       // > 2 weeks old — skip; doesn't affect any displayed bucket.
       continue;
     }
-    await scanFile(s.file, dayCutoff, weekCutoff, sessionLowerBound, out, sessionEntries);
+    await scanFile(
+      s.file,
+      dayCutoff,
+      weekCutoff,
+      sessionLowerBound,
+      out,
+      sessionEntries
+    );
   }
 
   // Refine the session window: find the earliest message in the last 5h.

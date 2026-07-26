@@ -32,7 +32,6 @@
   -webkit-backdrop-filter: blur(8px);
 }
 
-
 // theme.css declared `.modal` twice; the padding came from the FIRST
 // (rewind-dialog) block, which the marketplace block never reset — so it
 // was live here, and the toast's `bottom: 64px` is measured from inside
@@ -637,7 +636,8 @@
   border-radius: var(--round-sm);
   font-size: 12px;
   font-weight: 600;
-  box-shadow: 0 6px 24px color-mix(in srgb, var(--shadow-color) 35%, transparent);
+  box-shadow: 0 6px 24px
+    color-mix(in srgb, var(--shadow-color) 35%, transparent);
   transform: translateX(-50%);
   animation: market-toast-in var(--motion-enter) var(--ease-out);
 }

@@ -21,7 +21,7 @@ partial failures, replay attacks, secret leaks. The playbook focuses on those.
    Confirm replay protection (timestamp check, nonce, idempotency key).
 5. **For long-running operations**: identify the queue / job runner pattern.
 6. **Read the vendor's documentation** for the specific operation. Cite the
-   URL. Confirm against the *installed SDK version*, not the latest docs.
+   URL. Confirm against the _installed SDK version_, not the latest docs.
 7. **Read the existing test pattern** for integrations (mocked? recorded?
    sandbox?). The new integration must follow it.
 

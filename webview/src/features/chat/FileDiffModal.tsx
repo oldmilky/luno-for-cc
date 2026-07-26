@@ -60,9 +60,17 @@ interface FileDiffModalProps {
   onAddNote?: (note: DiffLineNote) => void;
 }
 
-export function FileDiffModal({ entry, onClose, originRect, onAddNote }: FileDiffModalProps) {
+export function FileDiffModal({
+  entry,
+  onClose,
+  originRect,
+  onAddNote
+}: FileDiffModalProps) {
   const [copied, setCopied] = useState(false);
-  const [noteFor, setNoteFor] = useState<{ lineNo: number; context: string } | null>(null);
+  const [noteFor, setNoteFor] = useState<{
+    lineNo: number;
+    context: string;
+  } | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   // Derive initial translate so the modal appears to morph out of the row that
   // was clicked. Only the offset is bespoke — the scale it starts at is the
@@ -96,7 +104,14 @@ export function FileDiffModal({ entry, onClose, originRect, onAddNote }: FileDif
 
   const copyDiff = async () => {
     const text = entry.changes
-      .map((c) => diffChange(c).map((r) => `${r.kind === "add" ? "+" : r.kind === "del" ? "-" : " "}${r.text}`).join("\n"))
+      .map((c) =>
+        diffChange(c)
+          .map(
+            (r) =>
+              `${r.kind === "add" ? "+" : r.kind === "del" ? "-" : " "}${r.text}`
+          )
+          .join("\n")
+      )
       .join("\n");
     try {
       await navigator.clipboard.writeText(text);
@@ -113,11 +128,7 @@ export function FileDiffModal({ entry, onClose, originRect, onAddNote }: FileDif
   };
 
   return (
-    <motion.div
-      className={s.overlay}
-      {...BACKDROP}
-      onClick={onClose}
-    >
+    <motion.div className={s.overlay} {...BACKDROP} onClick={onClose}>
       <motion.div
         {...OVERLAY_PANEL}
         // Two overrides, both because of the origin morph: where the panel
@@ -269,10 +280,8 @@ export function FileDiffModal({ entry, onClose, originRect, onAddNote }: FileDif
               />
               <div className={s.noteFoot}>
                 <div className={s.noteHint}>
-                  <kbd className={s.noteKbd}>↵</kbd>{" "}
-                  to add ·{" "}
-                  <kbd className={s.noteKbd}>Esc</kbd>{" "}
-                  to cancel
+                  <kbd className={s.noteKbd}>↵</kbd> to add ·{" "}
+                  <kbd className={s.noteKbd}>Esc</kbd> to cancel
                 </div>
                 <button
                   type="button"
@@ -303,7 +312,8 @@ export function FileDiffModal({ entry, onClose, originRect, onAddNote }: FileDif
             <span className={s.footerKbdLabel}>to close</span>
           </span>
           <span className={s.footerCount}>
-            {entry.changes.length} {entry.changes.length === 1 ? "change" : "changes"}
+            {entry.changes.length}{" "}
+            {entry.changes.length === 1 ? "change" : "changes"}
           </span>
         </div>
       </motion.div>
@@ -401,10 +411,7 @@ function ChangeBlock({
   const numbered = useMemo(() => assignLineNumbers(rows), [rows]);
 
   return (
-    <motion.div
-      {...enterAt(index)}
-      className={s.change}
-    >
+    <motion.div {...enterAt(index)} className={s.change}>
       <button
         type="button"
         onClick={() => setCollapsed((c) => !c)}
@@ -448,8 +455,7 @@ function ChangeBlock({
               row={r}
               onClick={
                 onLineClick && (r.kind === "add" || r.kind === "del")
-                  ? () =>
-                      onLineClick(r.newNo ?? r.oldNo ?? i + 1, r.text)
+                  ? () => onLineClick(r.newNo ?? r.oldNo ?? i + 1, r.text)
                   : undefined
               }
             />
@@ -485,7 +491,13 @@ function assignLineNumbers(rows: ReadonlyArray<DiffRow>): NumberedRow[] {
   });
 }
 
-function DiffLine({ row, onClick }: { row: NumberedRow; onClick?: () => void }) {
+function DiffLine({
+  row,
+  onClick
+}: {
+  row: NumberedRow;
+  onClick?: () => void;
+}) {
   const isAdd = row.kind === "add";
   const isDel = row.kind === "del";
   const tone = isAdd ? s.lineAdd : isDel ? s.lineDel : s.lineCtx;
@@ -534,9 +546,10 @@ function diffLines(a: string, b: string): DiffRow[] {
   );
   for (let i = m - 1; i >= 0; i--) {
     for (let j = n - 1; j >= 0; j--) {
-      dp[i][j] = aLines[i] === bLines[j]
-        ? dp[i + 1][j + 1] + 1
-        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      dp[i][j] =
+        aLines[i] === bLines[j]
+          ? dp[i + 1][j + 1] + 1
+          : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
   const rows: DiffRow[] = [];
@@ -558,7 +571,10 @@ function diffLines(a: string, b: string): DiffRow[] {
   return rows;
 }
 
-function computeTotals(entry: FileEditEntry): { added: number; removed: number } {
+function computeTotals(entry: FileEditEntry): {
+  added: number;
+  removed: number;
+} {
   let added = 0;
   let removed = 0;
   for (const c of entry.changes) {
@@ -590,8 +606,10 @@ function makeCrumbs(path: string): string[] {
 // cyan are identities, not theme decisions, so they must not shift when the
 // palette does. Applied as an inline `color` on the header tile.
 const EXT_COLORS: Record<string, string> = {
-  ts: "#3b82f6", tsx: "#3b82f6",
-  js: "#eab308", jsx: "#eab308",
+  ts: "#3b82f6",
+  tsx: "#3b82f6",
+  js: "#eab308",
+  jsx: "#eab308",
   py: "#22c55e",
   rs: "#f97316",
   go: "#06b6d4",

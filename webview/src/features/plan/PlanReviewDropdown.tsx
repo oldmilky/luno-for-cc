@@ -24,7 +24,12 @@ interface Props {
   anchor: { right: number; top: number };
 }
 
-export function PlanReviewDropdown({ revisionId, locked, onClose, anchor }: Props) {
+export function PlanReviewDropdown({
+  revisionId,
+  locked,
+  onClose,
+  anchor
+}: Props) {
   const [draft, setDraft] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);

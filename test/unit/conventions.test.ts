@@ -17,7 +17,10 @@ vi.mock("vscode", () => ({
     })
   },
   RelativePattern: class {
-    constructor(public root: string, public pattern: string) {}
+    constructor(
+      public root: string,
+      public pattern: string
+    ) {}
   }
 }));
 
@@ -76,7 +79,9 @@ describe("loadConventions", () => {
     );
     const result = await loadConventions(workspaceRoot);
     expect(result?.source).toBe("copilot");
-    expect(result?.workspaceRelativePath).toBe(".github/copilot-instructions.md");
+    expect(result?.workspaceRelativePath).toBe(
+      ".github/copilot-instructions.md"
+    );
   });
 
   it("caches the result for subsequent calls", async () => {

@@ -26,7 +26,12 @@ import {
 import type { MotionValue } from "framer-motion";
 import { Icon } from "../../design/icons";
 import { Tooltip } from "../../design/primitives";
-import { PRESS, OVERLAY_PANEL, TRAVEL, SPRING_PRESS } from "../../design/motion";
+import {
+  PRESS,
+  OVERLAY_PANEL,
+  TRAVEL,
+  SPRING_PRESS
+} from "../../design/motion";
 import { onMessage, send } from "../../lib/rpc";
 import type {
   TimelineEvent,
@@ -111,7 +116,9 @@ const SETTINGS_KEY = "luno.tokenMeter.v3";
 interface MeterSettings {
   plan: PlanKey;
   /** Custom overrides keyed by plan (so editing Pro limits doesn't bleed into Max). */
-  overrides: Partial<Record<PlanKey, { session?: number; weekAll?: number; weekSonnet?: number }>>;
+  overrides: Partial<
+    Record<PlanKey, { session?: number; weekAll?: number; weekSonnet?: number }>
+  >;
 }
 
 function defaultSettings(): MeterSettings {
@@ -248,21 +255,32 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
   // For the chip: show whichever bucket has the highest pressure. If the
   // currently-active plan has no caps (API) just show session total.
   const noCaps = settings.plan === "api";
-  const { primaryLabel, primaryShort, primaryValue, primaryDisplay, primaryTone } =
-    pickChipPrimary(
-      noCaps,
-      sessionTotal,
-      sessionPct,
-      weekAllTotal,
-      weekAllPct,
-      weekSonnetTotal,
-      weekSonnetPct
-    );
+  const {
+    primaryLabel,
+    primaryShort,
+    primaryValue,
+    primaryDisplay,
+    primaryTone
+  } = pickChipPrimary(
+    noCaps,
+    sessionTotal,
+    sessionPct,
+    weekAllTotal,
+    weekAllPct,
+    weekSonnetTotal,
+    weekSonnetPct
+  );
 
-  const setLimitOverride = (key: "session" | "weekAll" | "weekSonnet", v: number) => {
+  const setLimitOverride = (
+    key: "session" | "weekAll" | "weekSonnet",
+    v: number
+  ) => {
     setSettings((prev) => {
       const ov = { ...(prev.overrides[prev.plan] ?? {}), [key]: v };
-      const next = { ...prev, overrides: { ...prev.overrides, [prev.plan]: ov } };
+      const next = {
+        ...prev,
+        overrides: { ...prev.overrides, [prev.plan]: ov }
+      };
       writeSettings(next);
       return next;
     });
@@ -385,7 +403,9 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
               {serverLimit && hasAnyBucket(serverLimit) && (
                 <div className={s.serverBlock}>
                   <div className={s.serverHead}>
-                    <span className={s.sectionTitle}>Server-reported limits</span>
+                    <span className={s.sectionTitle}>
+                      Server-reported limits
+                    </span>
                     <Tooltip
                       label={`Updated ${formatAgo(serverLimitAt, tick)} from anthropic-ratelimit-* response headers`}
                     >
@@ -410,8 +430,8 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                     />
                   )}
                   <div className={s.serverNote}>
-                    Direct from Anthropic. Resets automatically; you'll see
-                    new numbers after every API call.
+                    Direct from Anthropic. Resets automatically; you'll see new
+                    numbers after every API call.
                   </div>
                 </div>
               )}
@@ -673,7 +693,11 @@ function UsageRow({
             </span>
           </Tooltip>
         ) : (
-          <CountText className={s.rowPct} count={pctCount} format={formatPctUsed} />
+          <CountText
+            className={s.rowPct}
+            count={pctCount}
+            format={formatPctUsed}
+          />
         )}
       </div>
       {!noCap && (
@@ -694,7 +718,11 @@ function UsageRow({
       <div className={s.rowFoot}>
         <span>{sub}</span>
         <span className={s.rowNums}>
-          <CountText className={s.rowUsed} count={usedCount} format={formatNum} />
+          <CountText
+            className={s.rowUsed}
+            count={usedCount}
+            format={formatNum}
+          />
           {!noCap && (
             <>
               <span className={s.rowSlash}>/</span>
@@ -804,7 +832,10 @@ function totalOf(t: UsageTotals): number {
   return t.inputTokens + t.outputTokens + t.cacheCreatedTokens;
 }
 
-function estimateSession(events: ReadonlyArray<TimelineEvent>, streaming: string) {
+function estimateSession(
+  events: ReadonlyArray<TimelineEvent>,
+  streaming: string
+) {
   let input = 0;
   let output = 0;
   for (const e of events) {
@@ -867,8 +898,18 @@ function pickChipPrimary(
     };
   }
   const candidates = [
-    { label: "Current session", short: "5H", used: sessionUsed, pct: sessionPct },
-    { label: "Weekly (all models)", short: "WK", used: weekAllUsed, pct: weekAllPct },
+    {
+      label: "Current session",
+      short: "5H",
+      used: sessionUsed,
+      pct: sessionPct
+    },
+    {
+      label: "Weekly (all models)",
+      short: "WK",
+      used: weekAllUsed,
+      pct: weekAllPct
+    },
     {
       label: "Weekly (Sonnet)",
       short: "SON",
@@ -920,10 +961,14 @@ function formatCompact(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) {
     const v = n / 1000;
-    return v >= 10 ? Math.round(v) + "k" : v.toFixed(1).replace(/\.0$/, "") + "k";
+    return v >= 10
+      ? Math.round(v) + "k"
+      : v.toFixed(1).replace(/\.0$/, "") + "k";
   }
   const v = n / 1_000_000;
-  return v >= 10 ? Math.round(v) + "M" : v.toFixed(2).replace(/\.?0+$/, "") + "M";
+  return v >= 10
+    ? Math.round(v) + "M"
+    : v.toFixed(2).replace(/\.?0+$/, "") + "M";
 }
 
 function formatNum(n: number): string {

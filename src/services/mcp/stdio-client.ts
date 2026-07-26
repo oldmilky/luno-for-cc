@@ -60,7 +60,10 @@ export class StdioMcpClient {
   constructor(private readonly opts: StdioClientOptions) {}
 
   /** Spawn, initialize, list tools, then tear the process down. */
-  async connectAndList(): Promise<{ info: InitializeResult; tools: ConnectorTool[] }> {
+  async connectAndList(): Promise<{
+    info: InitializeResult;
+    tools: ConnectorTool[];
+  }> {
     const session = await this.start();
     try {
       const info = await session.initialize();
@@ -68,7 +71,10 @@ export class StdioMcpClient {
       // Most stdio servers advertise a `tools` capability; some don't but
       // still answer tools/list. Attempt it either way and tolerate failure.
       try {
-        const listed = await session.request<{ tools?: ConnectorTool[] }>("tools/list", {});
+        const listed = await session.request<{ tools?: ConnectorTool[] }>(
+          "tools/list",
+          {}
+        );
         tools = listed.tools ?? [];
       } catch {
         // Server has no tools (or doesn't implement tools/list) — leave empty.
@@ -80,11 +86,17 @@ export class StdioMcpClient {
   }
 
   /** Spawn, initialize, invoke a single tool, then tear the process down. */
-  async callTool(name: string, args: Record<string, unknown>): Promise<ToolCallResult> {
+  async callTool(
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<ToolCallResult> {
     const session = await this.start();
     try {
       await session.initialize();
-      return await session.request<ToolCallResult>("tools/call", { name, arguments: args });
+      return await session.request<ToolCallResult>("tools/call", {
+        name,
+        arguments: args
+      });
     } finally {
       session.dispose();
     }
@@ -102,7 +114,11 @@ export class StdioMcpClient {
 
     const pending = new Map<
       string,
-      { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
+      {
+        resolve: (v: unknown) => void;
+        reject: (e: Error) => void;
+        timer: NodeJS.Timeout;
+      }
     >();
     let spawnError: Error | null = null;
     let exited = false;
@@ -145,7 +161,10 @@ export class StdioMcpClient {
       );
     });
 
-    const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+    const rl = readline.createInterface({
+      input: child.stdout,
+      crlfDelay: Infinity
+    });
     rl.on("line", (line) => {
       const trimmed = line.trim();
       if (!trimmed) return;
@@ -162,7 +181,9 @@ export class StdioMcpClient {
       pending.delete(key);
       clearTimeout(p.timer);
       if (env.error) {
-        p.reject(new Error(`MCP error ${env.error.code}: ${env.error.message}`));
+        p.reject(
+          new Error(`MCP error ${env.error.code}: ${env.error.message}`)
+        );
       } else {
         p.resolve(env.result);
       }
@@ -172,7 +193,12 @@ export class StdioMcpClient {
     // Whatever is still pending here truly got no answer.
     rl.on("close", () => {
       if (pending.size) {
-        failAll(exitErr ?? new Error(`MCP stdio server "${this.opts.command}" closed its output.`));
+        failAll(
+          exitErr ??
+            new Error(
+              `MCP stdio server "${this.opts.command}" closed its output.`
+            )
+        );
       }
     });
 
@@ -188,15 +214,24 @@ export class StdioMcpClient {
       }
     };
 
-    const request = <T>(method: string, params: Record<string, unknown>): Promise<T> =>
+    const request = <T>(
+      method: string,
+      params: Record<string, unknown>
+    ): Promise<T> =>
       new Promise<T>((resolve, reject) => {
         if (spawnError) return reject(spawnError);
         const id = randomId();
         const timer = setTimeout(() => {
           pending.delete(id);
-          reject(new Error(`MCP stdio ${method} timed out after ${timeoutMs}ms.`));
+          reject(
+            new Error(`MCP stdio ${method} timed out after ${timeoutMs}ms.`)
+          );
         }, timeoutMs);
-        pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
+        pending.set(id, {
+          resolve: resolve as (v: unknown) => void,
+          reject,
+          timer
+        });
         try {
           send({ jsonrpc: "2.0", id, method, params });
         } catch (e) {
@@ -234,7 +269,11 @@ export class StdioMcpClient {
       });
       // Best-effort post-initialize notification per the MCP lifecycle spec.
       try {
-        send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
+        send({
+          jsonrpc: "2.0",
+          method: "notifications/initialized",
+          params: {}
+        });
       } catch {
         // ignore — initialize already succeeded
       }

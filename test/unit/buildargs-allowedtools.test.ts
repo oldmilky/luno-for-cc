@@ -65,7 +65,10 @@ describe("buildArgs auto-mode allowedTools", () => {
     const args = buildArgs("hi", "sonnet", {
       ...base,
       permissionMode: "auto",
-      allowedBashPatterns: ["^git (status|diff|log|branch)$", "^npm (test|run test)$"]
+      allowedBashPatterns: [
+        "^git (status|diff|log|branch)$",
+        "^npm (test|run test)$"
+      ]
     });
     const tools = allowedToolsArgs(args);
     for (const t of [

@@ -46,7 +46,7 @@ Refactor Risks must explicitly address each:
 - **Adjacent improvements deferred** — if you spotted other tangential
   cleanups while exploring, list them under "Out of scope" — refactor
   PRs should stay focused.
-- **Performance change** — refactors *should* be perf-neutral, but
+- **Performance change** — refactors _should_ be perf-neutral, but
   splitting / inlining can shift behavior. For perf-sensitive code,
   state how you'll confirm.
 - **Behavior preservation** — explicitly confirm: this refactor does

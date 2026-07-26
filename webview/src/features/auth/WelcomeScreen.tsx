@@ -29,12 +29,7 @@ import { send, onMessage } from "../../lib/rpc";
 import s from "./WelcomeScreen.module.scss";
 
 type SetupStage =
-  | "idle"
-  | "launching"
-  | "awaitingBrowser"
-  | "saving"
-  | "done"
-  | "error";
+  "idle" | "launching" | "awaitingBrowser" | "saving" | "done" | "error";
 
 type TokenKind = "oauth" | "api" | "unknown" | "empty";
 
@@ -151,8 +146,9 @@ export function WelcomeScreen() {
             {stage === "idle" && (
               <motion.div key="idle" {...fade}>
                 <p className={s.lede}>
-                  We'll open a terminal that runs <code className={s.code}>claude setup-token</code>. Follow the prompts to sign in
-                  via your browser, then come back here.
+                  We'll open a terminal that runs{" "}
+                  <code className={s.code}>claude setup-token</code>. Follow the
+                  prompts to sign in via your browser, then come back here.
                 </p>
                 <button
                   type="button"
@@ -176,8 +172,8 @@ export function WelcomeScreen() {
                       Complete the sign-in in the{" "}
                       <span className={s.terminalHintStrong}>Luno Sign-in</span>{" "}
                       terminal at the bottom — open the URL it prints, then
-                      paste the code back into the terminal. Click below once
-                      it says you're signed in.
+                      paste the code back into the terminal. Click below once it
+                      says you're signed in.
                     </p>
                     <button
                       type="button"
@@ -251,8 +247,8 @@ export function WelcomeScreen() {
               </div>
               <p className={s.manualNote}>
                 Use an OAuth token from{" "}
-                <code className={s.code}>claude setup-token</code>{" "}
-                or an Anthropic Console API key (
+                <code className={s.code}>claude setup-token</code> or an
+                Anthropic Console API key (
                 <code className={s.code}>sk-ant-api…</code>).
               </p>
               <input
@@ -275,7 +271,8 @@ export function WelcomeScreen() {
                   }`}
                 >
                   <Icon name={manualValid ? "check" : "shield"} size={10} />
-                  {manualKind === "oauth" && "OAuth subscription token detected"}
+                  {manualKind === "oauth" &&
+                    "OAuth subscription token detected"}
                   {manualKind === "api" && "Anthropic Console API key detected"}
                   {manualKind === "unknown" &&
                     "Unrecognized format — should start with sk-ant-…"}
@@ -358,7 +355,14 @@ function ProgressList({ stage }: { stage: SetupStage }) {
       {items.map((it, i) => {
         const state: "pending" | "active" | "done" =
           i < stageIndex ? "done" : i === stageIndex ? "active" : "pending";
-        return <ProgressRow key={it.key} state={state} title={it.title} sub={it.sub} />;
+        return (
+          <ProgressRow
+            key={it.key}
+            state={state}
+            title={it.title}
+            sub={it.sub}
+          />
+        );
       })}
     </div>
   );

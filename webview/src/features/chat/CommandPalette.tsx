@@ -201,7 +201,16 @@ export function CommandPalette({
     }
 
     return items;
-  }, [models, skills, sessions, permissionMode, onLoadSession, onClose, onOpenKeyboardHints, onOpenHistory]);
+  }, [
+    models,
+    skills,
+    sessions,
+    permissionMode,
+    onLoadSession,
+    onClose,
+    onOpenKeyboardHints,
+    onOpenHistory
+  ]);
 
   const results = useMemo(() => fuzzy(allItems, query), [allItems, query]);
   const total = results.length;
@@ -330,9 +339,7 @@ function PaletteRow({
       </span>
       <div className={s.rowBody}>
         <div className={s.rowTitle}>{item.title}</div>
-        {item.subtitle && (
-          <div className={s.rowSubtitle}>{item.subtitle}</div>
-        )}
+        {item.subtitle && <div className={s.rowSubtitle}>{item.subtitle}</div>}
       </div>
       {active && <span className={s.rowEnter}>↵</span>}
     </div>
@@ -353,14 +360,24 @@ function fuzzy(items: Item[], query: string): ScoredResult[] {
     // When empty, show commands first, then 8 most recent sessions, then a
     // few model/mode options.
     const ordered = items
-      .map((item, i) => ({ item, score: groupRank(item.group) * 1000 + i, idx: i }))
+      .map((item, i) => ({
+        item,
+        score: groupRank(item.group) * 1000 + i,
+        idx: i
+      }))
       .sort((a, b) => a.score - b.score)
       .slice(0, 48);
     return ordered.map((r, idx) => ({ ...r, idx }));
   }
   const out: ScoredResult[] = [];
   for (const item of items) {
-    const hay = (item.title + " " + (item.subtitle ?? "") + " " + (item.keywords ?? "")).toLowerCase();
+    const hay = (
+      item.title +
+      " " +
+      (item.subtitle ?? "") +
+      " " +
+      (item.keywords ?? "")
+    ).toLowerCase();
     const score = scoreMatch(hay, q);
     if (score > 0) out.push({ item, score: -score, idx: 0 });
   }
@@ -378,7 +395,8 @@ function scoreMatch(hay: string, q: string): number {
     if (found === -1) return 0;
     score += 10;
     if (lastMatch !== -1 && found === lastMatch + 1) score += 5;
-    if (found === 0 || hay[found - 1] === " " || hay[found - 1] === "-") score += 4;
+    if (found === 0 || hay[found - 1] === " " || hay[found - 1] === "-")
+      score += 4;
     lastMatch = found;
     hi = found + 1;
   }
@@ -401,7 +419,13 @@ function groupBy(results: ScoredResult[]): Bucket[] {
     list.push(r);
     map.set(r.item.group, list);
   }
-  const order: Item["group"][] = ["Command", "History", "Mode", "Model", "Skill"];
+  const order: Item["group"][] = [
+    "Command",
+    "History",
+    "Mode",
+    "Model",
+    "Skill"
+  ];
   return order
     .filter((g) => map.has(g))
     .map((g) => ({ group: g, items: map.get(g) ?? [] }));
@@ -416,5 +440,8 @@ function relTime(ts: number): string {
   if (diff < hour) return `${Math.floor(diff / min)}m ago`;
   if (diff < day) return `${Math.floor(diff / hour)}h ago`;
   if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
-  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(ts).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric"
+  });
 }

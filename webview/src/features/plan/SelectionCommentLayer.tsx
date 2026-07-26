@@ -45,7 +45,11 @@ interface Trigger {
 const MAX_QUOTE_PREVIEW = 140;
 const POPOVER_WIDTH = 320;
 
-export function SelectionCommentLayer({ containerRef, revisionId, locked }: Props) {
+export function SelectionCommentLayer({
+  containerRef,
+  revisionId,
+  locked
+}: Props) {
   const [trigger, setTrigger] = useState<Trigger | null>(null);
   const [popover, setPopover] = useState<Trigger | null>(null);
   const [draft, setDraft] = useState("");
@@ -101,7 +105,8 @@ export function SelectionCommentLayer({ containerRef, revisionId, locked }: Prop
   useEffect(() => {
     if (!popover) return;
     const onMouseDown = (e: MouseEvent) => {
-      if (popoverRef.current && popoverRef.current.contains(e.target as Node)) return;
+      if (popoverRef.current && popoverRef.current.contains(e.target as Node))
+        return;
       setPopover(null);
       setDraft("");
     };
@@ -163,7 +168,10 @@ export function SelectionCommentLayer({ containerRef, revisionId, locked }: Prop
               }}
               onClick={() => {
                 // Anchor the popover to the trigger position. Clamp to viewport.
-                const x = Math.min(trigger.x, window.innerWidth - POPOVER_WIDTH - 12);
+                const x = Math.min(
+                  trigger.x,
+                  window.innerWidth - POPOVER_WIDTH - 12
+                );
                 const y = Math.min(trigger.y, window.innerHeight - 220);
                 setPopover({ x, y, quote: trigger.quote });
               }}

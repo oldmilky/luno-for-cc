@@ -8,7 +8,13 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Icon, BrandMark } from "../../design/icons";
 import { IconButton, Chip, Tooltip } from "../../design/primitives";
-import { PRESS, SPIN, SPRING_POP, DURATION, EASE_OUT } from "../../design/motion";
+import {
+  PRESS,
+  SPIN,
+  SPRING_POP,
+  DURATION,
+  EASE_OUT
+} from "../../design/motion";
 import { send, ConventionsSource, TimelineEvent } from "../../lib/rpc";
 import { findMode } from "./constants";
 import type { PermissionMode } from "../../lib/rpc";
@@ -105,7 +111,12 @@ export function Header({
           size={28}
           onClick={onOpenConnectors}
         />
-        <IconButton icon="history" title="Chat history" size={28} onClick={onOpenHistory} />
+        <IconButton
+          icon="history"
+          title="Chat history"
+          size={28}
+          onClick={onOpenHistory}
+        />
         <Tooltip label="New chat">
           <motion.button
             key={`new-chat-${newChatTick}`}

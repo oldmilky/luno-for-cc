@@ -19,14 +19,20 @@ describe("extractFileEdits", () => {
       item({
         id: "1",
         name: "Edit",
-        input: JSON.stringify({ path: "a.ts", old_string: "x", new_string: "y" }),
+        input: JSON.stringify({
+          path: "a.ts",
+          old_string: "x",
+          new_string: "y"
+        }),
         result: "ok"
       })
     ]);
     expect(out).toHaveLength(1);
     expect(out[0].path).toBe("a.ts");
     expect(out[0].action).toBe("Edited");
-    expect(out[0].changes).toEqual([{ kind: "edit", oldText: "x", newText: "y" }]);
+    expect(out[0].changes).toEqual([
+      { kind: "edit", oldText: "x", newText: "y" }
+    ]);
     expect(out[0].pending).toBe(false);
   });
 
@@ -49,8 +55,24 @@ describe("extractFileEdits", () => {
 
   it("aggregates multiple tool calls to the same path into one entry", () => {
     const out = extractFileEdits([
-      item({ id: "1", name: "Edit", input: JSON.stringify({ path: "a.ts", old_string: "x", new_string: "y" }) }),
-      item({ id: "2", name: "Edit", input: JSON.stringify({ path: "a.ts", old_string: "y", new_string: "z" }) })
+      item({
+        id: "1",
+        name: "Edit",
+        input: JSON.stringify({
+          path: "a.ts",
+          old_string: "x",
+          new_string: "y"
+        })
+      }),
+      item({
+        id: "2",
+        name: "Edit",
+        input: JSON.stringify({
+          path: "a.ts",
+          old_string: "y",
+          new_string: "z"
+        })
+      })
     ]);
     expect(out).toHaveLength(1);
     expect(out[0].changes).toHaveLength(2);
@@ -58,7 +80,11 @@ describe("extractFileEdits", () => {
 
   it("recognizes the various write tool name aliases", () => {
     const out = extractFileEdits([
-      item({ id: "1", name: "Write", input: JSON.stringify({ path: "a.ts", content: "hi" }) })
+      item({
+        id: "1",
+        name: "Write",
+        input: JSON.stringify({ path: "a.ts", content: "hi" })
+      })
     ]);
     expect(out[0].action).toBe("Wrote");
     expect(out[0].changes).toEqual([{ kind: "write", newText: "hi" }]);
@@ -66,38 +92,63 @@ describe("extractFileEdits", () => {
 
   it("reads alternate field names (file_path / filePath / target_file)", () => {
     const out = extractFileEdits([
-      item({ id: "1", name: "Write", input: JSON.stringify({ target_file: "t.ts", text: "z" }) })
+      item({
+        id: "1",
+        name: "Write",
+        input: JSON.stringify({ target_file: "t.ts", text: "z" })
+      })
     ]);
     expect(out[0].path).toBe("t.ts");
   });
 
   it("skips tool calls whose JSON cannot be parsed", () => {
-    const out = extractFileEdits([item({ id: "1", name: "Edit", input: "{not json" })]);
+    const out = extractFileEdits([
+      item({ id: "1", name: "Edit", input: "{not json" })
+    ]);
     expect(out).toHaveLength(0);
   });
 
   it("skips tool calls with no recognizable path", () => {
     const out = extractFileEdits([
-      item({ id: "1", name: "Edit", input: JSON.stringify({ old_string: "x", new_string: "y" }) })
+      item({
+        id: "1",
+        name: "Edit",
+        input: JSON.stringify({ old_string: "x", new_string: "y" })
+      })
     ]);
     expect(out).toHaveLength(0);
   });
 
   it("ignores non-file tools entirely", () => {
-    const out = extractFileEdits([item({ id: "1", name: "Grep", input: JSON.stringify({ pattern: "x" }) })]);
+    const out = extractFileEdits([
+      item({ id: "1", name: "Grep", input: JSON.stringify({ pattern: "x" }) })
+    ]);
     expect(out).toHaveLength(0);
   });
 
   it("marks an item pending when it has no result and no error", () => {
     const out = extractFileEdits([
-      item({ id: "1", name: "Write", input: JSON.stringify({ path: "a.ts", content: "x" }) })
+      item({
+        id: "1",
+        name: "Write",
+        input: JSON.stringify({ path: "a.ts", content: "x" })
+      })
     ]);
     expect(out[0].pending).toBe(true);
   });
 
   it("propagates the errored flag", () => {
     const out = extractFileEdits([
-      item({ id: "1", name: "Edit", input: JSON.stringify({ path: "a.ts", old_string: "x", new_string: "y" }), isError: true })
+      item({
+        id: "1",
+        name: "Edit",
+        input: JSON.stringify({
+          path: "a.ts",
+          old_string: "x",
+          new_string: "y"
+        }),
+        isError: true
+      })
     ]);
     expect(out[0].errored).toBe(true);
   });
@@ -107,8 +158,20 @@ describe("extractFileEdits", () => {
   // earlier edit changes are *retained* rather than superseded.
   it("documents that a Write after Edits keeps prior edit hunks (action upgrades to Wrote)", () => {
     const out = extractFileEdits([
-      item({ id: "1", name: "Edit", input: JSON.stringify({ path: "a.ts", old_string: "x", new_string: "y" }) }),
-      item({ id: "2", name: "Write", input: JSON.stringify({ path: "a.ts", content: "FULL" }) })
+      item({
+        id: "1",
+        name: "Edit",
+        input: JSON.stringify({
+          path: "a.ts",
+          old_string: "x",
+          new_string: "y"
+        })
+      }),
+      item({
+        id: "2",
+        name: "Write",
+        input: JSON.stringify({ path: "a.ts", content: "FULL" })
+      })
     ]);
     expect(out).toHaveLength(1);
     expect(out[0].action).toBe("Wrote");

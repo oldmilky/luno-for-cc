@@ -81,7 +81,9 @@ export function parseManagedServers(input: {
 
   const ingest = (servers: unknown, scope: ManagedScope) => {
     if (!servers || typeof servers !== "object") return;
-    for (const [name, raw] of Object.entries(servers as Record<string, unknown>)) {
+    for (const [name, raw] of Object.entries(
+      servers as Record<string, unknown>
+    )) {
       const server = normalizeServer(name, raw as RawServerSpec, scope);
       if (server) byKey.set(`${scope}:${name}`, server);
     }
@@ -113,7 +115,9 @@ function normalizeServer(
       transport: "stdio",
       command: raw.command,
       args: Array.isArray(raw.args) ? raw.args.map(String) : undefined,
-      env: isStringRecord(raw.env) ? (raw.env as Record<string, string>) : undefined,
+      env: isStringRecord(raw.env)
+        ? (raw.env as Record<string, string>)
+        : undefined,
       scope
     };
   }
@@ -130,8 +134,18 @@ function normalizeServer(
     if (declared === "sse") {
       return { name, transport: "sse", url: raw.url, headers, scope };
     }
-    if (declared === "http" || declared === "streamable-http" || declared === "streamablehttp") {
-      return { name, transport: "streamable-http", url: raw.url, headers, scope };
+    if (
+      declared === "http" ||
+      declared === "streamable-http" ||
+      declared === "streamablehttp"
+    ) {
+      return {
+        name,
+        transport: "streamable-http",
+        url: raw.url,
+        headers,
+        scope
+      };
     }
     return null; // no recognized type — CLI wouldn't load it
   }
@@ -142,7 +156,9 @@ function normalizeServer(
 /** True for a plain object whose values are all strings (headers / env maps). */
 function isStringRecord(v: unknown): v is Record<string, string> {
   if (!v || typeof v !== "object" || Array.isArray(v)) return false;
-  return Object.values(v as Record<string, unknown>).every((x) => typeof x === "string");
+  return Object.values(v as Record<string, unknown>).every(
+    (x) => typeof x === "string"
+  );
 }
 
 function asObject(v: unknown): Record<string, unknown> | undefined {
@@ -157,7 +173,9 @@ function asObject(v: unknown): Record<string, unknown> | undefined {
  */
 export function loadManagedServers(cwd?: string): ManagedServer[] {
   const claudeJson = readJsonSafe(path.join(os.homedir(), ".claude.json"));
-  const projectMcpJson = cwd ? readJsonSafe(path.join(cwd, ".mcp.json")) : undefined;
+  const projectMcpJson = cwd
+    ? readJsonSafe(path.join(cwd, ".mcp.json"))
+    : undefined;
   return parseManagedServers({ claudeJson, projectMcpJson, cwd });
 }
 
@@ -206,7 +224,8 @@ export function parseClaudeMcpList(stdout: string): CliMcpServer[] {
     if (st.includes("✓") || /\bconnected\b/.test(st)) status = "connected";
     else if (st.includes("needs") && st.includes("auth")) status = "needs-auth";
     else if (st.includes("pending")) status = "pending";
-    else if (st.includes("✗") || st.includes("fail") || st.includes("error")) status = "failed";
+    else if (st.includes("✗") || st.includes("fail") || st.includes("error"))
+      status = "failed";
     else continue; // unrecognized → not a server line
     out.push({ name: m[1].trim(), endpoint: m[2].trim(), status });
   }
@@ -219,7 +238,10 @@ export function endpointMatchesUrl(endpoint: string, url: string): boolean {
   try {
     const a = new URL(clean);
     const b = new URL(url);
-    return a.host === b.host && a.pathname.replace(/\/+$/, "") === b.pathname.replace(/\/+$/, "");
+    return (
+      a.host === b.host &&
+      a.pathname.replace(/\/+$/, "") === b.pathname.replace(/\/+$/, "")
+    );
   } catch {
     return clean === url;
   }

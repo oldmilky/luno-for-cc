@@ -114,26 +114,28 @@ function hasUserContent(s: StoredSession): boolean {
 function firstUserText(timeline: TimelineEvent[]): string {
   const firstUser = timeline.find((e) => e.kind === "user");
   if (!firstUser?.body) return "";
-  return firstUser.body
-    // Composer code badge: **file:lines**\n```lang\n…code…\n```
-    .replace(/\*\*[^*\n]+\*\*\s*\n`{3,}[^\n]*\n[\s\S]*?\n`{3,}/g, " ")
-    // Any remaining fenced code block
-    .replace(/`{3,}[^\n]*\n[\s\S]*?\n`{3,}/g, " ")
-    // Image markdown ![alt](src) — drop entirely (alt is rarely useful here)
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
-    // Link [text](url) → text
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    // Inline code `x` → x ; bold/italic markers → inner text
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/\*([^*]+)\*/g, "$1")
-    // `@file` mention tokens — drop them so the title reads as the user's
-    // instruction ("fix the bug") instead of a bare filename.
-    .replace(/(^|\s)@[^\s@]+/g, "$1")
-    // Leading heading / list / quote markers per line
-    .replace(/^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|>\s+)/gm, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    firstUser.body
+      // Composer code badge: **file:lines**\n```lang\n…code…\n```
+      .replace(/\*\*[^*\n]+\*\*\s*\n`{3,}[^\n]*\n[\s\S]*?\n`{3,}/g, " ")
+      // Any remaining fenced code block
+      .replace(/`{3,}[^\n]*\n[\s\S]*?\n`{3,}/g, " ")
+      // Image markdown ![alt](src) — drop entirely (alt is rarely useful here)
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+      // Link [text](url) → text
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      // Inline code `x` → x ; bold/italic markers → inner text
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/\*([^*]+)\*/g, "$1")
+      // `@file` mention tokens — drop them so the title reads as the user's
+      // instruction ("fix the bug") instead of a bare filename.
+      .replace(/(^|\s)@[^\s@]+/g, "$1")
+      // Leading heading / list / quote markers per line
+      .replace(/^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|>\s+)/gm, "")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 /** Basenames of every `@file` mention in the first user message, in order.
@@ -183,7 +185,10 @@ export function deriveTitle(timeline: TimelineEvent[]): string {
 
 /** A longer preview line for the history row. Returns "" when it would just
  *  echo the title (short prompts), so the UI can skip the second line. */
-export function deriveSnippet(timeline: TimelineEvent[], title: string): string {
+export function deriveSnippet(
+  timeline: TimelineEvent[],
+  title: string
+): string {
   const text = firstUserText(timeline);
   if (!text) return "";
   const titleStem = title.replace(/…$/, "");

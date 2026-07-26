@@ -9,7 +9,9 @@ import {
 
 describe("extractPlanSummary", () => {
   it("pulls the H1 title and a prose preview, stripping inline markdown", () => {
-    const s = extractPlanSummary("# My Plan\n\nWe will do **stuff** and `things`.");
+    const s = extractPlanSummary(
+      "# My Plan\n\nWe will do **stuff** and `things`."
+    );
     expect(s.title).toBe("My Plan");
     expect(s.preview).toBe("We will do stuff and things.");
   });
@@ -75,11 +77,16 @@ describe("formatRelativeTime", () => {
 // See webview/src/features/plan/summary.ts:33-40.
 // ─────────────────────────────────────────────────────────────
 describe("extractPlanSummary — KNOWN BUG: prose-only body shows 'Plan body is empty.'", () => {
-  it.fails("should preview prose even when the body has no markdown heading", () => {
-    const s = extractPlanSummary("We will refactor the parser and add tests.");
-    // DESIRED: the prose is previewed. ACTUAL (buggy): 'Plan body is empty.'
-    expect(s.preview).toBe("We will refactor the parser and add tests.");
-  });
+  it.fails(
+    "should preview prose even when the body has no markdown heading",
+    () => {
+      const s = extractPlanSummary(
+        "We will refactor the parser and add tests."
+      );
+      // DESIRED: the prose is previewed. ACTUAL (buggy): 'Plan body is empty.'
+      expect(s.preview).toBe("We will refactor the parser and add tests.");
+    }
+  );
 
   it("documents the actual (buggy) output for a prose-only body", () => {
     const s = extractPlanSummary("We will refactor the parser and add tests.");

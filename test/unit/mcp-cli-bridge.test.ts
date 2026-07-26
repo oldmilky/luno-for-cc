@@ -11,7 +11,10 @@ import { toCliServerEntry } from "../../src/services/mcp/index.js";
 describe("toCliServerEntry", () => {
   it("maps a streamable-http server with a bearer token", () => {
     expect(
-      toCliServerEntry({ transport: "streamable-http", url: "https://h/mcp" }, "tok")
+      toCliServerEntry(
+        { transport: "streamable-http", url: "https://h/mcp" },
+        "tok"
+      )
     ).toEqual({
       type: "http",
       url: "https://h/mcp",
@@ -20,7 +23,9 @@ describe("toCliServerEntry", () => {
   });
 
   it("maps an sse server", () => {
-    expect(toCliServerEntry({ transport: "sse", url: "https://h/sse" }, "t")).toMatchObject({
+    expect(
+      toCliServerEntry({ transport: "sse", url: "https://h/sse" }, "t")
+    ).toMatchObject({
       type: "sse",
       url: "https://h/sse"
     });
@@ -43,7 +48,9 @@ describe("toCliServerEntry", () => {
   });
 
   it("omits empty args/env on stdio entries", () => {
-    expect(toCliServerEntry({ transport: "stdio", command: "x", args: [], env: {} })).toEqual({
+    expect(
+      toCliServerEntry({ transport: "stdio", command: "x", args: [], env: {} })
+    ).toEqual({
       type: "stdio",
       command: "x"
     });

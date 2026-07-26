@@ -45,7 +45,8 @@ export class Session {
   addAssistantBlocks(blocks: ContentBlock[]) {
     this.messages.push({ role: "assistant", content: blocks });
     for (const b of blocks) {
-      if (b.type === "text") this.emit({ kind: "assistant", title: "Assistant", body: b.text });
+      if (b.type === "text")
+        this.emit({ kind: "assistant", title: "Assistant", body: b.text });
       else if (b.type === "tool_use")
         this.emit({
           kind: "tool_call",
@@ -66,7 +67,12 @@ export class Session {
   }
 
   addToolResult(toolUseId: string, content: string, isError = false) {
-    const block: ContentBlock = { type: "tool_result", tool_use_id: toolUseId, content, is_error: isError };
+    const block: ContentBlock = {
+      type: "tool_result",
+      tool_use_id: toolUseId,
+      content,
+      is_error: isError
+    };
     this.messages.push({ role: "user", content: [block] });
     this.emit({
       kind: "tool_result",
@@ -79,7 +85,9 @@ export class Session {
   emitPlanRevision(meta: PlanRevisionMeta): TimelineEvent {
     return this.emit({
       kind: "plan_revision",
-      title: meta.bodyChanged ? `Plan ${meta.revisionId}` : `Plan ${meta.revisionId} · tasks updated`,
+      title: meta.bodyChanged
+        ? `Plan ${meta.revisionId}`
+        : `Plan ${meta.revisionId} · tasks updated`,
       body: meta.body,
       meta: meta as unknown as Record<string, unknown>
     });
@@ -138,7 +146,10 @@ export class Session {
         if (last?.role === "assistant" && Array.isArray(last.content)) {
           (last.content as ContentBlock[]).push({ type: "text", text: e.body });
         } else {
-          newMessages.push({ role: "assistant", content: [{ type: "text", text: e.body }] });
+          newMessages.push({
+            role: "assistant",
+            content: [{ type: "text", text: e.body }]
+          });
         }
       }
     }

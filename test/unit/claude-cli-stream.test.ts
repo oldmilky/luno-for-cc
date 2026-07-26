@@ -31,7 +31,8 @@ function makeFakeChild() {
     child.signalCode = sig ?? null;
     return true;
   };
-  child.emitLine = (obj: unknown) => child.stdout.write(JSON.stringify(obj) + "\n");
+  child.emitLine = (obj: unknown) =>
+    child.stdout.write(JSON.stringify(obj) + "\n");
   return child;
 }
 
@@ -96,7 +97,9 @@ describe("ClaudeCliProvider.stream — tool stall watchdog (integration)", () =>
     expect(result).toBeDefined();
     expect(result!.toolUseId).toBe("wf1");
     expect(result!.resultIsError).toBe(true);
-    expect(result!.resultContent).toMatch(/did not respond within 0?40?s|did not respond within/i);
+    expect(result!.resultContent).toMatch(
+      /did not respond within 0?40?s|did not respond within/i
+    );
     // The wedged CLI was stopped rather than left hanging for 10 minutes.
     expect(child.killed).toBe(true);
     expect(child.signalCode).toBe("SIGTERM");
@@ -114,14 +117,28 @@ describe("ClaudeCliProvider.stream — tool stall watchdog (integration)", () =>
     child.emitLine({
       type: "assistant",
       message: {
-        content: [{ type: "tool_use", id: "wf1", name: "WebFetch", input: { url: "https://x" } }]
+        content: [
+          {
+            type: "tool_use",
+            id: "wf1",
+            name: "WebFetch",
+            input: { url: "https://x" }
+          }
+        ]
       }
     });
     // Real result arrives well within the 200ms budget.
     child.emitLine({
       type: "user",
       message: {
-        content: [{ type: "tool_result", tool_use_id: "wf1", content: "fetched ok", is_error: false }]
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "wf1",
+            content: "fetched ok",
+            is_error: false
+          }
+        ]
       }
     });
     // End the turn normally.
@@ -150,7 +167,14 @@ describe("ClaudeCliProvider.stream — tool stall watchdog (integration)", () =>
     child.emitLine({
       type: "assistant",
       message: {
-        content: [{ type: "tool_use", id: "b1", name: "Bash", input: { command: "sleep 1" } }]
+        content: [
+          {
+            type: "tool_use",
+            id: "b1",
+            name: "Bash",
+            input: { command: "sleep 1" }
+          }
+        ]
       }
     });
     // Wait well past the watchdog budget — Bash is intentionally unwatched.
@@ -162,7 +186,16 @@ describe("ClaudeCliProvider.stream — tool stall watchdog (integration)", () =>
     // tool_result is the real one, never a watchdog timeout.
     child.emitLine({
       type: "user",
-      message: { content: [{ type: "tool_result", tool_use_id: "b1", content: "ok", is_error: false }] }
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "b1",
+            content: "ok",
+            is_error: false
+          }
+        ]
+      }
     });
     child.emitLine({ type: "result", subtype: "success", result: "done" });
     await finished;

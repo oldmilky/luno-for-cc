@@ -25,7 +25,9 @@ export function classifyTask(prompt: string, activeFile?: string): TaskType {
   // 1. Docs-driven
   if (
     /\bhttps?:\/\//.test(prompt) ||
-    /\b(per the (spec|docs|rfc)|follow the (spec|docs|rfc)|according to (the )?docs)\b/.test(p)
+    /\b(per the (spec|docs|rfc)|follow the (spec|docs|rfc)|according to (the )?docs)\b/.test(
+      p
+    )
   ) {
     return "docs-driven";
   }
@@ -34,46 +36,67 @@ export function classifyTask(prompt: string, activeFile?: string): TaskType {
   if (
     /\.(tf|tfvars|hcl)$/.test(f) ||
     /(^|\/)dockerfile(\..+)?$/.test(f) ||
-    /\.(ya?ml)$/.test(f) && /(\.github\/workflows|\.gitlab-ci|circleci|travis|azure-pipelines|cloudbuild|bitbucket-pipelines)/.test(f) ||
-    /(?:^|\/)(infra|infrastructure|terraform|k8s|kubernetes|helm|ansible|chef|puppet|cloudformation|pulumi)\//.test(f) ||
-    /\b(terraform|kubernetes|kubectl|helm chart|github actions|gitlab ci|circleci|jenkins|argocd|spinnaker|ansible|cloudformation|pulumi|deploy(ment)?|rollout|canary|blue.green|infra|iac)\b/.test(p)
+    (/\.(ya?ml)$/.test(f) &&
+      /(\.github\/workflows|\.gitlab-ci|circleci|travis|azure-pipelines|cloudbuild|bitbucket-pipelines)/.test(
+        f
+      )) ||
+    /(?:^|\/)(infra|infrastructure|terraform|k8s|kubernetes|helm|ansible|chef|puppet|cloudformation|pulumi)\//.test(
+      f
+    ) ||
+    /\b(terraform|kubernetes|kubectl|helm chart|github actions|gitlab ci|circleci|jenkins|argocd|spinnaker|ansible|cloudformation|pulumi|deploy(ment)?|rollout|canary|blue.green|infra|iac)\b/.test(
+      p
+    )
   ) {
     return "devops";
   }
 
   // 3. Migration — package files or upgrade verbs
   if (
-    /(?:^|\/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|cargo\.toml|cargo\.lock|pyproject\.toml|requirements\.txt|gemfile|gemfile\.lock|go\.mod|go\.sum|composer\.json|composer\.lock)$/.test(f) ||
-    /\b(upgrade|migrate(?: from)?|bump|switch from|replace .+ with|move from .+ to|port to)\b/.test(p)
+    /(?:^|\/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|cargo\.toml|cargo\.lock|pyproject\.toml|requirements\.txt|gemfile|gemfile\.lock|go\.mod|go\.sum|composer\.json|composer\.lock)$/.test(
+      f
+    ) ||
+    /\b(upgrade|migrate(?: from)?|bump|switch from|replace .+ with|move from .+ to|port to)\b/.test(
+      p
+    )
   ) {
     return "migration";
   }
 
   // 4. Bug fix — fix verbs / error language
   if (
-    /\b(fix(es|ing|ed)?|bug|broken|crashes?|throws? error|failing test|regression|doesn'?t work|not working|stack ?trace|exception|null ?pointer|undefined is not)\b/.test(p)
+    /\b(fix(es|ing|ed)?|bug|broken|crashes?|throws? error|failing test|regression|doesn'?t work|not working|stack ?trace|exception|null ?pointer|undefined is not)\b/.test(
+      p
+    )
   ) {
     return "bugfix";
   }
 
   // 5. Refactor — restructure verbs
   if (
-    /\b(rename|extract|inline|split|consolidate|deduplicate|refactor|restructure|move (this|the)|reorganize|simplify(?! the)|clean.up)\b/.test(p)
+    /\b(rename|extract|inline|split|consolidate|deduplicate|refactor|restructure|move (this|the)|reorganize|simplify(?! the)|clean.up)\b/.test(
+      p
+    )
   ) {
     return "refactor";
   }
 
   // 6. Full-stack — explicit multi-layer signal
   if (
-    /\b(end.to.end|frontend (?:and|\+) backend|backend (?:and|\+) frontend|client (?:and|\+) server|server (?:and|\+) client|api (?:and|\+) ui|ui (?:and|\+) api|wire .+ to .+|full.?stack)\b/.test(p)
+    /\b(end.to.end|frontend (?:and|\+) backend|backend (?:and|\+) frontend|client (?:and|\+) server|server (?:and|\+) client|api (?:and|\+) ui|ui (?:and|\+) api|wire .+ to .+|full.?stack)\b/.test(
+      p
+    )
   ) {
     return "fullstack";
   }
 
   // 7. Integration — vendor names or integration-folder paths
   if (
-    /\b(stripe|twilio|slack|sendgrid|shopify|github(?: api)?|google api|aws|azure|firebase|supabase|webhook|oauth|paypal|braintree|auth0|okta|segment|mixpanel|datadog|sentry|openai|anthropic)\b/.test(p) ||
-    /(?:^|\/)(integrations?|clients?|webhooks?|providers?|connectors?)\//.test(f)
+    /\b(stripe|twilio|slack|sendgrid|shopify|github(?: api)?|google api|aws|azure|firebase|supabase|webhook|oauth|paypal|braintree|auth0|okta|segment|mixpanel|datadog|sentry|openai|anthropic)\b/.test(
+      p
+    ) ||
+    /(?:^|\/)(integrations?|clients?|webhooks?|providers?|connectors?)\//.test(
+      f
+    )
   ) {
     return "integration";
   }
@@ -81,16 +104,24 @@ export function classifyTask(prompt: string, activeFile?: string): TaskType {
   // 8. Frontend — UI extensions / paths / keywords
   if (
     /\.(tsx|jsx|vue|svelte|css|scss|sass|less|astro)$/.test(f) ||
-    /(?:^|\/)(components?|pages?|app|ui|views?|screens?|features?\/[^/]+|widgets?)\//.test(f) ||
-    /\b(component|button|modal|page|form|layout|css|tailwind|styled-components|design system|hook(?:s)?|state management|redux|zustand|jotai|recoil|accessibilit|a11y|responsive)\b/.test(p)
+    /(?:^|\/)(components?|pages?|app|ui|views?|screens?|features?\/[^/]+|widgets?)\//.test(
+      f
+    ) ||
+    /\b(component|button|modal|page|form|layout|css|tailwind|styled-components|design system|hook(?:s)?|state management|redux|zustand|jotai|recoil|accessibilit|a11y|responsive)\b/.test(
+      p
+    )
   ) {
     return "frontend";
   }
 
   // 9. Backend — API/server paths or keywords
   if (
-    /(?:^|\/)(api|routes?|controllers?|models?|migrations?|services?|handlers?|middleware|server|backend|resolvers?)\//.test(f) ||
-    /\b(endpoint|route|migration|database|sql|orm|prisma|drizzle|sequelize|mongoose|fastapi|express|nest|graphql|rest api|grpc|message queue|pubsub|kafka)\b/.test(p)
+    /(?:^|\/)(api|routes?|controllers?|models?|migrations?|services?|handlers?|middleware|server|backend|resolvers?)\//.test(
+      f
+    ) ||
+    /\b(endpoint|route|migration|database|sql|orm|prisma|drizzle|sequelize|mongoose|fastapi|express|nest|graphql|rest api|grpc|message queue|pubsub|kafka)\b/.test(
+      p
+    )
   ) {
     return "backend";
   }
@@ -98,7 +129,9 @@ export function classifyTask(prompt: string, activeFile?: string): TaskType {
   // 10. New implementation — greenfield verbs (lower priority so it doesn't
   //     swallow more specific signals like backend/frontend).
   if (
-    /\b(create (?:a )?new|build (?:a )?new|scaffold|set up (?:a )?new|implement from scratch|greenfield|new project|new (?:module|package|library|service))\b/.test(p)
+    /\b(create (?:a )?new|build (?:a )?new|scaffold|set up (?:a )?new|implement from scratch|greenfield|new project|new (?:module|package|library|service))\b/.test(
+      p
+    )
   ) {
     return "new-impl";
   }

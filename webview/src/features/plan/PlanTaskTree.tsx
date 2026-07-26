@@ -74,7 +74,9 @@ function PlanTaskRow({ index, task, revisionId, comments, locked }: RowProps) {
     >
       <div className={s.row}>
         <span
-          className={[s.glyph, GLYPH_CLASS[status] ?? ""].filter(Boolean).join(" ")}
+          className={[s.glyph, GLYPH_CLASS[status] ?? ""]
+            .filter(Boolean)
+            .join(" ")}
           aria-hidden
         >
           <Icon name={statusIcon(status)} size={11} />
@@ -84,7 +86,11 @@ function PlanTaskRow({ index, task, revisionId, comments, locked }: RowProps) {
           {status === "in_progress" ? task.activeForm : task.content}
         </span>
         <Chip tone={statusTone(status)}>{statusLabel(status)}</Chip>
-        <Tooltip label={hasComments ? `${taskComments.length} comment(s)` : "Add a comment"}>
+        <Tooltip
+          label={
+            hasComments ? `${taskComments.length} comment(s)` : "Add a comment"
+          }
+        >
           <button
             type="button"
             className={[s.commentBtn, hasComments ? s.hasComments : ""]
@@ -94,7 +100,9 @@ function PlanTaskRow({ index, task, revisionId, comments, locked }: RowProps) {
             aria-expanded={open}
           >
             <Icon name="at" size={11} />
-            {hasComments && <span className={s.commentCount}>{taskComments.length}</span>}
+            {hasComments && (
+              <span className={s.commentCount}>{taskComments.length}</span>
+            )}
           </button>
         </Tooltip>
       </div>

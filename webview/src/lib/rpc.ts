@@ -47,11 +47,7 @@ export interface PlanTaskFileRef {
 }
 
 export type PlanTaskStatus =
-  | "pending"
-  | "in_progress"
-  | "completed"
-  | "skipped"
-  | "accepted";
+  "pending" | "in_progress" | "completed" | "skipped" | "accepted";
 
 export interface PlanTask {
   id: string;
@@ -355,7 +351,12 @@ export type Outbound =
   | { type: "loadSession"; id: string }
   | { type: "deleteHistoryEntry"; id: string }
   | { type: "setSkillEnabled"; id: string; enabled: boolean }
-  | { type: "requestMarketplace"; offset?: number; limit?: number; query?: string }
+  | {
+      type: "requestMarketplace";
+      offset?: number;
+      limit?: number;
+      query?: string;
+    }
   | { type: "requestSkillDetail"; name: string }
   | {
       type: "installMarketplaceSkill";

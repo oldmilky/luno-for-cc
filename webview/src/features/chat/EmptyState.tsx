@@ -82,7 +82,8 @@ export function EmptyState() {
         // move, so it takes ENTER's timing without ENTER's rise.
         transition={enterAt(2).transition}
       >
-        Mention files with <Kbd>@</Kbd> · pick a mode for the kind of help you need
+        Mention files with <Kbd>@</Kbd> · pick a mode for the kind of help you
+        need
       </motion.div>
       {GROUPS.map((g) => {
         const headRung = ++rung;

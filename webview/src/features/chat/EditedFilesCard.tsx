@@ -35,13 +35,23 @@ interface EditedFilesCardProps {
 
 type RevertState = "idle" | "confirming" | "reverting" | "done" | "failed";
 
-export function EditedFilesCard({ edits, onAddDiffNote }: EditedFilesCardProps) {
-  const [openState, setOpenState] = useState<{ entry: FileEditEntry; rect: DOMRect | null } | null>(null);
+export function EditedFilesCard({
+  edits,
+  onAddDiffNote
+}: EditedFilesCardProps) {
+  const [openState, setOpenState] = useState<{
+    entry: FileEditEntry;
+    rect: DOMRect | null;
+  } | null>(null);
   const [expanded, setExpanded] = useState(true);
   const [undoConfirm, setUndoConfirm] = useState(false);
   const openEntry = openState?.entry ?? null;
-  const [revertState, setRevertState] = useState<Map<string, RevertState>>(new Map());
-  const [revertError, setRevertError] = useState<Map<string, string>>(new Map());
+  const [revertState, setRevertState] = useState<Map<string, RevertState>>(
+    new Map()
+  );
+  const [revertError, setRevertError] = useState<Map<string, string>>(
+    new Map()
+  );
 
   useEffect(() => {
     return onMessage((m) => {
@@ -79,7 +89,9 @@ export function EditedFilesCard({ edits, onAddDiffNote }: EditedFilesCardProps) 
   // Drives the "all reverted" header treatment + hides the Undo button so
   // the user can't double-undo (which would just hit "no prior snapshot").
   const allReverted = useMemo(
-    () => edits.length > 0 && edits.every((e) => revertState.get(e.path) === "done"),
+    () =>
+      edits.length > 0 &&
+      edits.every((e) => revertState.get(e.path) === "done"),
     [edits, revertState]
   );
   const anyReverting = useMemo(
@@ -117,10 +129,7 @@ export function EditedFilesCard({ edits, onAddDiffNote }: EditedFilesCardProps) 
 
   return (
     <>
-      <motion.div
-        {...ENTER_CARD}
-        className={s.card}
-      >
+      <motion.div {...ENTER_CARD} className={s.card}>
         {/* Header bar: chevron + file count, then Undo / Review */}
         <div className={s.head}>
           <button
@@ -142,9 +151,7 @@ export function EditedFilesCard({ edits, onAddDiffNote }: EditedFilesCardProps) 
               {edits.length} File{edits.length === 1 ? "" : "s"}
             </span>
             <span className={s.headStats}>
-              {stats.added > 0 && (
-                <span className={s.add}>+{stats.added}</span>
-              )}
+              {stats.added > 0 && <span className={s.add}>+{stats.added}</span>}
               {stats.removed > 0 && (
                 <span className={s.del}>−{stats.removed}</span>
               )}
@@ -185,7 +192,11 @@ export function EditedFilesCard({ edits, onAddDiffNote }: EditedFilesCardProps) 
                       anyReverting ? s.busy : ""
                     ].join(" ")}
                   >
-                    {anyReverting ? "Undoing…" : undoConfirm ? "Click again" : "Undo"}
+                    {anyReverting
+                      ? "Undoing…"
+                      : undoConfirm
+                        ? "Click again"
+                        : "Undo"}
                   </button>
                 </Tooltip>
                 <Tooltip label="Review changes in a full diff view">
@@ -205,10 +216,7 @@ export function EditedFilesCard({ edits, onAddDiffNote }: EditedFilesCardProps) 
         {/* File list */}
         <AnimatePresence initial={false}>
           {expanded && (
-            <motion.ul
-              {...EXPAND}
-              className={s.list}
-            >
+            <motion.ul {...EXPAND} className={s.list}>
               {edits.map((e, i) => (
                 <motion.li
                   key={e.id}
@@ -223,7 +231,9 @@ export function EditedFilesCard({ edits, onAddDiffNote }: EditedFilesCardProps) 
                     entry={e}
                     revertState={revertState.get(e.path) ?? "idle"}
                     revertError={revertError.get(e.path)}
-                    onOpenInEditor={() => send({ type: "openFile", path: e.path })}
+                    onOpenInEditor={() =>
+                      send({ type: "openFile", path: e.path })
+                    }
                   />
                 </motion.li>
               ))}
@@ -283,9 +293,7 @@ function FileRow({
         className={[s.file, isReverted ? s.fileReverted : ""].join(" ")}
       >
         <FileBadge path={entry.path} size={16} />
-        <span
-          className={[s.name, isReverted ? s.nameReverted : ""].join(" ")}
-        >
+        <span className={[s.name, isReverted ? s.nameReverted : ""].join(" ")}>
           {name}
         </span>
         {isReverting ? (
@@ -309,9 +317,7 @@ function FileRow({
           </Tooltip>
         ) : (
           <span className={s.rowStats}>
-            {counts.added > 0 && (
-              <span className={s.add}>+{counts.added}</span>
-            )}
+            {counts.added > 0 && <span className={s.add}>+{counts.added}</span>}
             {counts.removed > 0 && (
               <span className={s.del}>−{counts.removed}</span>
             )}
@@ -329,7 +335,10 @@ function baseName(p: string): string {
   return i === -1 ? p : p.slice(i + 1);
 }
 
-function computeStats(edits: FileEditEntry[]): { added: number; removed: number } {
+function computeStats(edits: FileEditEntry[]): {
+  added: number;
+  removed: number;
+} {
   let added = 0;
   let removed = 0;
   for (const e of edits) {
@@ -366,9 +375,10 @@ function lcsCounts(a: string[], b: string[]): { adds: number; dels: number } {
   );
   for (let i = m - 1; i >= 0; i--) {
     for (let j = n - 1; j >= 0; j--) {
-      dp[i][j] = a[i] === b[j]
-        ? dp[i + 1][j + 1] + 1
-        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      dp[i][j] =
+        a[i] === b[j]
+          ? dp[i + 1][j + 1] + 1
+          : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
   let i = 0;

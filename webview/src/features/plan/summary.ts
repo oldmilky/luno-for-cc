@@ -16,7 +16,8 @@ export interface PlanSummary {
 const FENCE_RE = /```[\s\S]*?```/g;
 const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
 const HEADING_RE = /^\s{0,3}(#{1,6})\s+(.+?)\s*$/m;
-const INLINE_MD_RE = /(`[^`]+`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_|\[([^\]]+)\]\([^)]+\))/g;
+const INLINE_MD_RE =
+  /(`[^`]+`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_|\[([^\]]+)\]\([^)]+\))/g;
 
 export function extractPlanSummary(body: string, maxChars = 220): PlanSummary {
   const cleaned = body.replace(FENCE_RE, "").replace(HTML_COMMENT_RE, "");
@@ -26,7 +27,11 @@ export function extractPlanSummary(body: string, maxChars = 220): PlanSummary {
   return { title, preview };
 }
 
-function firstParagraph(cleaned: string, title: string, maxChars: number): string {
+function firstParagraph(
+  cleaned: string,
+  title: string,
+  maxChars: number
+): string {
   // Strip out the title heading and anything before the first body line.
   const lines = cleaned.split(/\r?\n/);
   const collected: string[] = [];
@@ -54,12 +59,17 @@ function firstParagraph(cleaned: string, title: string, maxChars: number): strin
 
   let preview = collected
     .join(" ")
-    .replace(INLINE_MD_RE, (_match, _all, b1, b2, b3, b4, link) => b1 || b2 || b3 || b4 || link || _match.replace(/^`|`$/g, ""))
+    .replace(
+      INLINE_MD_RE,
+      (_match, _all, b1, b2, b3, b4, link) =>
+        b1 || b2 || b3 || b4 || link || _match.replace(/^`|`$/g, "")
+    )
     .replace(/\s+/g, " ")
     .trim();
 
   if (!preview) preview = "Plan body is empty.";
-  if (preview.length > maxChars) preview = preview.slice(0, maxChars - 1).trimEnd() + "…";
+  if (preview.length > maxChars)
+    preview = preview.slice(0, maxChars - 1).trimEnd() + "…";
   return preview;
 }
 

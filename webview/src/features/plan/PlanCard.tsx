@@ -34,12 +34,17 @@ interface Props {
 }
 
 export function PlanCard({ view, isLatest, ordinal }: Props) {
-  const summary = useMemo(() => extractPlanSummary(view.meta.body), [view.meta.body]);
+  const summary = useMemo(
+    () => extractPlanSummary(view.meta.body),
+    [view.meta.body]
+  );
   const pending = unresolvedComments(view).length;
   const branched = !!view.meta.parentRevisionId;
   const proceeded = !!view.meta.proceeded;
   const taskCount = view.meta.tasks.length;
-  const completed = view.meta.tasks.filter((t) => t.status === "completed").length;
+  const completed = view.meta.tasks.filter(
+    (t) => t.status === "completed"
+  ).length;
 
   const proceed = () => {
     // Don't send a chat prompt directly — that would inject a "Plan approved"
@@ -102,9 +107,7 @@ export function PlanCard({ view, isLatest, ordinal }: Props) {
         </span>
       </div>
 
-      {summary.preview && (
-        <p className={s.preview}>{summary.preview}</p>
-      )}
+      {summary.preview && <p className={s.preview}>{summary.preview}</p>}
 
       {/* The task list arrives on a later revision event than the plan body,
           and the stat row tracks comments the user is still writing — both
@@ -178,4 +181,3 @@ export function PlanCard({ view, isLatest, ordinal }: Props) {
     </motion.div>
   );
 }
-

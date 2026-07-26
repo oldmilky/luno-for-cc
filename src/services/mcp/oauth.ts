@@ -153,7 +153,11 @@ export async function performOAuth(
     await vscode.env.openExternal(vscode.Uri.parse(authUrl.toString()));
 
     // Step E — wait for the AS to redirect back to our loopback.
-    const code = await waitForCode(state, opts.timeoutMs ?? 5 * 60_000, opts.signal);
+    const code = await waitForCode(
+      state,
+      opts.timeoutMs ?? 5 * 60_000,
+      opts.signal
+    );
 
     // Step F — exchange code → tokens.
     const tokens = await exchangeCode({
@@ -191,7 +195,11 @@ export async function refreshAccessToken(opts: {
   refreshToken: string;
   clientId: string;
   clientSecret?: string;
-}): Promise<{ accessToken: string; refreshToken?: string; expiresAt?: number }> {
+}): Promise<{
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;
+}> {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: opts.refreshToken,
@@ -205,7 +213,9 @@ export async function refreshAccessToken(opts: {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Token refresh failed (HTTP ${res.status}): ${text || res.statusText}`);
+    throw new Error(
+      `Token refresh failed (HTTP ${res.status}): ${text || res.statusText}`
+    );
   }
   const json = (await res.json()) as {
     access_token: string;
@@ -233,13 +243,16 @@ async function discoverAuthServer(serverUrl: string): Promise<OAuthDiscovery> {
     const m = auth?.match(/resource_metadata="?([^",]+)"?/i);
     if (m) {
       const r = await fetch(m[1]);
-      if (r.ok) resourceMeta = (await r.json()) as { authorization_servers?: string[] };
+      if (r.ok)
+        resourceMeta = (await r.json()) as { authorization_servers?: string[] };
     }
   } catch {
     // ignore — fall through to origin-relative discovery
   }
 
-  const issuerCandidates = resourceMeta?.authorization_servers ?? [originOf(serverUrl)];
+  const issuerCandidates = resourceMeta?.authorization_servers ?? [
+    originOf(serverUrl)
+  ];
 
   for (const issuer of issuerCandidates) {
     const meta = await fetchAuthServerMetadata(issuer).catch(() => null);
@@ -252,7 +265,9 @@ async function discoverAuthServer(serverUrl: string): Promise<OAuthDiscovery> {
   );
 }
 
-async function fetchAuthServerMetadata(issuer: string): Promise<OAuthDiscovery> {
+async function fetchAuthServerMetadata(
+  issuer: string
+): Promise<OAuthDiscovery> {
   const base = issuer.replace(/\/+$/, "");
   const urls = [
     `${base}/.well-known/oauth-authorization-server`,
@@ -326,7 +341,10 @@ async function registerClient(
       `Dynamic Client Registration failed (HTTP ${res.status}): ${text || res.statusText}`
     );
   }
-  const json = (await res.json()) as { client_id: string; client_secret?: string };
+  const json = (await res.json()) as {
+    client_id: string;
+    client_secret?: string;
+  };
   if (!json.client_id) {
     throw new Error("Registration response missing client_id");
   }
@@ -337,7 +355,9 @@ async function registerClient(
 
 function generatePKCE(): { codeVerifier: string; codeChallenge: string } {
   const verifier = base64Url(crypto.randomBytes(32));
-  const challenge = base64Url(crypto.createHash("sha256").update(verifier).digest());
+  const challenge = base64Url(
+    crypto.createHash("sha256").update(verifier).digest()
+  );
   return { codeVerifier: verifier, codeChallenge: challenge };
 }
 
@@ -396,16 +416,15 @@ async function startLoopback(): Promise<{
       return;
     }
     if (!code) {
-      res.end(htmlMessage("Missing authorization code", "Try connecting again."));
+      res.end(
+        htmlMessage("Missing authorization code", "Try connecting again.")
+      );
       rejectCode?.(new Error("Missing authorization code"));
       return;
     }
     const state = url.searchParams.get("state") ?? "";
     res.end(
-      htmlMessage(
-        "Connected!",
-        "You can close this tab and return to VS Code."
-      )
+      htmlMessage("Connected!", "You can close this tab and return to VS Code.")
     );
     resolveCode?.(`${code}::${state}`);
   });

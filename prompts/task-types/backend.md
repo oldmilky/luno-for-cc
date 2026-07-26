@@ -28,7 +28,7 @@ Backend Risks must explicitly address each of these:
 - **Auth & permissions** — does the new code path enforce the same auth as the
   canonical example? Cite the middleware/check that proves it.
 - **Multi-tenancy / scoping** — confirm that new filter/query inputs cannot bypass
-  `storeId` / `tenantId` / `userId` scoping. A new range filter applied *before*
+  `storeId` / `tenantId` / `userId` scoping. A new range filter applied _before_
   the tenant `$match` is a security bug.
 - **Transaction boundaries** — for multi-write operations, where are the commit /
   rollback boundaries? What happens on partial failure?
@@ -38,7 +38,7 @@ Backend Risks must explicitly address each of these:
   array → `{data, pagination}`), this is breaking for every consumer. Flag
   consumers explicitly. Consider a feature flag or version bump.
 - **Performance under scale** — for new query shapes, state expected behavior
-  on the *largest* realistic dataset, not the current dev DB size.
+  on the _largest_ realistic dataset, not the current dev DB size.
 - **Index requirements** — for any new `$match`, `find`, or sort field, confirm
   an index exists or call out the index that needs to be added before this
   ships. For aggregation pipelines, note where in the pipeline the filter sits
@@ -61,7 +61,7 @@ Backend Risks must explicitly address each of these:
 
 If the plan would do any of these, call it out in Risks (or refuse and ask):
 
-- Filtering by user-controlled field *before* tenant scoping
+- Filtering by user-controlled field _before_ tenant scoping
 - Adding a range filter without a backing index on the underlying field
 - Changing a response shape without versioning or a feature flag
 - "Apply same pattern to all other widgets" without listing them — implicit

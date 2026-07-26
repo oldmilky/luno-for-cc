@@ -113,70 +113,70 @@ export function SkillsPicker({ skills }: SkillsPickerProps) {
         </Tooltip>
 
         <AnimatePresence>
-        {open && (
-          <motion.div
-            className={`${d.menu} ${d.left} ${d.above} ${s.menu}`}
-            role="dialog"
-            {...POPOVER_ABOVE}
-          >
-            <div className={s.head}>
-              <span className={s.title}>Skills</span>
-              <span className={s.sub}>
-                Tools and capabilities Luno can use this session.
-              </span>
-            </div>
+          {open && (
+            <motion.div
+              className={`${d.menu} ${d.left} ${d.above} ${s.menu}`}
+              role="dialog"
+              {...POPOVER_ABOVE}
+            >
+              <div className={s.head}>
+                <span className={s.title}>Skills</span>
+                <span className={s.sub}>
+                  Tools and capabilities Luno can use this session.
+                </span>
+              </div>
 
-            <div className={s.scroll}>
-              {grouped.tool.length > 0 && (
-                <SkillSection title="Built-in tools">
-                  {grouped.tool.map((sk) => (
-                    <SkillRow key={sk.id} skill={sk} />
-                  ))}
-                </SkillSection>
-              )}
-              {grouped.cli.length > 0 && (
-                <SkillSection title="Claude Code agent">
-                  {grouped.cli.map((sk) => (
-                    <SkillRow key={sk.id} skill={sk} />
-                  ))}
-                </SkillSection>
-              )}
-              {grouped.project.length > 0 && (
-                <SkillSection title="Project skills">
-                  {grouped.project.map((sk) => (
-                    <DiscoveredRow key={sk.id} skill={sk} />
-                  ))}
-                </SkillSection>
-              )}
-              {grouped.user.length > 0 && (
-                <SkillSection title="Your skills">
-                  {grouped.user.map((sk) => (
-                    <DiscoveredRow key={sk.id} skill={sk} />
-                  ))}
-                </SkillSection>
-              )}
-              {grouped.integration.length > 0 && (
-                <SkillSection title="Integrations">
-                  {grouped.integration.map((sk) => (
-                    <SkillRow key={sk.id} skill={sk} />
-                  ))}
-                </SkillSection>
-              )}
-            </div>
+              <div className={s.scroll}>
+                {grouped.tool.length > 0 && (
+                  <SkillSection title="Built-in tools">
+                    {grouped.tool.map((sk) => (
+                      <SkillRow key={sk.id} skill={sk} />
+                    ))}
+                  </SkillSection>
+                )}
+                {grouped.cli.length > 0 && (
+                  <SkillSection title="Claude Code agent">
+                    {grouped.cli.map((sk) => (
+                      <SkillRow key={sk.id} skill={sk} />
+                    ))}
+                  </SkillSection>
+                )}
+                {grouped.project.length > 0 && (
+                  <SkillSection title="Project skills">
+                    {grouped.project.map((sk) => (
+                      <DiscoveredRow key={sk.id} skill={sk} />
+                    ))}
+                  </SkillSection>
+                )}
+                {grouped.user.length > 0 && (
+                  <SkillSection title="Your skills">
+                    {grouped.user.map((sk) => (
+                      <DiscoveredRow key={sk.id} skill={sk} />
+                    ))}
+                  </SkillSection>
+                )}
+                {grouped.integration.length > 0 && (
+                  <SkillSection title="Integrations">
+                    {grouped.integration.map((sk) => (
+                      <SkillRow key={sk.id} skill={sk} />
+                    ))}
+                  </SkillSection>
+                )}
+              </div>
 
-            <div className={s.foot}>
-              <button
-                type="button"
-                className={s.addBtn}
-                onClick={() => setMarketOpen(true)}
-              >
-                <Icon name="plus" size={11} />
-                Add skills
-              </button>
-              <span className={s.footHint}>{totalEnabled} enabled</span>
-            </div>
-          </motion.div>
-        )}
+              <div className={s.foot}>
+                <button
+                  type="button"
+                  className={s.addBtn}
+                  onClick={() => setMarketOpen(true)}
+                >
+                  <Icon name="plus" size={11} />
+                  Add skills
+                </button>
+                <span className={s.footHint}>{totalEnabled} enabled</span>
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 
@@ -219,7 +219,11 @@ function SkillRow({ skill }: { skill: SkillInfo }) {
         <div className={s.rowDesc}>{skill.description}</div>
       </div>
       <span className={`${s.rowState}${skill.enabled ? ` ${s.on}` : ""}`}>
-        {skill.enabled ? <Icon name="check" size={11} /> : <Icon name="x" size={11} />}
+        {skill.enabled ? (
+          <Icon name="check" size={11} />
+        ) : (
+          <Icon name="x" size={11} />
+        )}
       </span>
     </div>
   );
@@ -253,7 +257,11 @@ function DiscoveredRow({ skill }: { skill: SkillInfo }) {
         <Switch
           checked={skill.enabled}
           onChange={() =>
-            send({ type: "setSkillEnabled", id: skill.id, enabled: !skill.enabled })
+            send({
+              type: "setSkillEnabled",
+              id: skill.id,
+              enabled: !skill.enabled
+            })
           }
           label={skill.name}
         />

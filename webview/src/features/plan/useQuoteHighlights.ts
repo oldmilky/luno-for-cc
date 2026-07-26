@@ -37,8 +37,7 @@ export interface QuoteEntry {
   preview?: string;
 }
 
-const BLOCK_SELECTOR =
-  "p, li, blockquote, h1, h2, h3, h4, h5, h6, pre, td, dd";
+const BLOCK_SELECTOR = "p, li, blockquote, h1, h2, h3, h4, h5, h6, pre, td, dd";
 
 export function useQuoteHighlights(
   containerRef: RefObject<HTMLElement | null>,

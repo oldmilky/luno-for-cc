@@ -1,5 +1,10 @@
 import * as vscode from "vscode";
-import { TimelineEvent, PlanCommentMeta, PlanRevisionMeta, PlanTask } from "../core/types.js";
+import {
+  TimelineEvent,
+  PlanCommentMeta,
+  PlanRevisionMeta,
+  PlanTask
+} from "../core/types.js";
 
 /**
  * Mirrors plan_comment quotes and the active plan step into VS Code editor
@@ -42,7 +47,9 @@ export class PlanDecorationService {
   /** Recompute decorations for every visible editor based on the current timeline. */
   syncFromTimeline(timeline: TimelineEvent[]): void {
     const latestRevision = lastRevision(timeline);
-    const activeTask = latestRevision ? findActiveTask(latestRevision) : undefined;
+    const activeTask = latestRevision
+      ? findActiveTask(latestRevision)
+      : undefined;
     const liveComments = collectLiveComments(timeline);
 
     for (const editor of vscode.window.visibleTextEditors) {
@@ -53,7 +60,9 @@ export class PlanDecorationService {
   /** Re-apply decorations to a single editor (called on editor switch). */
   refreshEditor(editor: vscode.TextEditor, timeline: TimelineEvent[]): void {
     const latestRevision = lastRevision(timeline);
-    const activeTask = latestRevision ? findActiveTask(latestRevision) : undefined;
+    const activeTask = latestRevision
+      ? findActiveTask(latestRevision)
+      : undefined;
     const liveComments = collectLiveComments(timeline);
     this.applyToEditor(editor, liveComments, latestRevision, activeTask);
   }
@@ -96,11 +105,17 @@ export class PlanDecorationService {
       for (const ref of activeTask.fileRefs) {
         if (ref.path !== docPath) continue;
         const startLine = Math.max(0, ref.startLine - 1);
-        const endLine = Math.min(editor.document.lineCount - 1, ref.endLine - 1);
+        const endLine = Math.min(
+          editor.document.lineCount - 1,
+          ref.endLine - 1
+        );
         if (endLine < startLine) continue;
         const range = new vscode.Range(
           new vscode.Position(startLine, 0),
-          new vscode.Position(endLine, editor.document.lineAt(endLine).text.length)
+          new vscode.Position(
+            endLine,
+            editor.document.lineAt(endLine).text.length
+          )
         );
         activeRanges.push({
           range,

@@ -156,6 +156,7 @@ export function makeNonce(): string {
   const chars =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let n = "";
-  for (let i = 0; i < 32; i++) n += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < 32; i++)
+    n += chars[Math.floor(Math.random() * chars.length)];
   return n;
 }

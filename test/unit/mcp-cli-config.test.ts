@@ -29,7 +29,11 @@ describe("parseManagedServers (import Claude Code's own MCP servers)", () => {
       mcpServers: { team: { type: "sse", url: "https://team.example.com/sse" } }
     };
 
-    const servers = parseManagedServers({ claudeJson, projectMcpJson, cwd: "/work/app" });
+    const servers = parseManagedServers({
+      claudeJson,
+      projectMcpJson,
+      cwd: "/work/app"
+    });
     const byName = Object.fromEntries(servers.map((s) => [s.name, s]));
 
     expect(byName.figma).toMatchObject({
@@ -56,15 +60,25 @@ describe("parseManagedServers (import Claude Code's own MCP servers)", () => {
         }
       }
     });
-    const byName = Object.fromEntries(servers.map((s) => [s.name, s.transport]));
-    expect(byName).toEqual({ a: "streamable-http", b: "streamable-http", c: "sse" });
+    const byName = Object.fromEntries(
+      servers.map((s) => [s.name, s.transport])
+    );
+    expect(byName).toEqual({
+      a: "streamable-http",
+      b: "streamable-http",
+      c: "sse"
+    });
   });
 
   it("captures remote headers and stdio env (used to fetch the tool list)", () => {
     const servers = parseManagedServers({
       claudeJson: {
         mcpServers: {
-          fig: { type: "http", url: "https://h/mcp", headers: { Authorization: "Bearer x" } },
+          fig: {
+            type: "http",
+            url: "https://h/mcp",
+            headers: { Authorization: "Bearer x" }
+          },
           loc: { command: "node", env: { API_KEY: "k" } }
         }
       }
@@ -77,7 +91,9 @@ describe("parseManagedServers (import Claude Code's own MCP servers)", () => {
   it("ignores headers/env whose values aren't all strings", () => {
     const servers = parseManagedServers({
       claudeJson: {
-        mcpServers: { x: { type: "http", url: "https://h/mcp", headers: { A: 1 } } }
+        mcpServers: {
+          x: { type: "http", url: "https://h/mcp", headers: { A: 1 } }
+        }
       }
     });
     expect(servers[0].headers).toBeUndefined();
@@ -87,7 +103,9 @@ describe("parseManagedServers (import Claude Code's own MCP servers)", () => {
     // Url-only, no type — mirrors what `claude` v2.1.150 refuses to load, so we
     // don't surface a phantom 'connected' card for a server that won't run.
     expect(
-      parseManagedServers({ claudeJson: { mcpServers: { x: { url: "https://h.com/sse" } } } })
+      parseManagedServers({
+        claudeJson: { mcpServers: { x: { url: "https://h.com/sse" } } }
+      })
     ).toEqual([]);
   });
 
@@ -96,7 +114,9 @@ describe("parseManagedServers (import Claude Code's own MCP servers)", () => {
     // local scope — both must surface so each can be managed independently.
     const servers = parseManagedServers({
       claudeJson: {
-        mcpServers: { figma: { type: "http", url: "https://global.example.com/mcp" } },
+        mcpServers: {
+          figma: { type: "http", url: "https://global.example.com/mcp" }
+        },
         projects: { "/p": { mcpServers: { figma: { command: "local-cmd" } } } }
       },
       cwd: "/p"
@@ -114,9 +134,15 @@ describe("parseManagedServers (import Claude Code's own MCP servers)", () => {
 
   it("ignores unrecognized shapes and non-object input", () => {
     expect(parseManagedServers({})).toEqual([]);
-    expect(parseManagedServers({ claudeJson: { mcpServers: { bad: {} } } })).toEqual([]);
-    expect(parseManagedServers({ claudeJson: "garbage" as unknown })).toEqual([]);
-    expect(parseManagedServers({ claudeJson: { mcpServers: null } })).toEqual([]);
+    expect(
+      parseManagedServers({ claudeJson: { mcpServers: { bad: {} } } })
+    ).toEqual([]);
+    expect(parseManagedServers({ claudeJson: "garbage" as unknown })).toEqual(
+      []
+    );
+    expect(parseManagedServers({ claudeJson: { mcpServers: null } })).toEqual(
+      []
+    );
   });
 });
 
@@ -153,7 +179,9 @@ describe("parseClaudeMcpList (status from `claude mcp list`)", () => {
 
   it("skips header and diagnostic lines (no recognizable status)", () => {
     const servers = parseClaudeMcpList(SAMPLE);
-    expect(servers.map((s) => s.name)).not.toContain("Checking MCP server health…");
+    expect(servers.map((s) => s.name)).not.toContain(
+      "Checking MCP server health…"
+    );
     expect(servers).toHaveLength(4);
   });
 
@@ -165,12 +193,37 @@ describe("parseClaudeMcpList (status from `claude mcp list`)", () => {
 
 describe("endpointMatchesUrl", () => {
   it("matches identical and (HTTP)-suffixed endpoints, ignoring trailing slash", () => {
-    expect(endpointMatchesUrl("https://mcp.figma.com/mcp", "https://mcp.figma.com/mcp")).toBe(true);
-    expect(endpointMatchesUrl("https://mcp.figma.com/mcp (HTTP)", "https://mcp.figma.com/mcp")).toBe(true);
-    expect(endpointMatchesUrl("https://mcp.figma.com/mcp/", "https://mcp.figma.com/mcp")).toBe(true);
+    expect(
+      endpointMatchesUrl(
+        "https://mcp.figma.com/mcp",
+        "https://mcp.figma.com/mcp"
+      )
+    ).toBe(true);
+    expect(
+      endpointMatchesUrl(
+        "https://mcp.figma.com/mcp (HTTP)",
+        "https://mcp.figma.com/mcp"
+      )
+    ).toBe(true);
+    expect(
+      endpointMatchesUrl(
+        "https://mcp.figma.com/mcp/",
+        "https://mcp.figma.com/mcp"
+      )
+    ).toBe(true);
   });
   it("rejects different hosts/paths", () => {
-    expect(endpointMatchesUrl("https://mcp.canva.com/mcp", "https://mcp.figma.com/mcp")).toBe(false);
-    expect(endpointMatchesUrl("https://mcp.figma.com/other", "https://mcp.figma.com/mcp")).toBe(false);
+    expect(
+      endpointMatchesUrl(
+        "https://mcp.canva.com/mcp",
+        "https://mcp.figma.com/mcp"
+      )
+    ).toBe(false);
+    expect(
+      endpointMatchesUrl(
+        "https://mcp.figma.com/other",
+        "https://mcp.figma.com/mcp"
+      )
+    ).toBe(false);
   });
 });

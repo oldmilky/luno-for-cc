@@ -4,7 +4,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
 
-import { getModePrompt, getTaskTypePrompt } from "../../src/services/prompt-loader.js";
+import {
+  getModePrompt,
+  getTaskTypePrompt
+} from "../../src/services/prompt-loader.js";
 
 describe("getModePrompt", () => {
   it("returns non-empty content for each mode", () => {
@@ -33,7 +36,13 @@ describe("getTaskTypePrompt", () => {
   });
 
   it("returns content for each task type", () => {
-    for (const t of ["backend", "frontend", "integration", "docs-driven", "refactor"] as const) {
+    for (const t of [
+      "backend",
+      "frontend",
+      "integration",
+      "docs-driven",
+      "refactor"
+    ] as const) {
       const md = getTaskTypePrompt(t);
       expect(md).toBeTruthy();
       expect(md!.length).toBeGreaterThan(0);
@@ -70,7 +79,10 @@ describe("LUNO_PROMPTS_DIR override", () => {
 
   it("reads task-type prompt from disk when env var is set", () => {
     fs.mkdirSync(path.join(tmpDir, "task-types"));
-    fs.writeFileSync(path.join(tmpDir, "task-types", "backend.md"), "OVERRIDE_BACKEND");
+    fs.writeFileSync(
+      path.join(tmpDir, "task-types", "backend.md"),
+      "OVERRIDE_BACKEND"
+    );
     process.env.LUNO_PROMPTS_DIR = tmpDir;
     expect(getTaskTypePrompt("backend")).toBe("OVERRIDE_BACKEND");
   });

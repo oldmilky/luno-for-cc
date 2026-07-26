@@ -36,7 +36,10 @@ type InstallState =
   | { phase: "busy"; scope: "user" | "project" }
   | { phase: "done"; ok: boolean; text: string };
 
-export function SkillDetailModal({ skillName, onClose }: SkillDetailModalProps) {
+export function SkillDetailModal({
+  skillName,
+  onClose
+}: SkillDetailModalProps) {
   const [state, setState] = useState<DetailState>({ status: "loading" });
   const [install, setInstall] = useState<InstallState>({ phase: "idle" });
 
@@ -49,8 +52,12 @@ export function SkillDetailModal({ skillName, onClose }: SkillDetailModalProps) 
         } else {
           setState({ status: "ready", skill: m.skill, content: m.content });
         }
-      } else if (m.type === "marketplaceInstallResult" && m.name === skillName) {
-        const scopeLabel = m.scope === "user" ? "globally" : "for this workspace";
+      } else if (
+        m.type === "marketplaceInstallResult" &&
+        m.name === skillName
+      ) {
+        const scopeLabel =
+          m.scope === "user" ? "globally" : "for this workspace";
         if (m.action === "install") {
           setInstall({
             phase: "done",
@@ -114,9 +121,7 @@ export function SkillDetailModal({ skillName, onClose }: SkillDetailModalProps) 
             <Icon name="bolt" size={20} />
           </div>
           <div className={s.titles}>
-            <h2 className={s.title}>
-              {skill?.name ?? skillName}
-            </h2>
+            <h2 className={s.title}>{skill?.name ?? skillName}</h2>
             <div className={s.meta}>
               {skill?.author && <span>@{skill.author}</span>}
               {skill && skill.installs > 0 && (
@@ -158,9 +163,7 @@ export function SkillDetailModal({ skillName, onClose }: SkillDetailModalProps) 
           ) : (
             <>
               {skill?.description && (
-                <p className={s.desc}>
-                  {skill.description}
-                </p>
+                <p className={s.desc}>{skill.description}</p>
               )}
               {state.content ? (
                 <div className={`md ${s.markdown}`}>
@@ -182,7 +185,9 @@ export function SkillDetailModal({ skillName, onClose }: SkillDetailModalProps) 
               <button
                 type="button"
                 className={s.btn}
-                onClick={() => send({ type: "openExternal", url: skill.sourceUrl })}
+                onClick={() =>
+                  send({ type: "openExternal", url: skill.sourceUrl })
+                }
               >
                 <Icon name="book" size={12} />
                 Source ↗

@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { CURATED_CATALOG, findCatalog } from "../../src/services/mcp/catalog.js";
+import {
+  CURATED_CATALOG,
+  findCatalog
+} from "../../src/services/mcp/catalog.js";
 
 describe("mcp catalog", () => {
   it("findCatalog returns the entry for a known id", () => {
@@ -19,7 +22,9 @@ describe("mcp catalog", () => {
   it("uses https endpoints for every remote connector", () => {
     for (const c of CURATED_CATALOG) {
       if (c.transport === "stdio") continue; // local presets have no url
-      expect(c.url?.startsWith("https://"), `${c.id} url should be https`).toBe(true);
+      expect(c.url?.startsWith("https://"), `${c.id} url should be https`).toBe(
+        true
+      );
     }
   });
 

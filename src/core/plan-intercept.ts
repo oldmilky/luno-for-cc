@@ -10,7 +10,11 @@ import {
   TimelineEvent
 } from "./types.js";
 
-export const PLAN_TOOL_NAMES = new Set(["ExitPlanMode", "TodoWrite", "AskUserQuestion"]);
+export const PLAN_TOOL_NAMES = new Set([
+  "ExitPlanMode",
+  "TodoWrite",
+  "AskUserQuestion"
+]);
 
 /**
  * Tool names that write file content. The CLI's plan-mode workflow writes
@@ -32,8 +36,10 @@ const WRITE_TOOL_NAMES = new Set([
 // Update, Put, Insert) or contain such a verb at a snake_case / kebab-case
 // boundary. Allows PascalCase suffixes (WritePlan, EditFile) by treating an
 // uppercase letter after the verb as a valid boundary too.
-const WRITE_TOOL_NAME_RE_PREFIX = /^(write|edit|create|save|update|put|insert)(?:$|[_-]|[A-Z])/i;
-const WRITE_TOOL_NAME_RE_BOUNDARY = /[_-](write|edit|create|save|update|put|insert)(?:$|[_-]|[A-Z])/i;
+const WRITE_TOOL_NAME_RE_PREFIX =
+  /^(write|edit|create|save|update|put|insert)(?:$|[_-]|[A-Z])/i;
+const WRITE_TOOL_NAME_RE_BOUNDARY =
+  /[_-](write|edit|create|save|update|put|insert)(?:$|[_-]|[A-Z])/i;
 
 function isWriteToolName(name: string): boolean {
   return (
@@ -77,13 +83,21 @@ interface PendingPlan {
 export class PlanInterceptor {
   private pending: PendingPlan = {};
   /** Plan-file writes seen this turn, by toolUseId, in arrival order. */
-  private planFileWrites: Array<{ toolUseId: string; path: string; content: string }> = [];
+  private planFileWrites: Array<{
+    toolUseId: string;
+    path: string;
+    content: string;
+  }> = [];
   readonly interceptedToolIds = new Set<string>();
 
   constructor(private session: Session) {}
 
   /** Returns true if this tool_use was a plan-related event we handled. */
-  consume(name: string, toolUseId: string, input: Record<string, unknown>): boolean {
+  consume(
+    name: string,
+    toolUseId: string,
+    input: Record<string, unknown>
+  ): boolean {
     // Snoop plan-file writes so ExitPlanMode can recover the plan body
     // from the file the CLI just wrote (its actual plan-mode workflow).
     if (isWriteToolName(name)) {
@@ -175,7 +189,11 @@ export class PlanInterceptor {
    * for the CLI's actual plan-mode workflow where the body lives in the
    * file and ExitPlanMode (when called) carries no plan field.
    */
-  private emitFileBackedRevision(planFilePath: string, body: string, toolUseId: string): void {
+  private emitFileBackedRevision(
+    planFilePath: string,
+    body: string,
+    toolUseId: string
+  ): void {
     const prior = priorRevision(this.session.timeline);
     const meta: PlanRevisionMeta = {
       revisionId: randomUUID(),
@@ -318,15 +336,17 @@ export function parseBashHeredocWrite(
   // We support both by trying redirect-after-path first, then path-after-heredoc.
 
   // cat > path <<MARKER  /  cat >> path <<MARKER  /  tee path <<MARKER
-  let m = /(?:cat|tee)\s+(?:-a\s+)?(?:>+\s*)?(\S+\.(?:md|markdown))\s*<<-?\s*['"]?(\w+)['"]?\s*\n([\s\S]*?)\n\2\s*$/m.exec(
-    cmd
-  );
+  let m =
+    /(?:cat|tee)\s+(?:-a\s+)?(?:>+\s*)?(\S+\.(?:md|markdown))\s*<<-?\s*['"]?(\w+)['"]?\s*\n([\s\S]*?)\n\2\s*$/m.exec(
+      cmd
+    );
   if (m) return { path: m[1], content: m[3] };
 
   // cat <<MARKER > path  ...  MARKER  (heredoc declared before redirect)
-  m = /cat\s+<<-?\s*['"]?(\w+)['"]?\s*>+\s*(\S+\.(?:md|markdown))\s*\n([\s\S]*?)\n\1\s*$/m.exec(
-    cmd
-  );
+  m =
+    /cat\s+<<-?\s*['"]?(\w+)['"]?\s*>+\s*(\S+\.(?:md|markdown))\s*\n([\s\S]*?)\n\1\s*$/m.exec(
+      cmd
+    );
   if (m) return { path: m[2], content: m[3] };
 
   return null;
@@ -397,7 +417,8 @@ function parseTasks(input: Record<string, unknown>): PlanTask[] {
  * Filters extensions to a known programming/markup set so we don't catch
  * stray "phase 1.0" or version numbers. Dedupes by path+range.
  */
-const FILE_EXT = "(?:ts|tsx|js|jsx|mjs|cjs|json|md|markdown|rs|py|go|java|kt|c|h|cc|hh|cpp|hpp|cs|rb|php|swift|sh|bash|yml|yaml|toml|html|css|scss|less|sql|graphql|gql|proto|tf|env|gitignore|dockerfile)";
+const FILE_EXT =
+  "(?:ts|tsx|js|jsx|mjs|cjs|json|md|markdown|rs|py|go|java|kt|c|h|cc|hh|cpp|hpp|cs|rb|php|swift|sh|bash|yml|yaml|toml|html|css|scss|less|sql|graphql|gql|proto|tf|env|gitignore|dockerfile)";
 const MD_LINK_RE = /\[([^\]]+)\]\(([^)\s]+)\)/g;
 const BARE_RE = new RegExp(
   `(?:^|[\\s\`(\\[])((?:[\\w./-]+/)?[\\w.-]+\\.${FILE_EXT})(?::(\\d+)(?:[\\u2013\\u2014-](\\d+))?)?`,
@@ -437,12 +458,20 @@ function parseRef(target: string, label?: string): PlanTaskFileRef | null {
   // Path may be "foo/bar.ts" or "foo/bar.ts:42-58"
   const cleaned = target.replace(/^`+|`+$/g, "");
   const m = cleaned.match(
-    new RegExp(`^((?:[\\w./-]+/)?[\\w.-]+\\.${FILE_EXT})(?::(\\d+)(?:-(\\d+))?)?$`, "i")
+    new RegExp(
+      `^((?:[\\w./-]+/)?[\\w.-]+\\.${FILE_EXT})(?::(\\d+)(?:-(\\d+))?)?$`,
+      "i"
+    )
   );
   if (!m) return null;
   const start = m[2] ? parseInt(m[2], 10) : 1;
   const end = m[3] ? parseInt(m[3], 10) : start;
-  return { path: m[1], startLine: start, endLine: end, ...(label ? { label } : {}) };
+  return {
+    path: m[1],
+    startLine: start,
+    endLine: end,
+    ...(label ? { label } : {})
+  };
 }
 
 function addUnique(seen: Set<string>, ref: PlanTaskFileRef): boolean {
@@ -469,7 +498,8 @@ function parseQuestions(input: Record<string, unknown>): PlanQuestionEntry[] {
         const obj = (o ?? {}) as Record<string, unknown>;
         return {
           label: String(obj.label ?? ""),
-          description: typeof obj.description === "string" ? obj.description : undefined
+          description:
+            typeof obj.description === "string" ? obj.description : undefined
         };
       });
       return {
@@ -482,7 +512,9 @@ function parseQuestions(input: Record<string, unknown>): PlanQuestionEntry[] {
     .filter((x): x is PlanQuestionEntry => x !== null);
 }
 
-function priorRevision(timeline: TimelineEvent[]): PlanRevisionMeta | undefined {
+function priorRevision(
+  timeline: TimelineEvent[]
+): PlanRevisionMeta | undefined {
   for (let i = timeline.length - 1; i >= 0; i--) {
     const e = timeline[i];
     if (e.kind === "plan_revision" && e.meta) {

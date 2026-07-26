@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { PlanInterceptor, extractFileRefs } from "../../src/core/plan-intercept.js";
+import {
+  PlanInterceptor,
+  extractFileRefs
+} from "../../src/core/plan-intercept.js";
 import { Session } from "../../src/core/session.js";
 import { PlanRevisionMeta } from "../../src/core/types.js";
 
@@ -21,7 +24,9 @@ describe("PlanInterceptor", () => {
 
   it("emits a single plan_revision when ExitPlanMode arrives alone", () => {
     const p = new PlanInterceptor(session);
-    expect(p.consume("ExitPlanMode", "tu_1", { plan: "## Plan\n- step a" })).toBe(true);
+    expect(
+      p.consume("ExitPlanMode", "tu_1", { plan: "## Plan\n- step a" })
+    ).toBe(true);
     p.flush();
 
     const revs = session.timeline.filter((e) => e.kind === "plan_revision");
@@ -39,7 +44,12 @@ describe("PlanInterceptor", () => {
     p.consume("ExitPlanMode", "tu_1", { plan: "Body" });
     p.consume("TodoWrite", "tu_2", {
       todos: [
-        { id: "t1", content: "Do thing", activeForm: "Doing thing", status: "pending" }
+        {
+          id: "t1",
+          content: "Do thing",
+          activeForm: "Doing thing",
+          status: "pending"
+        }
       ]
     });
     p.flush();
@@ -57,13 +67,17 @@ describe("PlanInterceptor", () => {
     const p1 = new PlanInterceptor(session);
     p1.consume("ExitPlanMode", "tu_1", { plan: "Initial body" });
     p1.consume("TodoWrite", "tu_2", {
-      todos: [{ id: "t1", content: "a", activeForm: "doing a", status: "pending" }]
+      todos: [
+        { id: "t1", content: "a", activeForm: "doing a", status: "pending" }
+      ]
     });
     p1.flush();
 
     const p2 = new PlanInterceptor(session);
     p2.consume("TodoWrite", "tu_3", {
-      todos: [{ id: "t1", content: "a", activeForm: "doing a", status: "completed" }]
+      todos: [
+        { id: "t1", content: "a", activeForm: "doing a", status: "completed" }
+      ]
     });
 
     const revs = session.timeline.filter((e) => e.kind === "plan_revision");
@@ -95,7 +109,9 @@ describe("PlanInterceptor", () => {
     expect(handled).toBe(true);
     const qs = session.timeline.filter((e) => e.kind === "plan_question");
     expect(qs).toHaveLength(1);
-    const meta = qs[0].meta as unknown as { questions: Array<{ question: string }> };
+    const meta = qs[0].meta as unknown as {
+      questions: Array<{ question: string }>;
+    };
     expect(meta.questions[0].question).toBe("Which DB?");
     expect(p.interceptedToolIds.has("tu_q")).toBe(true);
   });
@@ -106,7 +122,9 @@ describe("PlanInterceptor", () => {
   });
 
   it("extractFileRefs dedupes identical paths and ranges", () => {
-    const refs = extractFileRefs("foo/bar.ts:5-9 mentioned earlier; revisit foo/bar.ts:5-9.");
+    const refs = extractFileRefs(
+      "foo/bar.ts:5-9 mentioned earlier; revisit foo/bar.ts:5-9."
+    );
     expect(refs).toHaveLength(1);
     expect(refs[0]).toEqual({ path: "foo/bar.ts", startLine: 5, endLine: 9 });
   });
@@ -163,13 +181,18 @@ describe("PlanInterceptor", () => {
 
     const revs = session.timeline.filter((e) => e.kind === "plan_revision");
     expect(revs).toHaveLength(1); // the Write produced one; ExitPlanMode adds nothing
-    expect((revs[0].meta as unknown as PlanRevisionMeta).body).toBe("# Strategy");
+    expect((revs[0].meta as unknown as PlanRevisionMeta).body).toBe(
+      "# Strategy"
+    );
   });
 
   it("does not snoop writes to non-plan files", () => {
     const p = new PlanInterceptor(session);
     expect(
-      p.consume("Write", "tu_w", { file_path: "src/foo.ts", content: "// code" })
+      p.consume("Write", "tu_w", {
+        file_path: "src/foo.ts",
+        content: "// code"
+      })
     ).toBe(false);
     expect(p.interceptedToolIds.size).toBe(0);
   });
@@ -186,7 +209,8 @@ describe("PlanInterceptor", () => {
         },
         {
           id: "t2",
-          content: "Refactor [Open foo](src/lib/foo.ts) and tweak src/lib/bar.ts:5",
+          content:
+            "Refactor [Open foo](src/lib/foo.ts) and tweak src/lib/bar.ts:5",
           activeForm: "Refactoring",
           status: "pending"
         }
@@ -207,7 +231,9 @@ describe("PlanInterceptor", () => {
   it("malformed JSON inputs degrade gracefully", () => {
     const p = new PlanInterceptor(session);
     p.consume("ExitPlanMode", "tu_1", {});
-    p.consume("TodoWrite", "tu_2", { todos: "not-an-array" } as unknown as Record<string, unknown>);
+    p.consume("TodoWrite", "tu_2", {
+      todos: "not-an-array"
+    } as unknown as Record<string, unknown>);
     p.flush();
     const meta = lastRevision(session);
     expect(meta).toBeDefined();

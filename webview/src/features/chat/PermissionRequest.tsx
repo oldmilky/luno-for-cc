@@ -31,7 +31,10 @@ interface PermissionRequestProps {
 
 const BASH_TOOLS = /^(bash|shell|run|exec|terminal)/i;
 
-export function PermissionRequest({ request, onRespond }: PermissionRequestProps) {
+export function PermissionRequest({
+  request,
+  onRespond
+}: PermissionRequestProps) {
   const allowRef = useRef<HTMLButtonElement>(null);
   const denyRef = useRef<HTMLButtonElement>(null);
   const destructive = request.destructive === true;
@@ -49,7 +52,8 @@ export function PermissionRequest({ request, onRespond }: PermissionRequestProps
   }, [request]);
 
   const command =
-    BASH_TOOLS.test(request.toolName) && typeof request.input?.command === "string"
+    BASH_TOOLS.test(request.toolName) &&
+    typeof request.input?.command === "string"
       ? (request.input.command as string)
       : null;
   const isEdit = edits.length > 0;
@@ -60,7 +64,13 @@ export function PermissionRequest({ request, onRespond }: PermissionRequestProps
     (sug) => sug.type === "setMode" && typeof sug.mode === "string"
   );
 
-  const title = describe(isEdit, isCommand, destructive, network, request.toolName);
+  const title = describe(
+    isEdit,
+    isCommand,
+    destructive,
+    network,
+    request.toolName
+  );
 
   // Focus a button on mount so the scoped shortcuts work right away. For
   // destructive calls focus DENY so a reflexive Enter rejects.
@@ -106,7 +116,11 @@ export function PermissionRequest({ request, onRespond }: PermissionRequestProps
         {isEdit ? (
           <div className={s.edits}>
             {edits.map((entry) => (
-              <InlineEditPreview key={entry.id} entry={entry} onOpenFull={() => undefined} />
+              <InlineEditPreview
+                key={entry.id}
+                entry={entry}
+                onOpenFull={() => undefined}
+              />
             ))}
           </div>
         ) : isCommand ? (

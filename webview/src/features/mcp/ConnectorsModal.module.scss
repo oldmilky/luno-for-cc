@@ -549,7 +549,8 @@
   font-size: 12px;
   font-weight: 600;
   transform: translateX(-50%);
-  box-shadow: 0 6px 24px color-mix(in srgb, var(--shadow-color) 35%, transparent);
+  box-shadow: 0 6px 24px
+    color-mix(in srgb, var(--shadow-color) 35%, transparent);
   animation: connectors-toast-in var(--motion-enter) var(--ease-out);
 }
 

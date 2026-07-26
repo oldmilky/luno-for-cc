@@ -182,7 +182,11 @@ function knownInstallDirs(): string[] {
   if (process.platform === "win32") {
     if (process.env.APPDATA) dirs.push(path.join(process.env.APPDATA, "npm"));
   } else {
-    dirs.push(path.join(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin");
+    dirs.push(
+      path.join(home, ".local", "bin"),
+      "/opt/homebrew/bin",
+      "/usr/local/bin"
+    );
   }
   return dirs;
 }

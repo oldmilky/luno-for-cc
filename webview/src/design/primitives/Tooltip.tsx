@@ -136,7 +136,10 @@ export function Tooltip({
     pending = hideRef.current;
     window.clearTimeout(timer.current);
     const warm = Date.now() - lastHiddenAt < TOOLTIP_GRACE_MS;
-    timer.current = window.setTimeout(() => setOpen(true), warm ? 0 : TOOLTIP_DELAY_MS);
+    timer.current = window.setTimeout(
+      () => setOpen(true),
+      warm ? 0 : TOOLTIP_DELAY_MS
+    );
   }, [disabled]);
 
   useEffect(

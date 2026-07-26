@@ -13,7 +13,12 @@ interface ContextStripProps {
   onUnpin: () => void;
 }
 
-export function ContextStrip({ context, pinned, onPin, onUnpin }: ContextStripProps) {
+export function ContextStrip({
+  context,
+  pinned,
+  onPin,
+  onUnpin
+}: ContextStripProps) {
   if (!context) return null;
   const fileName = context.file.split("/").pop() ?? context.file;
   const sel = context.selection;
@@ -35,15 +40,12 @@ export function ContextStrip({ context, pinned, onPin, onUnpin }: ContextStripPr
         >
           <Icon name="file" size={11} className={bits.stripIcon} />
           <span className={bits.stripName}>{fileName}</span>
-          <span className={bits.stripLang}>
-            {context.language}
-          </span>
+          <span className={bits.stripLang}>{context.language}</span>
         </button>
       </Tooltip>
       {sel && (
         <span className={bits.stripSelection}>
-          <Icon name="code" size={10} />
-          L{sel.startLine}
+          <Icon name="code" size={10} />L{sel.startLine}
           {sel.endLine !== sel.startLine && `–${sel.endLine}`}
         </span>
       )}

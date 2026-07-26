@@ -52,7 +52,10 @@ describe("foldPlanState", () => {
     const [view] = foldPlanState(events);
     expect(view.rootComments).toHaveLength(2);
     expect(view.rootComments[0].commentId).toBe("c1");
-    expect(view.rootComments[0].replies.map((r) => r.commentId)).toEqual(["c2", "c3"]);
+    expect(view.rootComments[0].replies.map((r) => r.commentId)).toEqual([
+      "c2",
+      "c3"
+    ]);
     expect(view.rootComments[1].commentId).toBe("c4");
     expect(view.rootComments[1].replies).toEqual([]);
     // Flat list still has all four (legacy contract).
@@ -61,7 +64,12 @@ describe("foldPlanState", () => {
 
   it("filters soft-deleted comments out of the rendered view", () => {
     const events: TimelineEvent[] = [
-      ev("plan_revision", { revisionId: "r1", body: "", tasks: [], bodyChanged: true }),
+      ev("plan_revision", {
+        revisionId: "r1",
+        body: "",
+        tasks: [],
+        bodyChanged: true
+      }),
       ev("plan_comment", {
         commentId: "c1",
         revisionId: "r1",
@@ -82,7 +90,12 @@ describe("foldPlanState", () => {
 
   it("orphan replies (parent missing) get promoted to root", () => {
     const events: TimelineEvent[] = [
-      ev("plan_revision", { revisionId: "r1", body: "", tasks: [], bodyChanged: true }),
+      ev("plan_revision", {
+        revisionId: "r1",
+        body: "",
+        tasks: [],
+        bodyChanged: true
+      }),
       ev("plan_comment", {
         commentId: "child",
         revisionId: "r1",

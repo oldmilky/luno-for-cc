@@ -119,7 +119,8 @@ export const CURATED_CATALOG: ReadonlyArray<CatalogEntry> = [
     id: "asana",
     name: "Asana",
     vendor: "asana.com",
-    description: "Browse projects and tasks, post comments, mark work complete.",
+    description:
+      "Browse projects and tasks, post comments, mark work complete.",
     url: "https://mcp.asana.com/sse",
     transport: "sse",
     categories: ["productivity"],
@@ -155,7 +156,8 @@ export const CURATED_CATALOG: ReadonlyArray<CatalogEntry> = [
     id: "paypal",
     name: "PayPal",
     vendor: "paypal.com",
-    description: "Read transactions, refunds, and invoices in your PayPal account.",
+    description:
+      "Read transactions, refunds, and invoices in your PayPal account.",
     url: "https://mcp.paypal.com/sse",
     transport: "sse",
     categories: ["commerce", "finance"],
@@ -180,7 +182,8 @@ export const CURATED_CATALOG: ReadonlyArray<CatalogEntry> = [
     id: "stripe",
     name: "Stripe",
     vendor: "stripe.com",
-    description: "Look up customers, charges, and invoices in your Stripe account.",
+    description:
+      "Look up customers, charges, and invoices in your Stripe account.",
     url: "https://mcp.stripe.com/",
     transport: "streamable-http",
     categories: ["commerce", "finance"],
@@ -197,7 +200,8 @@ export const CURATED_CATALOG: ReadonlyArray<CatalogEntry> = [
     transport: "sse",
     categories: ["infra", "devops"],
     icon: "cloud",
-    homepage: "https://developers.cloudflare.com/agents/model-context-protocol/",
+    homepage:
+      "https://developers.cloudflare.com/agents/model-context-protocol/",
     builtIn: true
   },
   // ── claude.ai first-party connectors ────────────────────────
@@ -218,7 +222,8 @@ export const CURATED_CATALOG: ReadonlyArray<CatalogEntry> = [
     id: "figma",
     name: "Figma",
     vendor: "figma.com",
-    description: "Read designs, frames, components, and variables from your Figma files.",
+    description:
+      "Read designs, frames, components, and variables from your Figma files.",
     url: "https://mcp.figma.com/mcp",
     transport: "streamable-http",
     categories: ["design"],

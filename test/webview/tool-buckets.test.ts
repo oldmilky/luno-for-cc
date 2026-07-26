@@ -21,10 +21,18 @@ describe("classifyTool", () => {
   });
 
   it("sniffs the bash command to sub-classify shell calls", () => {
-    expect(classifyTool("Bash", JSON.stringify({ command: "find . -name x" }))).toBe("explore");
-    expect(classifyTool("Bash", JSON.stringify({ command: "rg pattern" }))).toBe("search");
-    expect(classifyTool("Bash", JSON.stringify({ command: "cat file.ts" }))).toBe("read");
-    expect(classifyTool("Bash", JSON.stringify({ command: "npm test" }))).toBe("run");
+    expect(
+      classifyTool("Bash", JSON.stringify({ command: "find . -name x" }))
+    ).toBe("explore");
+    expect(
+      classifyTool("Bash", JSON.stringify({ command: "rg pattern" }))
+    ).toBe("search");
+    expect(
+      classifyTool("Bash", JSON.stringify({ command: "cat file.ts" }))
+    ).toBe("read");
+    expect(classifyTool("Bash", JSON.stringify({ command: "npm test" }))).toBe(
+      "run"
+    );
   });
 
   it("treats a bash call with no/unparseable command as a generic run", () => {

@@ -51,7 +51,9 @@ export function InlineCommentThreads({
     const root = docRef.current;
     if (!root) return;
 
-    root.querySelectorAll(".plan-inline-thread-slot").forEach((el) => el.remove());
+    root
+      .querySelectorAll(".plan-inline-thread-slot")
+      .forEach((el) => el.remove());
 
     const next = new Map<string, HTMLElement>();
     for (const c of quoted) {
@@ -76,7 +78,9 @@ export function InlineCommentThreads({
     setSlots(next);
 
     return () => {
-      root.querySelectorAll(".plan-inline-thread-slot").forEach((el) => el.remove());
+      root
+        .querySelectorAll(".plan-inline-thread-slot")
+        .forEach((el) => el.remove());
     };
   }, [docRef, quoted, redrawKey]);
 
@@ -109,7 +113,9 @@ export function InlineCommentThreads({
   useEffect(() => {
     const root = docRef.current;
     if (!root) return;
-    root.querySelectorAll(".is-pinned").forEach((el) => el.classList.remove("is-pinned"));
+    root
+      .querySelectorAll(".is-pinned")
+      .forEach((el) => el.classList.remove("is-pinned"));
     if (!pinnedId) return;
     const slot = root.querySelector(
       `.plan-inline-thread-slot[data-comment-id="${CSS.escape(pinnedId)}"]`

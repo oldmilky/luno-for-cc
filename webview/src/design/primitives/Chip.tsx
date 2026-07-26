@@ -8,7 +8,8 @@ import { AMBIENT } from "../../design/motion";
 import { motion } from "framer-motion";
 import s from "./Chip.module.scss";
 
-export type ChipTone = "default" | "accent" | "success" | "warn" | "error" | "info" | "danger";
+export type ChipTone =
+  "default" | "accent" | "success" | "warn" | "error" | "info" | "danger";
 
 export interface ChipProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   tone?: ChipTone;
@@ -30,7 +31,15 @@ const TONES: Record<ChipTone, string> = {
 };
 
 export const Chip = forwardRef<HTMLButtonElement, ChipProps>(function Chip(
-  { tone = "default", active, interactive, pulse, children, className = "", ...rest },
+  {
+    tone = "default",
+    active,
+    interactive,
+    pulse,
+    children,
+    className = "",
+    ...rest
+  },
   ref
 ) {
   const cls = [

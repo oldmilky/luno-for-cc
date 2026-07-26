@@ -3,17 +3,20 @@ import { parseFrontmatter } from "../../src/services/claude-skills.js";
 
 describe("parseFrontmatter", () => {
   it("parses name + description from a frontmatter block", () => {
-    const fm = parseFrontmatter("---\nname: my-skill\ndescription: Does a thing\n---\n# body");
+    const fm = parseFrontmatter(
+      "---\nname: my-skill\ndescription: Does a thing\n---\n# body"
+    );
     expect(fm).toEqual({ name: "my-skill", description: "Does a thing" });
   });
 
   it("strips surrounding quotes from the description", () => {
-    expect(parseFrontmatter('---\nname: x\ndescription: "quoted desc"\n---').description).toBe(
-      "quoted desc"
-    );
-    expect(parseFrontmatter("---\nname: x\ndescription: 'single'\n---").description).toBe(
-      "single"
-    );
+    expect(
+      parseFrontmatter('---\nname: x\ndescription: "quoted desc"\n---')
+        .description
+    ).toBe("quoted desc");
+    expect(
+      parseFrontmatter("---\nname: x\ndescription: 'single'\n---").description
+    ).toBe("single");
   });
 
   it("returns {} when there is no frontmatter block", () => {
@@ -33,7 +36,9 @@ describe("parseFrontmatter", () => {
   });
 
   it("handles CRLF line endings", () => {
-    const fm = parseFrontmatter("---\r\nname: crlf\r\ndescription: works\r\n---\r\n");
+    const fm = parseFrontmatter(
+      "---\r\nname: crlf\r\ndescription: works\r\n---\r\n"
+    );
     expect(fm.name).toBe("crlf");
     expect(fm.description).toBe("works");
   });

@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  mkdirSync,
+  writeFileSync,
+  utimesSync
+} from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { aggregateClaudeCodeUsage } from "../../src/services/claude-code-usage.js";
@@ -10,7 +16,12 @@ const NOW = new Date("2026-05-27T18:00:00");
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
 
-function line(tsMs: number, model: string, input: number, output: number): string {
+function line(
+  tsMs: number,
+  model: string,
+  input: number,
+  output: number
+): string {
   return JSON.stringify({
     type: "assistant",
     timestamp: new Date(tsMs).toISOString(),
@@ -92,7 +103,10 @@ describe("aggregateClaudeCodeUsage windowing", () => {
     const proj = path.join(root, "proj-1");
     mkdirSync(proj, { recursive: true });
     const nowMs = NOW.getTime();
-    writeFileSync(path.join(proj, "fresh.jsonl"), line(nowMs - HOUR, "claude-sonnet-4-6", 100, 50));
+    writeFileSync(
+      path.join(proj, "fresh.jsonl"),
+      line(nowMs - HOUR, "claude-sonnet-4-6", 100, 50)
+    );
 
     const oldFile = path.join(proj, "old.jsonl");
     writeFileSync(oldFile, line(nowMs - 20 * DAY, "claude-opus-4-8", 999, 999));

@@ -29,9 +29,7 @@ export async function setToken(
   await ctx.secrets.store(TOKEN_KEY, token);
 }
 
-export async function deleteToken(
-  ctx: vscode.ExtensionContext
-): Promise<void> {
+export async function deleteToken(ctx: vscode.ExtensionContext): Promise<void> {
   await ctx.secrets.delete(TOKEN_KEY);
 }
 

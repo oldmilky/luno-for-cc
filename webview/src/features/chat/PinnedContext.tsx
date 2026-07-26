@@ -24,7 +24,11 @@ interface PinnedContextProps {
   onClearAll: () => void;
 }
 
-export function PinnedContext({ pins, onRemove, onClearAll }: PinnedContextProps) {
+export function PinnedContext({
+  pins,
+  onRemove,
+  onClearAll
+}: PinnedContextProps) {
   if (pins.length === 0) return null;
   return (
     <motion.div {...EXPAND} className={bits.pins}>

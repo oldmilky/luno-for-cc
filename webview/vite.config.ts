@@ -24,7 +24,8 @@ export default defineConfig({
       input: "src/main.tsx",
       output: {
         entryFileNames: "main.js",
-        assetFileNames: (info) => (info.name?.endsWith(".css") ? "main.css" : "[name][extname]"),
+        assetFileNames: (info) =>
+          info.name?.endsWith(".css") ? "main.css" : "[name][extname]",
         format: "iife"
       }
     },

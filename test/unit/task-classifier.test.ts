@@ -4,8 +4,12 @@ import { classifyTask } from "../../src/core/task-classifier.js";
 describe("classifyTask", () => {
   describe("docs-driven", () => {
     it("matches explicit URLs", () => {
-      expect(classifyTask("implement per https://example.com/spec")).toBe("docs-driven");
-      expect(classifyTask("see http://docs.example.com/auth")).toBe("docs-driven");
+      expect(classifyTask("implement per https://example.com/spec")).toBe(
+        "docs-driven"
+      );
+      expect(classifyTask("see http://docs.example.com/auth")).toBe(
+        "docs-driven"
+      );
     });
 
     it("matches 'follow the docs/spec' phrasing", () => {
@@ -30,8 +34,12 @@ describe("classifyTask", () => {
     });
 
     it("matches integration-folder paths", () => {
-      expect(classifyTask("change this", "src/integrations/sentry.ts")).toBe("integration");
-      expect(classifyTask("update", "lib/webhooks/handler.ts")).toBe("integration");
+      expect(classifyTask("change this", "src/integrations/sentry.ts")).toBe(
+        "integration"
+      );
+      expect(classifyTask("update", "lib/webhooks/handler.ts")).toBe(
+        "integration"
+      );
     });
   });
 
@@ -47,7 +55,9 @@ describe("classifyTask", () => {
     });
 
     it("matches component-folder paths", () => {
-      expect(classifyTask("change this", "app/components/Card.tsx")).toBe("frontend");
+      expect(classifyTask("change this", "app/components/Card.tsx")).toBe(
+        "frontend"
+      );
     });
   });
 
@@ -78,7 +88,9 @@ describe("classifyTask", () => {
 
   describe("priority ordering", () => {
     it("docs-driven wins over refactor when URL is present", () => {
-      expect(classifyTask("rename per https://example.com/style")).toBe("docs-driven");
+      expect(classifyTask("rename per https://example.com/style")).toBe(
+        "docs-driven"
+      );
     });
 
     it("bugfix wins over refactor when fix verb is present", () => {
@@ -95,7 +107,9 @@ describe("classifyTask", () => {
     });
 
     it("devops wins over backend when CI/IaC file is active", () => {
-      expect(classifyTask("update the deploy", ".github/workflows/deploy.yml")).toBe("devops");
+      expect(
+        classifyTask("update the deploy", ".github/workflows/deploy.yml")
+      ).toBe("devops");
     });
 
     it("migration wins over generic when bumping a dependency", () => {
@@ -106,7 +120,9 @@ describe("classifyTask", () => {
   describe("devops", () => {
     it("matches Terraform / IaC files", () => {
       expect(classifyTask("update", "infra/main.tf")).toBe("devops");
-      expect(classifyTask("change", "terraform/modules/vpc/main.tfvars")).toBe("devops");
+      expect(classifyTask("change", "terraform/modules/vpc/main.tfvars")).toBe(
+        "devops"
+      );
     });
 
     it("matches Dockerfile", () => {
@@ -118,7 +134,9 @@ describe("classifyTask", () => {
     });
 
     it("matches k8s / helm folders", () => {
-      expect(classifyTask("update manifest", "k8s/deployments/api.yaml")).toBe("devops");
+      expect(classifyTask("update manifest", "k8s/deployments/api.yaml")).toBe(
+        "devops"
+      );
       expect(classifyTask("update", "helm/web/values.yaml")).toBe("devops");
     });
 
@@ -138,11 +156,15 @@ describe("classifyTask", () => {
 
     it("matches regression / failing test language", () => {
       expect(classifyTask("regression after the auth merge")).toBe("bugfix");
-      expect(classifyTask("failing test in user.service.spec.ts")).toBe("bugfix");
+      expect(classifyTask("failing test in user.service.spec.ts")).toBe(
+        "bugfix"
+      );
     });
 
     it("matches stack trace mentions", () => {
-      expect(classifyTask("undefined is not a function in checkout")).toBe("bugfix");
+      expect(classifyTask("undefined is not a function in checkout")).toBe(
+        "bugfix"
+      );
     });
   });
 
@@ -163,8 +185,12 @@ describe("classifyTask", () => {
 
   describe("fullstack", () => {
     it("matches explicit multi-layer phrases", () => {
-      expect(classifyTask("end-to-end profile editing feature")).toBe("fullstack");
-      expect(classifyTask("frontend and backend changes for invites")).toBe("fullstack");
+      expect(classifyTask("end-to-end profile editing feature")).toBe(
+        "fullstack"
+      );
+      expect(classifyTask("frontend and backend changes for invites")).toBe(
+        "fullstack"
+      );
       expect(classifyTask("wire the new modal to the api")).toBe("fullstack");
       expect(classifyTask("client and server changes")).toBe("fullstack");
     });
@@ -172,7 +198,9 @@ describe("classifyTask", () => {
 
   describe("new-impl", () => {
     it("matches greenfield verbs without other strong signals", () => {
-      expect(classifyTask("create a new project for analytics")).toBe("new-impl");
+      expect(classifyTask("create a new project for analytics")).toBe(
+        "new-impl"
+      );
       expect(classifyTask("scaffold a fresh package")).toBe("new-impl");
       expect(classifyTask("set up a new module from scratch")).toBe("new-impl");
     });

@@ -8,7 +8,10 @@ import { parseEnvelope } from "../../src/services/mcp/client.js";
 /** Build a minimal fetch Response double for parseEnvelope. */
 function res(contentType: string, body: string): any {
   return {
-    headers: { get: (k: string) => (k.toLowerCase() === "content-type" ? contentType : null) },
+    headers: {
+      get: (k: string) =>
+        k.toLowerCase() === "content-type" ? contentType : null
+    },
     text: async () => body
   };
 }
@@ -16,32 +19,45 @@ function res(contentType: string, body: string): any {
 describe("parseEnvelope", () => {
   it("parses a plain JSON JSON-RPC result", async () => {
     const env = await parseEnvelope(
-      res("application/json", JSON.stringify({ jsonrpc: "2.0", id: 1, result: { ok: true } }))
+      res(
+        "application/json",
+        JSON.stringify({ jsonrpc: "2.0", id: 1, result: { ok: true } })
+      )
     );
     expect(env.result).toEqual({ ok: true });
   });
 
   it("parses a JSON-RPC error envelope", async () => {
     const env = await parseEnvelope(
-      res("application/json", JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -1, message: "boom" } }))
+      res(
+        "application/json",
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          error: { code: -1, message: "boom" }
+        })
+      )
     );
     expect(env.error?.message).toBe("boom");
   });
 
   it("parses an SSE-framed JSON-RPC envelope", async () => {
-    const sse = 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"x":1}}\n\n';
+    const sse =
+      'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"x":1}}\n\n';
     const env = await parseEnvelope(res("text/event-stream", sse));
     expect(env.result).toEqual({ x: 1 });
   });
 
   it("throws when an SSE stream has no JSON-RPC envelope", async () => {
-    await expect(parseEnvelope(res("text/event-stream", "data: hello\n\n"))).rejects.toThrow(
-      /no JSON-RPC envelope/
-    );
+    await expect(
+      parseEnvelope(res("text/event-stream", "data: hello\n\n"))
+    ).rejects.toThrow(/no JSON-RPC envelope/);
   });
 
   it("throws on an empty JSON body", async () => {
-    await expect(parseEnvelope(res("application/json", ""))).rejects.toThrow(/Empty response body/);
+    await expect(parseEnvelope(res("application/json", ""))).rejects.toThrow(
+      /Empty response body/
+    );
   });
 
   // Fix for audit finding #7: parseEnvelope now takes the request id and
@@ -85,7 +101,8 @@ describe("parseEnvelope", () => {
   });
 
   it("parses a JSON payload split across multiple data: lines", async () => {
-    const sse = 'event: message\ndata: {"jsonrpc":"2.0","id":3,\ndata: "result":{"multi":true}}\n\n';
+    const sse =
+      'event: message\ndata: {"jsonrpc":"2.0","id":3,\ndata: "result":{"multi":true}}\n\n';
     const env = await parseEnvelope(res("text/event-stream", sse), 3);
     expect(env.result).toEqual({ multi: true });
   });

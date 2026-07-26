@@ -57,17 +57,29 @@ interface Props {
   onCollapse: () => void;
 }
 
-export function PlanFullView({ view, previous, isLatest, ordinal, onCollapse }: Props) {
+export function PlanFullView({
+  view,
+  previous,
+  isLatest,
+  ordinal,
+  onCollapse
+}: Props) {
   const [showDiff, setShowDiff] = useState(false);
   const [copied, setCopied] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewAnchor, setReviewAnchor] = useState<{ right: number; top: number } | null>(null);
+  const [reviewAnchor, setReviewAnchor] = useState<{
+    right: number;
+    top: number;
+  } | null>(null);
   const [, forceTick] = useState(0);
   const docRef = useRef<HTMLDivElement>(null);
   const reviewBtnRef = useRef<HTMLButtonElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const summary = useMemo(() => extractPlanSummary(view.meta.body), [view.meta.body]);
+  const summary = useMemo(
+    () => extractPlanSummary(view.meta.body),
+    [view.meta.body]
+  );
   const proceeded = !!view.meta.proceeded;
   // Treat a proceeded plan as locked for all editing surfaces — comments,
   // step controls, the Review dropdown, etc. The user can unlock it by
@@ -76,7 +88,8 @@ export function PlanFullView({ view, previous, isLatest, ordinal, onCollapse }: 
   const pending = unresolvedComments(view).length;
   const tasks = view.meta.tasks;
   const completed = tasks.filter((t) => t.status === "completed").length;
-  const progressPct = tasks.length > 0 ? Math.round((completed / tasks.length) * 100) : 0;
+  const progressPct =
+    tasks.length > 0 ? Math.round((completed / tasks.length) * 100) : 0;
 
   const liveComments = useMemo(
     () => view.comments.filter((c) => !c.deleted),
@@ -205,7 +218,9 @@ export function PlanFullView({ view, previous, isLatest, ordinal, onCollapse }: 
                 <>
                   <span className={s.dot}>·</span>
                   <Tooltip label={view.meta.planFilePath} wrap>
-                    <span className={s.path}>{compactPath(view.meta.planFilePath)}</span>
+                    <span className={s.path}>
+                      {compactPath(view.meta.planFilePath)}
+                    </span>
                   </Tooltip>
                 </>
               )}
@@ -227,7 +242,12 @@ export function PlanFullView({ view, previous, isLatest, ordinal, onCollapse }: 
             size={26}
             onClick={copy}
           />
-          <IconButton icon="arrow" title="Download .md" size={26} onClick={download} />
+          <IconButton
+            icon="arrow"
+            title="Download .md"
+            size={26}
+            onClick={download}
+          />
           {previous && view.meta.bodyChanged && (
             // There is nothing to diff against until a second revision lands,
             // which happens while this header is already on screen.
@@ -265,7 +285,12 @@ export function PlanFullView({ view, previous, isLatest, ordinal, onCollapse }: 
           on a plan that was already proceeded when the view opened. */}
       <AnimatePresence initial={false}>
         {proceeded && (
-          <motion.div key="banner" className={s.banner} role="status" {...EXPAND}>
+          <motion.div
+            key="banner"
+            className={s.banner}
+            role="status"
+            {...EXPAND}
+          >
             <Icon name="check" size={11} />
             <span>Plan in progress — rewind to this revision to edit.</span>
           </motion.div>
@@ -299,7 +324,10 @@ export function PlanFullView({ view, previous, isLatest, ordinal, onCollapse }: 
             come back missing. */}
         {showDiff && previous ? (
           <motion.div key="diff" {...ENTER}>
-            <PlanRevisionDiff previous={previous.meta.body} current={view.meta.body} />
+            <PlanRevisionDiff
+              previous={previous.meta.body}
+              current={view.meta.body}
+            />
           </motion.div>
         ) : (
           <motion.div key="body" className={s.docStack} {...ENTER}>
@@ -363,7 +391,9 @@ export function PlanFullView({ view, previous, isLatest, ordinal, onCollapse }: 
                 <span>Questions</span>
               </div>
               {view.questions.map((q, i) => {
-                const ans = view.answers.find((a) => a.questionId === q.questionId);
+                const ans = view.answers.find(
+                  (a) => a.questionId === q.questionId
+                );
                 return (
                   // The stagger lives here rather than in QuestionCard: the
                   // parent is the only one that knows the row's position.
@@ -389,7 +419,10 @@ export function PlanFullView({ view, previous, isLatest, ordinal, onCollapse }: 
                 type="button"
                 className={`${pbtn.btn} ${pbtn.primary} ${pbtn.block}`}
                 onClick={() => {
-                  send({ type: "planResubmit", revisionId: view.meta.revisionId });
+                  send({
+                    type: "planResubmit",
+                    revisionId: view.meta.revisionId
+                  });
                   onCollapse();
                 }}
               >
@@ -433,7 +466,6 @@ export function PlanFullView({ view, previous, isLatest, ordinal, onCollapse }: 
           />
         )}
       </AnimatePresence>
-
     </motion.div>
   );
 }
@@ -474,14 +506,22 @@ function PlanStepList({
     <ol className={s.stepList}>
       {tasks.map((task, i) => {
         const mode: "active" | "completed" | "upcoming" =
-          i === activeIdx ? "active" : i < activeIdx || activeIdx === -1 ? "completed" : "upcoming";
+          i === activeIdx
+            ? "active"
+            : i < activeIdx || activeIdx === -1
+              ? "completed"
+              : "upcoming";
         // When activeIdx === -1 (everything is done/skipped), treat all as
         // completed so they all collapse into the read-only summary form.
         return (
           // The whole list arrives in one commit when the agent posts its
           // todos, so the rows are staggered — enterAt caps itself, so a
           // twenty-step plan does not turn into a two-second reveal.
-          <motion.li key={task.id} className={STEP_ITEM_CLASS[mode]} {...enterAt(i)}>
+          <motion.li
+            key={task.id}
+            className={STEP_ITEM_CLASS[mode]}
+            {...enterAt(i)}
+          >
             <PlanStepCard
               task={task}
               index={i}

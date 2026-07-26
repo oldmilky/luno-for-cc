@@ -21,7 +21,9 @@ export function ThoughtBlock({ text, durationMs }: ThoughtBlockProps) {
   const [open, setOpen] = useState(true);
   if (!text.trim()) return null;
   const label =
-    durationMs === undefined ? "Thinking…" : `Thought for ${formatDuration(durationMs)}`;
+    durationMs === undefined
+      ? "Thinking…"
+      : `Thought for ${formatDuration(durationMs)}`;
   return (
     <div className={s.thought}>
       <button

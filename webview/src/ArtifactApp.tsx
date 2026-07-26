@@ -26,7 +26,10 @@ type TimelineAction =
   | { type: "append"; event: TimelineEvent }
   | { type: "replace"; events: TimelineEvent[] };
 
-function timelineReducer(state: TimelineEvent[], action: TimelineAction): TimelineEvent[] {
+function timelineReducer(
+  state: TimelineEvent[],
+  action: TimelineAction
+): TimelineEvent[] {
   switch (action.type) {
     case "reset":
       return [];
@@ -80,8 +83,8 @@ export function ArtifactApp({ revisionId }: Props) {
       <div className={s.empty}>
         <div className={s.emptyTitle}>Plan revision not found</div>
         <div className={s.emptyBody}>
-          The plan you opened may have been rewound or replaced. Reopen it from the chat
-          panel to see the current state.
+          The plan you opened may have been rewound or replaced. Reopen it from
+          the chat panel to see the current state.
         </div>
       </div>
     );

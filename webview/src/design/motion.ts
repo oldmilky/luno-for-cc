@@ -88,8 +88,14 @@ export const ENTER_CARD = {
  */
 export const BACKDROP = {
   initial: { opacity: 0 },
-  animate: { opacity: 1, transition: { duration: DURATION.hover, ease: EASE_OUT } },
-  exit: { opacity: 0, transition: { duration: DURATION.enter, ease: EASE_SOFT } }
+  animate: {
+    opacity: 1,
+    transition: { duration: DURATION.hover, ease: EASE_OUT }
+  },
+  exit: {
+    opacity: 0,
+    transition: { duration: DURATION.enter, ease: EASE_SOFT }
+  }
 } as const;
 
 /**
@@ -271,7 +277,10 @@ export const DRAWER = {
  */
 export const SWAP = {
   initial: { opacity: 0 },
-  animate: { opacity: 1, transition: { duration: DURATION.hover, ease: EASE_OUT } },
+  animate: {
+    opacity: 1,
+    transition: { duration: DURATION.hover, ease: EASE_OUT }
+  },
   exit: { opacity: 0, transition: { duration: DURATION.tap, ease: EASE_SOFT } }
 } as const;
 

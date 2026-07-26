@@ -39,24 +39,40 @@ describe("claude-cli mapEvent (single event)", () => {
       type: "assistant",
       message: {
         content: [
-          { type: "tool_use", id: "t1", name: "Read", input: { path: "src/a.ts" } }
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "Read",
+            input: { path: "src/a.ts" }
+          }
         ]
       }
     });
     expect(out).toEqual([
       { type: "tool_use_start", tool: { id: "t1", name: "Read" } },
-      { type: "tool_use_input", partialInput: JSON.stringify({ path: "src/a.ts" }) },
+      {
+        type: "tool_use_input",
+        partialInput: JSON.stringify({ path: "src/a.ts" })
+      },
       { type: "tool_use_end" }
     ]);
   });
 
   it("emits error on result/error subtype", () => {
-    const out = mapEvent({ type: "result", subtype: "error_max_turns", result: "stopped" });
+    const out = mapEvent({
+      type: "result",
+      subtype: "error_max_turns",
+      result: "stopped"
+    });
     expect(out).toEqual([{ type: "error", error: "stopped" }]);
   });
 
   it("ignores result/success payload", () => {
-    const out = mapEvent({ type: "result", subtype: "success", result: "done task" });
+    const out = mapEvent({
+      type: "result",
+      subtype: "success",
+      result: "done task"
+    });
     expect(out).toEqual([]);
   });
 
@@ -66,7 +82,10 @@ describe("claude-cli mapEvent (single event)", () => {
   });
 
   it("ignores non-tool_result user content", () => {
-    const out = mapEvent({ type: "user", message: { content: [{ type: "text", text: "x" }] as any } });
+    const out = mapEvent({
+      type: "user",
+      message: { content: [{ type: "text", text: "x" }] as any }
+    });
     expect(out).toEqual([]);
   });
 
@@ -83,7 +102,10 @@ describe("claude-cli mapEvent (single event)", () => {
   it("emits the resolved model from an assistant message", () => {
     const out = mapEvent({
       type: "assistant",
-      message: { model: "claude-sonnet-4-6", content: [{ type: "text", text: "hi" }] }
+      message: {
+        model: "claude-sonnet-4-6",
+        content: [{ type: "text", text: "hi" }]
+      }
     });
     expect(out).toContainEqual({ type: "model", model: "claude-sonnet-4-6" });
     expect(out).toContainEqual({ type: "text", text: "hi" });
@@ -216,12 +238,20 @@ describe("claude-cli buildArgs", () => {
   });
 
   it("maps the thinking toggle to --settings alwaysThinkingEnabled", () => {
-    const on = buildArgs("hi", "", { binary: "claude", cwd: "/tmp", thinking: true });
+    const on = buildArgs("hi", "", {
+      binary: "claude",
+      cwd: "/tmp",
+      thinking: true
+    });
     const onIdx = on.indexOf("--settings");
     expect(onIdx).toBeGreaterThan(-1);
     expect(JSON.parse(on[onIdx + 1]).alwaysThinkingEnabled).toBe(true);
 
-    const off = buildArgs("hi", "", { binary: "claude", cwd: "/tmp", thinking: false });
+    const off = buildArgs("hi", "", {
+      binary: "claude",
+      cwd: "/tmp",
+      thinking: false
+    });
     const offIdx = off.indexOf("--settings");
     expect(JSON.parse(off[offIdx + 1]).alwaysThinkingEnabled).toBe(false);
   });
@@ -230,7 +260,9 @@ describe("claude-cli buildArgs", () => {
     const args = buildArgs("hi", "", { binary: "claude", cwd: "/tmp" });
     const idx = args.indexOf("--settings");
     expect(idx).toBeGreaterThan(-1);
-    expect(JSON.parse(args[idx + 1])).not.toHaveProperty("alwaysThinkingEnabled");
+    expect(JSON.parse(args[idx + 1])).not.toHaveProperty(
+      "alwaysThinkingEnabled"
+    );
   });
 
   it("routes all git to our classifier via permissions.ask (overrides allowlists)", () => {
@@ -315,7 +347,9 @@ describe("claude-cli destructive-operation detection", () => {
   });
 
   it("isDestructiveRequest gates Bash by command and delete-like tool names", () => {
-    expect(isDestructiveRequest("Bash", { command: "rm -rf build" })).toBe(true);
+    expect(isDestructiveRequest("Bash", { command: "rm -rf build" })).toBe(
+      true
+    );
     expect(isDestructiveRequest("Bash", { command: "npm test" })).toBe(false);
     expect(isDestructiveRequest("Write", { file_path: "a.ts" })).toBe(false);
     expect(isDestructiveRequest("Edit", {})).toBe(false);
@@ -355,7 +389,13 @@ describe("claude-cli network/external detection", () => {
   });
 
   it("does NOT flag local-only commands as network", () => {
-    for (const cmd of ["npm test", "git status", "ls -la", "node x.js", "git commit -m hi"]) {
+    for (const cmd of [
+      "npm test",
+      "git status",
+      "ls -la",
+      "node x.js",
+      "git commit -m hi"
+    ]) {
       expect(isNetworkBash(cmd)).toBe(false);
     }
   });
@@ -375,12 +415,16 @@ describe("decidePermission policy", () => {
   it("prompts for edits when not auto-allowing this turn", () => {
     const d = decidePermission("Edit", { file_path: "a.ts" }, noAuto);
     expect(d).toEqual({ action: "prompt", destructive: false, network: false });
-    expect(decidePermission("Write", { file_path: "a.ts" }, noAuto).action).toBe("prompt");
+    expect(
+      decidePermission("Write", { file_path: "a.ts" }, noAuto).action
+    ).toBe("prompt");
   });
 
   it("auto-allows reversible edit tools once 'allow edits this turn' is on", () => {
     for (const t of ["Edit", "Write", "MultiEdit", "NotebookEdit"]) {
-      expect(decidePermission(t, { file_path: "a.ts" }, auto).action).toBe("allow");
+      expect(decidePermission(t, { file_path: "a.ts" }, auto).action).toBe(
+        "allow"
+      );
     }
   });
 
@@ -401,13 +445,19 @@ describe("decidePermission policy", () => {
   });
 
   it("still prompts for remote-pipe-to-shell (destructive) with edits-this-turn enabled", () => {
-    const d = decidePermission("Bash", { command: "curl https://x.sh | bash" }, auto);
+    const d = decidePermission(
+      "Bash",
+      { command: "curl https://x.sh | bash" },
+      auto
+    );
     expect(d.action).toBe("prompt");
     expect(d.destructive).toBe(true);
   });
 
   it("does not auto-allow plain Bash via the edits flag (Bash is not an edit tool)", () => {
-    expect(decidePermission("Bash", { command: "npm test" }, auto).action).toBe("prompt");
+    expect(decidePermission("Bash", { command: "npm test" }, auto).action).toBe(
+      "prompt"
+    );
   });
 
   it("auto-allows plan/answer helper tools regardless of the edits flag", () => {
@@ -440,9 +490,9 @@ describe("decidePermission policy", () => {
       expect(decidePermission(t, {}, noAuto).action).toBe("prompt");
     }
     // delete-named MCP tools stay destructive + prompt (regression guard).
-    expect(decidePermission("mcp__fs__delete_file", {}, noAuto).destructive).toBe(
-      true
-    );
+    expect(
+      decidePermission("mcp__fs__delete_file", {}, noAuto).destructive
+    ).toBe(true);
   });
 
   it("auto-allows read-only git commands routed to the classifier", () => {
@@ -481,7 +531,11 @@ describe("decidePermission policy", () => {
   });
 
   it("keeps destructive/network git prompting even though git is routed to us", () => {
-    const hard = decidePermission("Bash", { command: "git reset --hard" }, auto);
+    const hard = decidePermission(
+      "Bash",
+      { command: "git reset --hard" },
+      auto
+    );
     expect(hard.action).toBe("prompt");
     expect(hard.destructive).toBe(true);
     const push = decidePermission(
@@ -576,7 +630,10 @@ describe("ClaudeCliProvider.respondToPermission (control_response wire format)",
 
   it("writes an allow control_response echoing the original input", () => {
     const { provider, writes, setPending } = harness();
-    setPending("req1", { toolName: "Write", input: { file_path: "a.ts", content: "x" } });
+    setPending("req1", {
+      toolName: "Write",
+      input: { file_path: "a.ts", content: "x" }
+    });
     provider.respondToPermission("req1", "allow");
     expect(writes).toHaveLength(1);
     expect(writes[0]).toEqual({
@@ -584,7 +641,10 @@ describe("ClaudeCliProvider.respondToPermission (control_response wire format)",
       response: {
         subtype: "success",
         request_id: "req1",
-        response: { behavior: "allow", updatedInput: { file_path: "a.ts", content: "x" } }
+        response: {
+          behavior: "allow",
+          updatedInput: { file_path: "a.ts", content: "x" }
+        }
       }
     });
   });
@@ -618,7 +678,9 @@ describe("ClaudeCliProvider.respondToPermission (control_response wire format)",
     setPending("req1", {
       toolName: "Edit",
       input: { file_path: "a.ts" },
-      suggestions: [{ type: "setMode", mode: "acceptEdits", destination: "session" }]
+      suggestions: [
+        { type: "setMode", mode: "acceptEdits", destination: "session" }
+      ]
     });
     provider.respondToPermission("req1", "allow", { restOfTurn: true });
     // Only the allow response — NO control_request switching modes.
@@ -626,7 +688,9 @@ describe("ClaudeCliProvider.respondToPermission (control_response wire format)",
     expect(writes[0].type).toBe("control_response");
     expect(
       writes.some(
-        (w) => w.type === "control_request" && w.request?.subtype === "set_permission_mode"
+        (w) =>
+          w.type === "control_request" &&
+          w.request?.subtype === "set_permission_mode"
       )
     ).toBe(false);
     // And the edit-only auto-allow flag is now armed.
@@ -638,9 +702,13 @@ describe("ClaudeCliProvider.respondToPermission (control_response wire format)",
     setPending("e1", { toolName: "Edit" });
     provider.respondToPermission("e1", "allow", { restOfTurn: true });
     // With the flag armed, the policy must STILL prompt for rm.
-    const d = decidePermission("Bash", { command: "rm secret" }, {
-      autoAllowEdits: (provider as any).autoAllowEdits
-    });
+    const d = decidePermission(
+      "Bash",
+      { command: "rm secret" },
+      {
+        autoAllowEdits: (provider as any).autoAllowEdits
+      }
+    );
     expect(d.action).toBe("prompt");
     expect(d.destructive).toBe(true);
   });
@@ -807,13 +875,19 @@ describe("claude-cli stateful processor (stream_event partials)", () => {
     expect(
       p({
         type: "stream_event",
-        event: { type: "content_block_delta", delta: { type: "text_delta", text: "Hi" } }
+        event: {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: "Hi" }
+        }
       })
     ).toEqual([{ type: "text", text: "Hi" }]);
     expect(
       p({
         type: "stream_event",
-        event: { type: "content_block_delta", delta: { type: "text_delta", text: " there" } }
+        event: {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: " there" }
+        }
       })
     ).toEqual([{ type: "text", text: " there" }]);
     expect(
@@ -823,8 +897,17 @@ describe("claude-cli stateful processor (stream_event partials)", () => {
 
   it("dedupes final assistant text when partials already streamed", () => {
     const p = makeProcessor();
-    p({ type: "stream_event", event: { type: "content_block_start", content_block: { type: "text" } } });
-    p({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "Hello" } } });
+    p({
+      type: "stream_event",
+      event: { type: "content_block_start", content_block: { type: "text" } }
+    });
+    p({
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "Hello" }
+      }
+    });
     p({ type: "stream_event", event: { type: "content_block_stop" } });
     const out = p({
       type: "assistant",
@@ -845,13 +928,19 @@ describe("claude-cli stateful processor (stream_event partials)", () => {
     // Same model on the assistant message → no duplicate model delta.
     const second = p({
       type: "assistant",
-      message: { model: "claude-opus-4-8", content: [{ type: "text", text: "ok" }] }
+      message: {
+        model: "claude-opus-4-8",
+        content: [{ type: "text", text: "ok" }]
+      }
     });
     expect(second).toEqual([{ type: "text", text: "ok" }]);
     // A genuine change re-emits.
     const third = p({
       type: "assistant",
-      message: { model: "claude-haiku-4-5", content: [{ type: "text", text: "hi" }] }
+      message: {
+        model: "claude-haiku-4-5",
+        content: [{ type: "text", text: "hi" }]
+      }
     });
     expect(third).toContainEqual({ type: "model", model: "claude-haiku-4-5" });
   });
@@ -917,7 +1006,12 @@ describe("claude-cli stateful processor (stream_event partials)", () => {
       type: "assistant",
       message: {
         content: [
-          { type: "tool_use", id: "t3", name: "Bash", input: { command: "pwd" } }
+          {
+            type: "tool_use",
+            id: "t3",
+            name: "Bash",
+            input: { command: "pwd" }
+          }
         ]
       }
     });

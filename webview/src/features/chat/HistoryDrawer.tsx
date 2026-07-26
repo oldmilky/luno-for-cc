@@ -171,14 +171,19 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
             <div className={s.body}>
               {sessions === null && <LoadingState />}
               {sessions !== null && sessions.length === 0 && (
-                <EmptyState title="No previous chats yet" sub="Start a conversation — it'll appear here." />
-              )}
-              {sessions !== null && sessions.length > 0 && grouped.length === 0 && (
                 <EmptyState
-                  title="No matches"
-                  sub={`Nothing matched "${query}". Try a different keyword.`}
+                  title="No previous chats yet"
+                  sub="Start a conversation — it'll appear here."
                 />
               )}
+              {sessions !== null &&
+                sessions.length > 0 &&
+                grouped.length === 0 && (
+                  <EmptyState
+                    title="No matches"
+                    sub={`Nothing matched "${query}". Try a different keyword.`}
+                  />
+                )}
 
               {grouped.map((group, gi) => (
                 <motion.section
@@ -261,7 +266,9 @@ function HistoryItem({
       <span className={s.dot} aria-hidden />
       <div className={s.itemMain}>
         <span className={s.itemTitle}>{session.title || "Untitled chat"}</span>
-        {session.snippet && <span className={s.itemSnippet}>{session.snippet}</span>}
+        {session.snippet && (
+          <span className={s.itemSnippet}>{session.snippet}</span>
+        )}
         <span className={s.itemMeta}>
           <span>{formatRelativeTime(session.updatedAt)}</span>
           <span className={s.itemMetaDot}>·</span>
@@ -301,8 +308,14 @@ function LoadingState() {
         >
           <span className={s.skeletonDot} />
           <div className={s.skeletonLines}>
-            <span className={s.skeletonBar} style={{ width: `${60 + i * 8}%` }} />
-            <span className={s.skeletonBarSub} style={{ width: `${30 + i * 4}%` }} />
+            <span
+              className={s.skeletonBar}
+              style={{ width: `${60 + i * 8}%` }}
+            />
+            <span
+              className={s.skeletonBarSub}
+              style={{ width: `${30 + i * 4}%` }}
+            />
           </div>
         </div>
       ))}
@@ -377,5 +390,8 @@ function formatRelativeTime(ts: number): string {
   if (diff < hour) return `${Math.floor(diff / min)}m ago`;
   if (diff < day) return `${Math.floor(diff / hour)}h ago`;
   if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
-  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(ts).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric"
+  });
 }

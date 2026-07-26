@@ -21,7 +21,7 @@ but break production**. The playbook focuses on surfacing those.
    transitive changes that affect runtime behavior.
 4. **Find a similar past migration in git history** if one exists. Cite the
    commit. The same approach often applies.
-5. **Check deprecation timeline.** If you're migrating *off* a deprecated API,
+5. **Check deprecation timeline.** If you're migrating _off_ a deprecated API,
    confirm the new API is stable (not itself in beta). If you're staying on
    an old API, confirm when it gets removed.
 

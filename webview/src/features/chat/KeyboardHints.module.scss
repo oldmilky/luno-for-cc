@@ -23,7 +23,8 @@
   border: 1px solid var(--b2);
   border-radius: 16px;
   background: var(--s1);
-  box-shadow: 0 28px 80px color-mix(in srgb, var(--shadow-color) 60%, transparent);
+  box-shadow: 0 28px 80px
+    color-mix(in srgb, var(--shadow-color) 60%, transparent);
   // Clips the header/footer fills to the rounded corners.
   overflow: hidden;
 }

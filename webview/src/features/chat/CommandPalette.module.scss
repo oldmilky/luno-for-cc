@@ -25,7 +25,8 @@
   border: 1px solid var(--b2);
   border-radius: var(--round-lg);
   background: var(--s1);
-  box-shadow: 0 28px 80px color-mix(in srgb, var(--shadow-color) 60%, transparent);
+  box-shadow: 0 28px 80px
+    color-mix(in srgb, var(--shadow-color) 60%, transparent);
   overflow: hidden;
 }
 

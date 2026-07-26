@@ -113,97 +113,96 @@ export function ModelPicker({
             className={`${d.menu} ${d.right} ${d.above} ${s.menu}`}
             {...POPOVER_ABOVE}
             role="listbox"
-        >
-          <div className={s.head}>
-            <span className={s.title}>Select a model</span>
-            <span className={s.sub}>
-              {currentResolved ? (
-                <>
-                  Using{" "}
-                  <span className={s.subStrong}>{currentResolved}</span>
-                </>
-              ) : (
-                "Each alias tracks the latest Claude release for your plan."
-              )}
-            </span>
-          </div>
-
-          <div className={s.scroll}>
-            <div className={s.list}>
-              {models.map((m) => (
-                <ModelRow
-                  key={m.value}
-                  label={m.label}
-                  note={m.note}
-                  version={
-                    resolvedModels[m.value]
-                      ? prettyModel(resolvedModels[m.value])
-                      : null
-                  }
-                  recommended={m.value === "default"}
-                  selected={m.value === value}
-                  onSelect={() => pick(m.value)}
-                />
-              ))}
+          >
+            <div className={s.head}>
+              <span className={s.title}>Select a model</span>
+              <span className={s.sub}>
+                {currentResolved ? (
+                  <>
+                    Using <span className={s.subStrong}>{currentResolved}</span>
+                  </>
+                ) : (
+                  "Each alias tracks the latest Claude release for your plan."
+                )}
+              </span>
             </div>
-          </div>
 
-          <div className={s.controls}>
-            <div className={s.control}>
-              <div className={s.controlHead}>
-                <span className={s.controlLabel}>Effort</span>
-                <span className={s.controlValue}>{activeEffort.label}</span>
-              </div>
-              <div
-                className={s.seg}
-                role="radiogroup"
-                aria-label="Reasoning effort"
-              >
-                {EFFORT_LEVELS.map((opt, i) => {
-                  const activeIdx = EFFORT_LEVELS.findIndex(
-                    (e) => e.value === activeEffort.value
-                  );
-                  return (
-                    // The cell shows `opt.short` — a letter or two — so the
-                    // full level name is genuinely new information, not an echo.
-                    <Tooltip key={opt.value} label={opt.label}>
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={opt.value === activeEffort.value}
-                        aria-label={opt.label}
-                        className={`${s.cell}${
-                          i <= activeIdx ? ` ${s.filled}` : ""
-                        }${opt.value === activeEffort.value ? ` ${s.active}` : ""}`}
-                        onClick={() => onEffort(opt.value)}
-                      >
-                        <span className={s.cellLabel}>{opt.short}</span>
-                      </button>
-                    </Tooltip>
-                  );
-                })}
+            <div className={s.scroll}>
+              <div className={s.list}>
+                {models.map((m) => (
+                  <ModelRow
+                    key={m.value}
+                    label={m.label}
+                    note={m.note}
+                    version={
+                      resolvedModels[m.value]
+                        ? prettyModel(resolvedModels[m.value])
+                        : null
+                    }
+                    recommended={m.value === "default"}
+                    selected={m.value === value}
+                    onSelect={() => pick(m.value)}
+                  />
+                ))}
               </div>
             </div>
 
-            <div className={`${s.control} ${s.controlRow}`}>
-              <div className={`${s.controlHead} ${s.controlHeadInline}`}>
-                <span className={s.controlLabel}>Thinking</span>
-                <span className={s.controlNote}>
-                  Reason step-by-step before answering
-                </span>
+            <div className={s.controls}>
+              <div className={s.control}>
+                <div className={s.controlHead}>
+                  <span className={s.controlLabel}>Effort</span>
+                  <span className={s.controlValue}>{activeEffort.label}</span>
+                </div>
+                <div
+                  className={s.seg}
+                  role="radiogroup"
+                  aria-label="Reasoning effort"
+                >
+                  {EFFORT_LEVELS.map((opt, i) => {
+                    const activeIdx = EFFORT_LEVELS.findIndex(
+                      (e) => e.value === activeEffort.value
+                    );
+                    return (
+                      // The cell shows `opt.short` — a letter or two — so the
+                      // full level name is genuinely new information, not an echo.
+                      <Tooltip key={opt.value} label={opt.label}>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={opt.value === activeEffort.value}
+                          aria-label={opt.label}
+                          className={`${s.cell}${
+                            i <= activeIdx ? ` ${s.filled}` : ""
+                          }${opt.value === activeEffort.value ? ` ${s.active}` : ""}`}
+                          onClick={() => onEffort(opt.value)}
+                        >
+                          <span className={s.cellLabel}>{opt.short}</span>
+                        </button>
+                      </Tooltip>
+                    );
+                  })}
+                </div>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={thinking}
-                aria-label="Extended thinking"
-                className={`${s.switch}${thinking ? ` ${s.on}` : ""}`}
-                onClick={() => onThinking(!thinking)}
-              >
-                <span className={s.knob} />
-              </button>
+
+              <div className={`${s.control} ${s.controlRow}`}>
+                <div className={`${s.controlHead} ${s.controlHeadInline}`}>
+                  <span className={s.controlLabel}>Thinking</span>
+                  <span className={s.controlNote}>
+                    Reason step-by-step before answering
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={thinking}
+                  aria-label="Extended thinking"
+                  className={`${s.switch}${thinking ? ` ${s.on}` : ""}`}
+                  onClick={() => onThinking(!thinking)}
+                >
+                  <span className={s.knob} />
+                </button>
+              </div>
             </div>
-          </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -259,7 +258,10 @@ function ModelRow({
 
 /** `claude-opus-4-7` → `opus-4-7` (used for unknown / freeform ids). */
 function shortLabel(m: string): string {
-  return m.replace(/^claude-/, "").replace(/-\d{8}$/, "").replace(/-latest$/, "");
+  return m
+    .replace(/^claude-/, "")
+    .replace(/-\d{8}$/, "")
+    .replace(/-latest$/, "");
 }
 
 /**

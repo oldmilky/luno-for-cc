@@ -68,7 +68,9 @@ export function SkillsMarketplace({
     offset: 0
   });
   const [busyName, setBusyName] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
+  const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(
+    null
+  );
   const debounceRef = useRef<number | null>(null);
 
   // Subscribe to marketplace responses + install results.
@@ -87,7 +89,8 @@ export function SkillsMarketplace({
         setState((prev) => ({ ...prev, status: "error", error: m.message }));
       } else if (m.type === "marketplaceInstallResult") {
         setBusyName(null);
-        const scopeLabel = m.scope === "user" ? "globally" : "for this workspace";
+        const scopeLabel =
+          m.scope === "user" ? "globally" : "for this workspace";
         if (m.ok) {
           if (m.action === "uninstall") {
             setToast({ ok: true, text: `Removed ${m.name} (${scopeLabel}).` });
@@ -326,7 +329,9 @@ export function SkillsMarketplace({
               ) : state.skills.length === 0 ? (
                 <div className={mk.empty}>
                   <Icon name="search" size={20} />
-                  <span>No skills match {query ? `"${query}"` : "your filter"}.</span>
+                  <span>
+                    No skills match {query ? `"${query}"` : "your filter"}.
+                  </span>
                 </div>
               ) : (
                 <>
@@ -359,7 +364,9 @@ export function SkillsMarketplace({
             </div>
 
             {toast && (
-              <div className={`${mk.toast} ${toast.ok ? mk.toastOk : mk.toastErr}`}>
+              <div
+                className={`${mk.toast} ${toast.ok ? mk.toastOk : mk.toastErr}`}
+              >
                 <Icon name={toast.ok ? "check" : "x"} size={11} />
                 <span>{toast.text}</span>
               </div>
@@ -440,8 +447,7 @@ function MarketCard({
             )}
             {skill.stars > 0 && (
               <>
-                <span className={mk.cardDot} />
-                ★ {formatCount(skill.stars)}
+                <span className={mk.cardDot} />★ {formatCount(skill.stars)}
               </>
             )}
           </span>
@@ -453,9 +459,7 @@ function MarketCard({
           <button
             type="button"
             className={`${mk.cardBtn} ${mk.ghost}`}
-            onClick={() =>
-              send({ type: "openExternal", url: skill.sourceUrl })
-            }
+            onClick={() => send({ type: "openExternal", url: skill.sourceUrl })}
           >
             <Icon name="book" size={11} />
             Source
@@ -469,7 +473,9 @@ function MarketCard({
               }`}
             >
               <Icon name="check" size={11} />
-              {installed.source === "user" ? "Installed · User" : "Installed · Project"}
+              {installed.source === "user"
+                ? "Installed · User"
+                : "Installed · Project"}
             </span>
             <Tooltip label={`Uninstall (${installed.source} scope)`}>
               <button
@@ -506,10 +512,7 @@ function MarketCard({
               <Icon name="chevronD" size={9} />
             </button>
             {menuOpen && (
-              <div
-                className={`${dd.menu} ${dd.below} ${dd.right}`}
-                role="menu"
-              >
+              <div className={`${dd.menu} ${dd.below} ${dd.right}`} role="menu">
                 <button
                   type="button"
                   role="menuitem"
@@ -519,7 +522,9 @@ function MarketCard({
                     onInstall("project");
                   }}
                 >
-                  <span className={mk.itemTitle}>Install for this workspace</span>
+                  <span className={mk.itemTitle}>
+                    Install for this workspace
+                  </span>
                   <span className={mk.itemSub}>
                     Only available while you're working in this project.
                   </span>
@@ -584,7 +589,9 @@ function InstalledCard({
         </div>
       </div>
       <p className={mk.cardDesc}>
-        {description ? truncate(description, 220) : "Installed skill — no description provided."}
+        {description
+          ? truncate(description, 220)
+          : "Installed skill — no description provided."}
       </p>
       <div className={mk.cardActions}>
         <span

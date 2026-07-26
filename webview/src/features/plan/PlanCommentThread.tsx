@@ -22,7 +22,12 @@ interface Props {
   locked: boolean;
 }
 
-export function PlanCommentThread({ revisionId, taskId, comments, locked }: Props) {
+export function PlanCommentThread({
+  revisionId,
+  taskId,
+  comments,
+  locked
+}: Props) {
   const [draft, setDraft] = useState("");
   const own = comments.filter((c) => c.taskId === taskId);
 
@@ -46,7 +51,11 @@ export function PlanCommentThread({ revisionId, taskId, comments, locked }: Prop
               <motion.li
                 key={c.eventId}
                 {...enterAt(i)}
-                className={c.resolvedInRevisionId ? `${s.comment} ${s.resolved}` : s.comment}
+                className={
+                  c.resolvedInRevisionId
+                    ? `${s.comment} ${s.resolved}`
+                    : s.comment
+                }
               >
                 <div className={s.meta}>
                   <Icon name="user" size={11} />

@@ -175,11 +175,7 @@ export function InlineThreadCard({ comment, pinNumber, locked }: Props) {
             {comment.replies.map((r, i) => (
               // A reply is a row arriving in a list — it lands after the RPC
               // round-trip, so it always mounts into an already-open card.
-              <motion.li
-                key={r.eventId}
-                {...enterAt(i)}
-                className={s.reply}
-              >
+              <motion.li key={r.eventId} {...enterAt(i)} className={s.reply}>
                 <span className={s.replyRail} aria-hidden>
                   {i === comment.replies.length - 1 ? "└" : "├"}
                 </span>

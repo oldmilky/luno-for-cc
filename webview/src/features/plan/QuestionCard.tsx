@@ -55,8 +55,10 @@ export function QuestionCard({ question, answer, locked }: Props) {
       <ol className={s.list}>
         {question.questions.map((q, i) => {
           const recorded = answer?.answers[i];
-          const value = isAnswered ? recorded?.choice ?? "" : draft[i].choice;
-          const noteValue = isAnswered ? recorded?.note ?? "" : draft[i].note ?? "";
+          const value = isAnswered ? (recorded?.choice ?? "") : draft[i].choice;
+          const noteValue = isAnswered
+            ? (recorded?.note ?? "")
+            : (draft[i].note ?? "");
           return (
             <li key={i} className={s.item}>
               <div className={s.prompt}>{q.question}</div>
@@ -73,7 +75,11 @@ export function QuestionCard({ question, answer, locked }: Props) {
                       checked={value === opt.label}
                       disabled={disabled}
                       onChange={() =>
-                        setDraft((cur) => cur.map((d, idx) => (idx === i ? { ...d, choice: opt.label } : d)))
+                        setDraft((cur) =>
+                          cur.map((d, idx) =>
+                            idx === i ? { ...d, choice: opt.label } : d
+                          )
+                        )
                       }
                     />
                     <span className={s.optionBody}>
@@ -94,7 +100,11 @@ export function QuestionCard({ question, answer, locked }: Props) {
                     checked={value === "__other"}
                     disabled={disabled}
                     onChange={() =>
-                      setDraft((cur) => cur.map((d, idx) => (idx === i ? { ...d, choice: "__other" } : d)))
+                      setDraft((cur) =>
+                        cur.map((d, idx) =>
+                          idx === i ? { ...d, choice: "__other" } : d
+                        )
+                      )
                     }
                   />
                   <span className={s.optionBody}>
@@ -107,7 +117,9 @@ export function QuestionCard({ question, answer, locked }: Props) {
                       value={noteValue}
                       onChange={(e) =>
                         setDraft((cur) =>
-                          cur.map((d, idx) => (idx === i ? { ...d, note: e.target.value } : d))
+                          cur.map((d, idx) =>
+                            idx === i ? { ...d, note: e.target.value } : d
+                          )
                         )
                       }
                     />

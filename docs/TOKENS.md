@@ -28,40 +28,40 @@ name stays because every module already uses it.
 
 ## Core tokens — a theme MUST declare all 15
 
-| Token | Role |
-|---|---|
-| `--s0` | page background — the deepest surface |
-| `--s1` | panel / header / composer surface |
-| `--s2` | raised card surface |
-| `--s3` | hover / active surface, inline chips |
-| `--t1` | primary text |
-| `--t2` | body text |
-| `--t3` | muted text, icon default |
-| `--t4` | faintest text, disabled |
-| `--accent` | the palette's signature color |
-| `--accent-deep` | pressed / darker accent, gradient end |
-| `--accent-glow` | lighter accent for halos and highlights |
-| `--on-accent` | glyph/label color on an accent fill (contrast against `--accent`) |
-| `--lift` | the color surfaces are lifted with — white on dark palettes; every border and tint derives from it |
-| `--brand-tile-gradient` | the brand mark tile, in the palette's hues |
+| Token                   | Role                                                                                               |
+| ----------------------- | -------------------------------------------------------------------------------------------------- |
+| `--s0`                  | page background — the deepest surface                                                              |
+| `--s1`                  | panel / header / composer surface                                                                  |
+| `--s2`                  | raised card surface                                                                                |
+| `--s3`                  | hover / active surface, inline chips                                                               |
+| `--t1`                  | primary text                                                                                       |
+| `--t2`                  | body text                                                                                          |
+| `--t3`                  | muted text, icon default                                                                           |
+| `--t4`                  | faintest text, disabled                                                                            |
+| `--accent`              | the palette's signature color                                                                      |
+| `--accent-deep`         | pressed / darker accent, gradient end                                                              |
+| `--accent-glow`         | lighter accent for halos and highlights                                                            |
+| `--on-accent`           | glyph/label color on an accent fill (contrast against `--accent`)                                  |
+| `--lift`                | the color surfaces are lifted with — white on dark palettes; every border and tint derives from it |
+| `--brand-tile-gradient` | the brand mark tile, in the palette's hues                                                         |
 
 ## Derived tokens — provided by `_base.scss`, overridable
 
 Computed from the core with `color-mix()`, so one formula serves every palette.
 
-| Group | Tokens | Derived from |
-|---|---|---|
-| Borders | `--b1` `--b2` `--b3` | `--lift` @ 5.5% / 8.5% / 13% |
-| Elevation tints | `--tint-weak` `--tint` `--tint-strong` | `--lift` @ 2% / 4% / 6% |
-| Scrollbar | `--scrollbar-thumb` `--scrollbar-thumb-hover` | `--lift` @ 8% / 18% |
-| Accent tints | `--accent-soft` `--accent-mid` `--accent-shadow` | `--accent` @ 12% / 22% / 38% |
-| Accent alias | `--ink` | `--on-accent` |
-| Status ink | `--on-status` | `--s0` — ink for text on an `--ok`/`--err` fill; `--on-accent` is near-white and fails there |
-| Sheen | `--sheen` `--sheen-strong` | `--lift` @ 12% / 18% — inner highlight on filled controls |
-| Shadows | `--shadow-color` `--shadow-1` `--shadow-2` | cast shadows; `--shadow-color` is the raw color for one-off geometries |
-| Glass | `--glass` `--glass-border` | `--s1` @ 90%, `--lift` @ 7% |
-| Ambient aurora | `--aurora-1` `--aurora-2` `--aurora-top` | `--accent` @ 18%/10%, `--accent-glow` @ 12% |
-| Diff | `--add-line` `--del-line` `--add-bg` `--del-bg` | `--ok` / `--err` |
+| Group           | Tokens                                           | Derived from                                                                                 |
+| --------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| Borders         | `--b1` `--b2` `--b3`                             | `--lift` @ 5.5% / 8.5% / 13%                                                                 |
+| Elevation tints | `--tint-weak` `--tint` `--tint-strong`           | `--lift` @ 2% / 4% / 6%                                                                      |
+| Scrollbar       | `--scrollbar-thumb` `--scrollbar-thumb-hover`    | `--lift` @ 8% / 18%                                                                          |
+| Accent tints    | `--accent-soft` `--accent-mid` `--accent-shadow` | `--accent` @ 12% / 22% / 38%                                                                 |
+| Accent alias    | `--ink`                                          | `--on-accent`                                                                                |
+| Status ink      | `--on-status`                                    | `--s0` — ink for text on an `--ok`/`--err` fill; `--on-accent` is near-white and fails there |
+| Sheen           | `--sheen` `--sheen-strong`                       | `--lift` @ 12% / 18% — inner highlight on filled controls                                    |
+| Shadows         | `--shadow-color` `--shadow-1` `--shadow-2`       | cast shadows; `--shadow-color` is the raw color for one-off geometries                       |
+| Glass           | `--glass` `--glass-border`                       | `--s1` @ 90%, `--lift` @ 7%                                                                  |
+| Ambient aurora  | `--aurora-1` `--aurora-2` `--aurora-top`         | `--accent` @ 18%/10%, `--accent-glow` @ 12%                                                  |
+| Diff            | `--add-line` `--del-line` `--add-bg` `--del-bg`  | `--ok` / `--err`                                                                             |
 
 ## Semantics — shared defaults, overridable per theme
 
@@ -70,13 +70,13 @@ every palette on purpose; a theme may still override them.
 
 ## Non-color tokens — shared, never per-theme
 
-| Token | Value |
-|---|---|
-| `--round-sm` `--round` `--round-lg` | 8px · 10px · 14px |
-| `--font-sans` `--font-mono` | Geist · Geist Mono |
-| `--motion-fast` `--motion` `--motion-slow` | 120ms · 200ms · 360ms |
-| `--ease` | `cubic-bezier(0.4, 0, 0.2, 1)` |
-| `--theme-transition` | 420ms — the palette morph |
+| Token                                      | Value                          |
+| ------------------------------------------ | ------------------------------ |
+| `--round-sm` `--round` `--round-lg`        | 8px · 10px · 14px              |
+| `--font-sans` `--font-mono`                | Geist · Geist Mono             |
+| `--motion-fast` `--motion` `--motion-slow` | 120ms · 200ms · 360ms          |
+| `--ease`                                   | `cubic-bezier(0.4, 0, 0.2, 1)` |
+| `--theme-transition`                       | 420ms — the palette morph      |
 
 ## Switching
 

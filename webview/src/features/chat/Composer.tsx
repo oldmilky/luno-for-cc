@@ -187,7 +187,8 @@ export function Composer({
 
   useEffect(() => {
     document.addEventListener("selectionchange", refreshMention);
-    return () => document.removeEventListener("selectionchange", refreshMention);
+    return () =>
+      document.removeEventListener("selectionchange", refreshMention);
   }, [refreshMention]);
 
   const handleEditorChange = (text: string) => {
@@ -218,57 +219,60 @@ export function Composer({
     setMention(NO_MENTION);
   };
 
-  const handleMentionPick = useCallback((result: FileSearchResult) => {
-    // Replace the trailing `@<query>` token immediately before the caret
-    // with an atomic mention pill carrying the full path on data-path.
-    // Falls back to plain `@basename ` text when something about the
-    // current selection prevents the in-place splice (e.g. caret outside
-    // a text node).
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
-    const range = sel.getRangeAt(0);
-    const node = range.startContainer;
-    if (node.nodeType !== Node.TEXT_NODE) return;
+  const handleMentionPick = useCallback(
+    (result: FileSearchResult) => {
+      // Replace the trailing `@<query>` token immediately before the caret
+      // with an atomic mention pill carrying the full path on data-path.
+      // Falls back to plain `@basename ` text when something about the
+      // current selection prevents the in-place splice (e.g. caret outside
+      // a text node).
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0);
+      const node = range.startContainer;
+      if (node.nodeType !== Node.TEXT_NODE) return;
 
-    const text = node.textContent ?? "";
-    const offset = range.startOffset;
-    let i = offset - 1;
-    while (i >= 0 && !/\s/.test(text[i])) i--;
-    const tokenStart = i + 1;
-    if (text[tokenStart] !== "@") return;
+      const text = node.textContent ?? "";
+      const offset = range.startOffset;
+      let i = offset - 1;
+      while (i >= 0 && !/\s/.test(text[i])) i--;
+      const tokenStart = i + 1;
+      if (text[tokenStart] !== "@") return;
 
-    const basename = result.name || result.path.split("/").pop() || result.path;
-    const before = text.slice(0, tokenStart);
-    const after = text.slice(offset);
+      const basename =
+        result.name || result.path.split("/").pop() || result.path;
+      const before = text.slice(0, tokenStart);
+      const after = text.slice(offset);
 
-    // Split the original text node into a leading text node, the pill,
-    // and a trailing text node so the caret can land cleanly after.
-    const parent = node.parentNode;
-    if (!parent) return;
-    node.textContent = before;
-    const pill = makeMentionBadge(result.path, basename);
-    parent.insertBefore(pill, node.nextSibling);
-    const trailingSpace = document.createTextNode(" " + after);
-    parent.insertBefore(trailingSpace, pill.nextSibling);
+      // Split the original text node into a leading text node, the pill,
+      // and a trailing text node so the caret can land cleanly after.
+      const parent = node.parentNode;
+      if (!parent) return;
+      node.textContent = before;
+      const pill = makeMentionBadge(result.path, basename);
+      parent.insertBefore(pill, node.nextSibling);
+      const trailingSpace = document.createTextNode(" " + after);
+      parent.insertBefore(trailingSpace, pill.nextSibling);
 
-    // Caret right after the inserted space — ready for more typing.
-    const r = document.createRange();
-    r.setStart(trailingSpace, 1);
-    r.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(r);
+      // Caret right after the inserted space — ready for more typing.
+      const r = document.createRange();
+      r.setStart(trailingSpace, 1);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
 
-    setMention(NO_MENTION);
-    onChange(editorRef.current?.serialize() ?? "");
-  }, [onChange]);
+      setMention(NO_MENTION);
+      onChange(editorRef.current?.serialize() ?? "");
+    },
+    [onChange]
+  );
 
   const addImageAttachments = useCallback(async (files: File[]) => {
     const added = await Promise.all(files.map(readImageAttachment));
     setAttachments((prev) => [...prev, ...added]);
   }, []);
 
-  const canSend =
-    !busy && (value.trim().length > 0 || attachments.length > 0);
+  const canSend = !busy && (value.trim().length > 0 || attachments.length > 0);
   const mode = findMode(permissionMode);
   const [dropping, setDropping] = useState(false);
 
@@ -570,7 +574,8 @@ async function readImageAttachment(file: File): Promise<ImageAttachment> {
   });
   const dims = await new Promise<{ width: number; height: number }>((res) => {
     const img = new Image();
-    img.onload = () => res({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onload = () =>
+      res({ width: img.naturalWidth, height: img.naturalHeight });
     img.onerror = () => res({ width: 0, height: 0 });
     img.src = dataUrl;
   });
@@ -597,8 +602,7 @@ function collectDroppedPaths(dt: DataTransfer): string[] {
   };
 
   const uriList =
-    dt.getData("text/uri-list") ||
-    dt.getData("application/vnd.code.uri-list");
+    dt.getData("text/uri-list") || dt.getData("application/vnd.code.uri-list");
   if (uriList) {
     for (const raw of uriList.split(/\r?\n/)) {
       const line = raw.trim();
@@ -618,4 +622,3 @@ function collectDroppedPaths(dt: DataTransfer): string[] {
 
   return out;
 }
-

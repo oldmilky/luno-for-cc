@@ -91,11 +91,11 @@ Open any workspace and pick a starter, or just type. `@` mentions a file, drag-d
 
 Cycle modes with **Shift+Tab** (when chat is focused) or the **Luno: Cycle Permission Mode** command.
 
-| Mode | Runs without asking | Prompts you |
-|---|---|---|
-| **Ask** *(default)* | Read-only tools (`Read`, `Grep`, `Glob`) | Every edit, write, and command |
-| **Agent** | Reads **+** file edits (`Edit` / `Write` / `MultiEdit` / `NotebookEdit`) **+** allow-listed commands | Anything not pre-approved |
-| **Plan** | Read-only reasoning — nothing executes | — (review the plan, then **Proceed**) |
+| Mode                | Runs without asking                                                                                  | Prompts you                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| **Ask** _(default)_ | Read-only tools (`Read`, `Grep`, `Glob`)                                                             | Every edit, write, and command        |
+| **Agent**           | Reads **+** file edits (`Edit` / `Write` / `MultiEdit` / `NotebookEdit`) **+** allow-listed commands | Anything not pre-approved             |
+| **Plan**            | Read-only reasoning — nothing executes                                                               | — (review the plan, then **Proceed**) |
 
 **Always gated — in every mode, even Agent, even if allow-listed:**
 
@@ -112,7 +112,7 @@ When an action needs your OK, an inline card slides in above the composer with a
 - **Commands** → the exact shell line, in a terminal block.
 - **Other tools** → the proposed inputs.
 
-Choose **Allow** (`↵`), **Deny** (`Esc`), or — for edits — **Allow this turn** (`⇧↵`) to stop being re-asked about edits for the rest of the turn. Destructive cards turn **red**, default focus to **Deny**, and require an explicit *"Allow anyway"*; network cards are flagged **amber**. "Allow this turn" only auto-accepts *edits* — it never disables the destructive/network gate.
+Choose **Allow** (`↵`), **Deny** (`Esc`), or — for edits — **Allow this turn** (`⇧↵`) to stop being re-asked about edits for the rest of the turn. Destructive cards turn **red**, default focus to **Deny**, and require an explicit _"Allow anyway"_; network cards are flagged **amber**. "Allow this turn" only auto-accepts _edits_ — it never disables the destructive/network gate.
 
 ---
 
@@ -153,29 +153,29 @@ Edited files appear as a collapsible card under the assistant turn with line-add
 
 ## Commands
 
-| Command | Default keybinding |
-|---|---|
-| Luno: New Chat | — |
-| Luno: Toggle Chat Panel | `Cmd/Ctrl+Shift+I` |
-| Luno: Cycle Permission Mode | `Shift+Tab` *(chat focused)* |
-| Luno: Send Selection to Chat | `Cmd/Ctrl+U` *(editor has selection)* |
-| Luno: Comment on Selection | *(editor context menu)* |
-| Luno: Generate CLAUDE.md | — |
-| Luno: Open Connectors | — |
+| Command                      | Default keybinding                    |
+| ---------------------------- | ------------------------------------- |
+| Luno: New Chat               | —                                     |
+| Luno: Toggle Chat Panel      | `Cmd/Ctrl+Shift+I`                    |
+| Luno: Cycle Permission Mode  | `Shift+Tab` _(chat focused)_          |
+| Luno: Send Selection to Chat | `Cmd/Ctrl+U` _(editor has selection)_ |
+| Luno: Comment on Selection   | _(editor context menu)_               |
+| Luno: Generate CLAUDE.md     | —                                     |
+| Luno: Open Connectors        | —                                     |
 
 ---
 
 ## Settings
 
-| Setting | Default | Description |
-|---|---|---|
-| `luno.model` | `default` | Model alias (`sonnet`, `opus`, `haiku`, `opusplan`, `default`) or explicit version. `default` always tracks the latest. Set from the composer's model picker. |
-| `luno.permissionMode` | `default` | `default` (Ask) / `auto` (Agent) / `plan`. |
-| `luno.effort` | `high` | Reasoning effort: `low` / `medium` / `high` / `xhigh` / `max`. |
-| `luno.thinking` | `true` | Extended thinking — reason step-by-step before answering. |
-| `luno.maxTokens` | `4096` | Max output tokens per assistant turn. Lower → fewer rate-limit hits. |
-| `luno.allowedBashPatterns` | `["^git (status\|diff\|log\|branch)$", "^npm (test\|run test)$"]` | Regex allowlist for commands that auto-run in **Agent** mode. Destructive / network commands are **never** auto-run, even if matched. |
-| `luno.claudeBinaryPath` | `""` | Absolute path to the `claude` binary. Empty → auto-detect from PATH and the standard install locations (`~/.claude/local`, npm global, Homebrew). Set it only to pin a specific install; on Windows point it at `claude.exe`, not the `claude.cmd` shim. |
+| Setting                    | Default                                                           | Description                                                                                                                                                                                                                                              |
+| -------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `luno.model`               | `default`                                                         | Model alias (`sonnet`, `opus`, `haiku`, `opusplan`, `default`) or explicit version. `default` always tracks the latest. Set from the composer's model picker.                                                                                            |
+| `luno.permissionMode`      | `default`                                                         | `default` (Ask) / `auto` (Agent) / `plan`.                                                                                                                                                                                                               |
+| `luno.effort`              | `high`                                                            | Reasoning effort: `low` / `medium` / `high` / `xhigh` / `max`.                                                                                                                                                                                           |
+| `luno.thinking`            | `true`                                                            | Extended thinking — reason step-by-step before answering.                                                                                                                                                                                                |
+| `luno.maxTokens`           | `4096`                                                            | Max output tokens per assistant turn. Lower → fewer rate-limit hits.                                                                                                                                                                                     |
+| `luno.allowedBashPatterns` | `["^git (status\|diff\|log\|branch)$", "^npm (test\|run test)$"]` | Regex allowlist for commands that auto-run in **Agent** mode. Destructive / network commands are **never** auto-run, even if matched.                                                                                                                    |
+| `luno.claudeBinaryPath`    | `""`                                                              | Absolute path to the `claude` binary. Empty → auto-detect from PATH and the standard install locations (`~/.claude/local`, npm global, Homebrew). Set it only to pin a specific install; on Windows point it at `claude.exe`, not the `claude.cmd` shim. |
 
 ---
 

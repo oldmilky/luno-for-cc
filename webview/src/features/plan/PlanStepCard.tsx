@@ -78,7 +78,9 @@ export function PlanStepCard({
   const [modifyOpen, setModifyOpen] = useState(false);
   const [modifyDraft, setModifyDraft] = useState("");
 
-  const stepComments = comments.filter((c) => c.taskId === task.id && !c.deleted);
+  const stepComments = comments.filter(
+    (c) => c.taskId === task.id && !c.deleted
+  );
   const status = task.status;
   const fileRefs = task.fileRefs ?? [];
 
@@ -93,7 +95,12 @@ export function PlanStepCard({
   const submitModify = () => {
     const instr = modifyDraft.trim();
     if (!instr || locked || mode !== "active") return;
-    send({ type: "planModifyStep", revisionId, taskId: task.id, instruction: instr });
+    send({
+      type: "planModifyStep",
+      revisionId,
+      taskId: task.id,
+      instruction: instr
+    });
     setModifyDraft("");
     setModifyOpen(false);
   };
@@ -130,7 +137,9 @@ export function PlanStepCard({
       </div>
 
       <div className={s.content}>
-        {mode === "completed" && status === "in_progress" ? task.activeForm : task.content}
+        {mode === "completed" && status === "in_progress"
+          ? task.activeForm
+          : task.content}
       </div>
 
       {fileRefs.length > 0 && (
@@ -233,7 +242,9 @@ export function PlanStepCard({
 function FileRefChip({ ref }: { ref: PlanTaskFileRef }) {
   const label = ref.label || ref.path;
   const range =
-    ref.startLine === ref.endLine ? `:${ref.startLine}` : `:${ref.startLine}-${ref.endLine}`;
+    ref.startLine === ref.endLine
+      ? `:${ref.startLine}`
+      : `:${ref.startLine}-${ref.endLine}`;
   return (
     <Tooltip label={`Open ${ref.path}${range}`}>
       <button

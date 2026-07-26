@@ -45,7 +45,12 @@
   left: 0;
   height: 1px;
   opacity: 0.6;
-  background: linear-gradient(to right, transparent, var(--accent), transparent);
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--accent),
+    transparent
+  );
 }
 
 // ── Head ─────────────────────────────────────────────────────

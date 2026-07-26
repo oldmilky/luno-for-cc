@@ -60,7 +60,10 @@ type TimelineAction =
   | { type: "append"; event: TimelineEvent }
   | { type: "replace"; events: TimelineEvent[] };
 
-function timelineReducer(state: TimelineEvent[], action: TimelineAction): TimelineEvent[] {
+function timelineReducer(
+  state: TimelineEvent[],
+  action: TimelineAction
+): TimelineEvent[] {
   switch (action.type) {
     case "reset":
       return [];
@@ -89,12 +92,17 @@ export function App() {
   const initial = loadState<Persisted>() ?? {};
 
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
-  const [events, dispatchTimeline] = useReducer(timelineReducer, initial.events ?? []);
+  const [events, dispatchTimeline] = useReducer(
+    timelineReducer,
+    initial.events ?? []
+  );
   const [streaming, setStreaming] = useState("");
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState(initial.input ?? "");
   const [error, setError] = useState<string | null>(null);
-  const [editorContext, setEditorContext] = useState<EditorContext | null>(null);
+  const [editorContext, setEditorContext] = useState<EditorContext | null>(
+    null
+  );
   const [models, setModels] = useState<ModelInfo[]>([...FALLBACK_MODELS]);
   // alias → resolved concrete id (e.g. `default` → `claude-opus-4-7[1m]`),
   // accumulated as the host resolves each picker entry. Lets every row show
@@ -241,9 +249,7 @@ export function App() {
           break;
         case "activeModel":
           setResolvedModels((prev) =>
-            prev[m.alias] === m.model
-              ? prev
-              : { ...prev, [m.alias]: m.model }
+            prev[m.alias] === m.model ? prev : { ...prev, [m.alias]: m.model }
           );
           break;
         case "skills":
@@ -351,7 +357,9 @@ export function App() {
             curr.some((x) => x.path === p.path) ? curr : [...curr, p]
           )
         }
-        onUnpin={(path) => setPins((curr) => curr.filter((p) => p.path !== path))}
+        onUnpin={(path) =>
+          setPins((curr) => curr.filter((p) => p.path !== path))
+        }
         onClearPins={() => setPins([])}
         onInput={setInput}
         onSubmit={(text) => {

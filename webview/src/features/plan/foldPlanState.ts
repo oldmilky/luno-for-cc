@@ -29,8 +29,10 @@ const WRITE_TOOL_NAMES = new Set([
   "fs_write",
   "str_replace_editor"
 ]);
-const WRITE_TOOL_NAME_RE_PREFIX = /^(write|edit|create|save|update|put|insert)(?:$|[_-]|[A-Z])/i;
-const WRITE_TOOL_NAME_RE_BOUNDARY = /[_-](write|edit|create|save|update|put|insert)(?:$|[_-]|[A-Z])/i;
+const WRITE_TOOL_NAME_RE_PREFIX =
+  /^(write|edit|create|save|update|put|insert)(?:$|[_-]|[A-Z])/i;
+const WRITE_TOOL_NAME_RE_BOUNDARY =
+  /[_-](write|edit|create|save|update|put|insert)(?:$|[_-]|[A-Z])/i;
 function isWriteToolName(name: string): boolean {
   return (
     WRITE_TOOL_NAMES.has(name) ||
@@ -54,7 +56,10 @@ export function looksLikePlanFile(p: string): boolean {
  * input writes a plan-file. Used to back-fill PlanCards in sessions saved
  * before the orchestrator-side interceptor was wired.
  */
-function synthesizeFromWrite(e: TimelineEvent, parent?: PlanRevisionMeta): PlanRevisionView | null {
+function synthesizeFromWrite(
+  e: TimelineEvent,
+  parent?: PlanRevisionMeta
+): PlanRevisionView | null {
   let input: Record<string, unknown>;
   try {
     input = JSON.parse(e.body ?? "{}") as Record<string, unknown>;
@@ -164,7 +169,12 @@ export function foldPlanState(events: TimelineEvent[]): PlanRevisionView[] {
       // hidden from the rendered view.
       if (meta.deleted) continue;
       const target = byRevisionId.get(meta.revisionId);
-      const view: PlanCommentView = { ...meta, eventId: e.id, ts: e.ts, replies: [] };
+      const view: PlanCommentView = {
+        ...meta,
+        eventId: e.id,
+        ts: e.ts,
+        replies: []
+      };
       target?.comments.push(view);
     } else if (e.kind === "plan_answer") {
       const meta = e.meta as unknown as PlanAnswerMeta | undefined;
@@ -189,7 +199,9 @@ export function foldPlanState(events: TimelineEvent[]): PlanRevisionView[] {
     for (const c of rev.comments) byId.set(c.commentId, c);
     rev.rootComments = [];
     for (const c of rev.comments) {
-      const parent = c.parentCommentId ? byId.get(c.parentCommentId) : undefined;
+      const parent = c.parentCommentId
+        ? byId.get(c.parentCommentId)
+        : undefined;
       if (parent) parent.replies.push(c);
       else rev.rootComments.push(c);
     }
@@ -206,6 +218,8 @@ function lastView(revisions: PlanRevisionView[]): PlanRevisionView | undefined {
  * Comments not yet addressed by a follow-up revision and not manually
  * resolved. Includes replies (so the count matches the visual badge).
  */
-export function unresolvedComments(view: PlanRevisionView): PlanRevisionView["comments"] {
+export function unresolvedComments(
+  view: PlanRevisionView
+): PlanRevisionView["comments"] {
   return view.comments.filter((c) => !c.resolvedInRevisionId && !c.resolvedAt);
 }

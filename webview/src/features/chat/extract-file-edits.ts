@@ -28,9 +28,7 @@ interface RawInput {
 }
 
 function readPath(o: RawInput): string {
-  return String(
-    o.path ?? o.file_path ?? o.filePath ?? o.target_file ?? ""
-  );
+  return String(o.path ?? o.file_path ?? o.filePath ?? o.target_file ?? "");
 }
 
 function readString(...vals: unknown[]): string {
@@ -65,7 +63,12 @@ function extractOne(item: ToolGroupItem): {
   if (!path) return null;
 
   if (kind === "write") {
-    const text = readString(parsed.content, parsed.text, parsed.new_str, parsed.new_string);
+    const text = readString(
+      parsed.content,
+      parsed.text,
+      parsed.new_str,
+      parsed.new_string
+    );
     if (!text && text !== "") return { path, kind, changes: [] };
     return { path, kind, changes: [{ kind: "write", newText: text }] };
   }
@@ -81,13 +84,23 @@ function extractOne(item: ToolGroupItem): {
     return { path, kind, changes };
   }
 
-  const oldText = readString(parsed.old_string, parsed.oldString, parsed.old_str);
-  const newText = readString(parsed.new_string, parsed.newString, parsed.new_str);
+  const oldText = readString(
+    parsed.old_string,
+    parsed.oldString,
+    parsed.old_str
+  );
+  const newText = readString(
+    parsed.new_string,
+    parsed.newString,
+    parsed.new_str
+  );
   return { path, kind, changes: [{ kind: "edit", oldText, newText }] };
 }
 
 /** Aggregate file edits across an entire turn into one entry per path. */
-export function extractFileEdits(items: ReadonlyArray<ToolGroupItem>): FileEditEntry[] {
+export function extractFileEdits(
+  items: ReadonlyArray<ToolGroupItem>
+): FileEditEntry[] {
   const map = new Map<string, FileEditEntry>();
   for (const it of items) {
     const x = extractOne(it);

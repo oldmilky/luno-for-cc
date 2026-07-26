@@ -72,7 +72,10 @@ export class McpClient {
   }> {
     const info = await this.initialize();
     let tools: ConnectorTool[] = [];
-    if (info.capabilities && (info.capabilities as { tools?: unknown }).tools !== undefined) {
+    if (
+      info.capabilities &&
+      (info.capabilities as { tools?: unknown }).tools !== undefined
+    ) {
       const listed = await this.listTools();
       tools = listed.tools;
     }
@@ -97,13 +100,19 @@ export class McpClient {
     return this.rpc<ToolsListResult>("tools/list", {});
   }
 
-  async callTool(name: string, args: Record<string, unknown>): Promise<ToolCallResult> {
+  async callTool(
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<ToolCallResult> {
     return this.rpc<ToolCallResult>("tools/call", { name, arguments: args });
   }
 
   // ── Internals ─────────────────────────────────────────────
 
-  private async rpc<T>(method: string, params: Record<string, unknown>): Promise<T> {
+  private async rpc<T>(
+    method: string,
+    params: Record<string, unknown>
+  ): Promise<T> {
     const id = randomId();
     const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
 
@@ -148,7 +157,10 @@ export class McpClient {
     return env.result as T;
   }
 
-  private async notify(method: string, params: Record<string, unknown>): Promise<void> {
+  private async notify(
+    method: string,
+    params: Record<string, unknown>
+  ): Promise<void> {
     const body = JSON.stringify({ jsonrpc: "2.0", method, params });
     await fetch(this.opts.url, {
       method: "POST",

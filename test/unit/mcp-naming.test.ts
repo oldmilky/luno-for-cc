@@ -57,8 +57,14 @@ describe("cliToolNamespace (CLI mcp__<namespace>__<tool> parity)", () => {
 
 describe("parseManagedId (managed:<scope>:<name>)", () => {
   it("splits scope and name", () => {
-    expect(parseManagedId("managed:user:figma")).toEqual({ scope: "user", name: "figma" });
-    expect(parseManagedId("managed:local:my-server")).toEqual({ scope: "local", name: "my-server" });
+    expect(parseManagedId("managed:user:figma")).toEqual({
+      scope: "user",
+      name: "figma"
+    });
+    expect(parseManagedId("managed:local:my-server")).toEqual({
+      scope: "local",
+      name: "my-server"
+    });
   });
   it("keeps a name that itself contains colons", () => {
     expect(parseManagedId("managed:project:plugin:figma:figma")).toEqual({
@@ -98,7 +104,9 @@ describe("deriveConnectorId (fix #6 — no same-host path collision)", () => {
   });
 
   it("prefixes the slugified name and appends an 8-char hex hash", () => {
-    expect(deriveConnectorId("My Server", "x")).toMatch(/^my-server-[0-9a-f]{8}$/);
+    expect(deriveConnectorId("My Server", "x")).toMatch(
+      /^my-server-[0-9a-f]{8}$/
+    );
   });
 
   it("distinguishes stdio servers that differ only by args", () => {

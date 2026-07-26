@@ -13,7 +13,9 @@ export interface SkillSuggestion {
   reason: string;
 }
 
-const RECOMMENDATIONS: Partial<Record<TaskType, { skillId: string; skillName: string; reason: string }>> = {
+const RECOMMENDATIONS: Partial<
+  Record<TaskType, { skillId: string; skillName: string; reason: string }>
+> = {
   backend: {
     skillId: "architecture-patterns",
     skillName: "architecture-patterns",

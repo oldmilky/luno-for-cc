@@ -11,7 +11,11 @@ export { extractPlanSummary, formatRelativeTime } from "./summary";
 export { PlanTaskTree } from "./PlanTaskTree";
 export { PlanCommentThread } from "./PlanCommentThread";
 export { PlanRevisionDiff } from "./PlanRevisionDiff";
-export { foldPlanState, unresolvedComments, looksLikePlanFile } from "./foldPlanState";
+export {
+  foldPlanState,
+  unresolvedComments,
+  looksLikePlanFile
+} from "./foldPlanState";
 export { useQuoteHighlights } from "./useQuoteHighlights";
 export { collapseWhitespace, truncate, compactPath } from "./utils";
 export type * from "./types";
