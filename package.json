@@ -200,7 +200,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,json,scss,css,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,scss,css,md}\"",
     "fix": "bun run format && eslint . --fix && stylelint \"webview/src/**/*.{scss,css}\" --fix",
-    "harness": "node scripts/webview-harness.mjs"
+    "harness": "node scripts/webview-harness.mjs",
+    "skills:verify": "node scripts/verify-skills.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

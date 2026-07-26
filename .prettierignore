@@ -6,3 +6,11 @@ ghost.one/
 assets/
 *.vsix
 bun.lock
+
+# Vendored skills are pinned by hash in skills-lock.json. Reformatting them
+# rewrites the file prettier does not own and breaks the pin on every `format`,
+# which is how the lock stops meaning anything. Upstream's formatting is
+# upstream's business.
+.claude/skills/vercel-*/
+.claude/skills/web-design-guidelines/
+.claude/skills/writing-guidelines/

@@ -17,6 +17,8 @@ vitest.config.*
 .claude/**
 CLAUDE.md
 .claudeignore
+skills-lock.json
+scripts/**
 .prettierrc.json
 .prettierignore
 .prettierrc
