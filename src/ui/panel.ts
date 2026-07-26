@@ -12,9 +12,8 @@ import {
 } from "../core/types.js";
 import type { ChatProvider } from "../providers/base.js";
 import { buildSystemPrompt } from "./system-prompt.js";
-import { createProvider, resolveClaudeBinary } from "../providers/factory.js";
+import { createProvider } from "../providers/factory.js";
 import type { EffortLevel } from "../providers/claude-cli.js";
-import { getToken, setToken, deleteToken, classifyToken } from "../secrets.js";
 import { CheckpointService } from "../services/checkpoint.js";
 import { HistoryService } from "../services/history.js";
 import { PlanDecorationService } from "../services/plan-decorations.js";
@@ -34,6 +33,8 @@ import {
 } from "./messages.js";
 import { broadcastUsage } from "./domains/usage.js";
 import { SessionStore } from "./domains/session-store.js";
+import { AuthManager } from "./domains/auth.js";
+import { runInSetupTerminal } from "./domains/terminal.js";
 import {
   findCommentEvent,
   findRevisionEvent,
@@ -105,6 +106,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    *  checkpoints and the CLI resume id. Four fields and six methods used to
    *  live on this class. */
   private readonly sessions: SessionStore;
+  /** Owns which credential we have and the flows that get one. Two fields, a
+   *  storage key and seven methods used to live on this class. */
+  private readonly auth: AuthManager;
   private history: HistoryService;
   private decorations: PlanDecorationService;
   private artifacts: PlanArtifactManager;
@@ -127,26 +131,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private scheduleSave(): void {
     this.sessions.scheduleSave();
   }
-  /** Sticky flag set when the user has clicked Logout this session.
-   *  `broadcastAuthState` ORs this with "no token in SecretStorage" to
-   *  decide whether the webview should show the welcome screen — so even
-   *  if SecretStorage somehow returns a stale token, the explicit logout
-   *  takes precedence until the user signs back in. */
-  private signedOut = false;
-  /** In-flight `claude setup-token` terminal, if any. We use a VS Code
-   *  terminal (not a background child process) because `setup-token` is
-   *  an interactive command — it prints a URL, then either waits for the
-   *  user to paste a code back into stdin or for its local OAuth callback
-   *  server to fire. Either way we need a real TTY the user can see. */
-  private setupTerminal?: vscode.Terminal;
-
-  /** Persists "the user signed in via `claude setup-token`, which stored
-   *  credentials in Claude Code's own credential store (Keychain on macOS
-   *  or ~/.claude/.credentials.json elsewhere)". When this is true we treat
-   *  the user as authed even if SecretStorage holds no token — the bundled
-   *  CLI will pick up its own creds on each spawn. */
-  private static readonly CLAUDE_CREDS_READY_KEY = "luno.claudeCredsReady.v1";
-
   constructor(private readonly ctx: vscode.ExtensionContext) {
     this.models = new ModelResolver(this.post, ctx);
     this.history = new HistoryService(ctx);
@@ -157,6 +141,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // After history and decorations: the store wires session events straight
     // into both, so it cannot be built before they exist.
     this.sessions = new SessionStore(this.post, this.history, this.decorations);
+    this.auth = new AuthManager(this.post, ctx, {
+      // Auth does not know what a model or a skill is; it only knows that a
+      // credential appeared. These are the two things that were inline in
+      // `broadcastAuthState` and `handleClaudeLogout`.
+      onAuthed: async () => {
+        await this.models.broadcast();
+        await broadcastSkills(this.post, this.ctx);
+      },
+      onSignOut: () => {
+        this.abortTurn();
+        this.orchestrator = undefined;
+        this.resumeId = undefined;
+      }
+    });
     // Artifact panels share the chat panel's RPC handler so any user action
     // (comment, accept, reply, …) reaches the same session no matter which
     // surface fired it.
@@ -176,6 +174,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         disposeConventionsWatchers();
         this.models.dispose();
         this.sessions.dispose();
+        this.auth.dispose();
         cfgWatcher.dispose();
       }
     });
@@ -284,226 +283,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * signed out this session. We broadcast both the auth status and the
    * model / permission-mode so the webview can hydrate ChatScreen state.
    */
+  /** Kept as a method because a dozen call sites re-publish auth after a
+   *  settings change; the state itself lives in `auth`. */
   async broadcastAuthState() {
-    const cfg = vscode.workspace.getConfiguration("luno");
-    const model = cfg.get<string>("model", "default");
-    const permissionMode = cfg.get<PermissionMode>("permissionMode", "default");
-    const effort = cfg.get<EffortLevel>("effort", "high");
-    const thinking = cfg.get<boolean>("thinking", true);
-    const token = await getToken(this.ctx);
-    const credsReady = this.ctx.globalState.get<boolean>(
-      ChatPanelProvider.CLAUDE_CREDS_READY_KEY,
-      false
-    );
-    const authed = !this.signedOut && (!!token || credsReady);
-    this.post({
-      type: "auth",
-      authed,
-      model,
-      permissionMode,
-      effort,
-      thinking
-    });
-    if (authed) {
-      await this.models.broadcast();
-      await broadcastSkills(this.post, this.ctx);
-    }
-  }
-
-  /**
-   * Kick off the automated OAuth flow.
-   *
-   * `claude setup-token` is an interactive command — it prints a URL,
-   * waits for the user to sign in (either via stdin paste or its local
-   * callback server), then writes credentials to Claude Code's own store
-   * and exits. A background child process can't service its stdin, so
-   * we run it inside a visible VS Code terminal the user can interact
-   * with. When they confirm sign-in via the welcome screen, we persist
-   * the credsReady flag and proceed.
-   */
-  private handleStartClaudeSetup(): void {
-    // Drop any prior terminal — re-using one that already had `claude`
-    // running would type the new command as REPL input, not execute it.
-    this.cancelClaudeSetup();
-
-    // Must go through the same resolver as every other call site. Luno ships
-    // no bundled CLI — the binary is auto-detected, or
-    // whatever `luno.claudeBinaryPath` points at.
-    const binary = resolveClaudeBinary();
-    if (!fs.existsSync(binary)) {
-      this.post({
-        type: "setupProgress",
-        stage: "error",
-        error:
-          `Claude CLI not found. Luno searched PATH and the standard ` +
-          `install locations and came up empty. Install Claude Code, or set ` +
-          `"luno.claudeBinaryPath" to your claude binary ` +
-          `(run \`where claude\` / \`which claude\` to find it), ` +
-          `or paste a token manually below.`
-      });
-      return;
-    }
-
-    this.post({ type: "setupProgress", stage: "launching" });
-
-    // Launch the binary directly as the terminal's process (shellPath +
-    // shellArgs) instead of typing a command into whatever shell happens to
-    // be the default. Routing through a shell breaks on Windows, where the
-    // default integrated terminal is PowerShell: a command that *starts*
-    // with a quoted path — `"C:\...\claude.exe" setup-token` — is parsed as
-    // a string literal, so the trailing argument fails with
-    // `Unexpected token 'setup-token' in expression or statement`.
-    // (PowerShell would need a leading `&` call operator, which in turn
-    // breaks cmd.exe and POSIX shells.) Running the executable directly
-    // means no shell parses our command at all, so it behaves identically
-    // across PowerShell, cmd.exe, bash, and zsh — and the path can contain
-    // spaces without any quoting. setup-token stays fully interactive: its
-    // stdin/stdout are the terminal's, so the URL prompt and token paste
-    // work exactly as before.
-    const term = vscode.window.createTerminal({
-      name: "Luno Sign-in",
-      shellPath: binary,
-      shellArgs: ["setup-token"]
-    });
-    this.setupTerminal = term;
-    term.show(true);
-    this.post({ type: "setupProgress", stage: "awaitingBrowser" });
-
-    // If the user closes the terminal mid-flow, snap back to idle so the
-    // welcome screen doesn't stay stuck on "awaiting browser".
-    const closeSub = vscode.window.onDidCloseTerminal((closed) => {
-      if (closed !== term) return;
-      closeSub.dispose();
-      if (this.setupTerminal === term) {
-        this.setupTerminal = undefined;
-        // Don't error — the user may have closed the terminal after
-        // completing sign-in. They'll click "I've signed in" next.
-      }
-    });
-  }
-
-  /**
-   * Sign-in succeeded but the CLI didn't emit a token (creds went into
-   * Claude Code's own store). Persist the "credsReady" flag and let the
-   * CLI use its own credentials on every subsequent spawn — no env
-   * injection from our side.
-   */
-  private async markClaudeCredsReady(): Promise<void> {
-    this.post({ type: "setupProgress", stage: "saving" });
-    await this.ctx.globalState.update(
-      ChatPanelProvider.CLAUDE_CREDS_READY_KEY,
-      true
-    );
-    this.signedOut = false;
-    this.setupTerminal?.dispose();
-    this.setupTerminal = undefined;
-    this.post({ type: "setupProgress", stage: "done" });
-    await this.broadcastAuthState();
-  }
-
-  /** Cancel a pending `claude setup-token` invocation. */
-  private cancelClaudeSetup(): void {
-    this.setupTerminal?.dispose();
-    this.setupTerminal = undefined;
-  }
-
-  /**
-   * User clicked "I've signed in" on the welcome screen. The terminal
-   * flow stored credentials in Claude Code's own credential store; mark
-   * credsReady and proceed.
-   */
-  private async confirmClaudeSetup(): Promise<void> {
-    await this.markClaudeCredsReady();
-  }
-
-  /**
-   * Run a shell command in a fresh, integrated terminal.
-   *
-   * IMPORTANT: we always dispose any existing "Luno Setup" terminal
-   * before creating a new one. Re-using a terminal that previously hosted
-   * `claude` (or any other interactive command) would cause `sendText` to
-   * type the new command **as input into the still-running process**
-   * rather than execute it as a shell command. Disposing first guarantees
-   * a clean shell prompt.
-   *
-   * `sendText` is also deferred to the next tick so the new terminal's
-   * shell has time to print its initial prompt — without that, on some
-   * shells (zsh with slow init) the keystrokes can interleave with the
-   * shell startup output.
-   */
-  private runTerminalCommand(command: string): void {
-    const existing = vscode.window.terminals.find(
-      (t) => t.name === "Luno Setup"
-    );
-    existing?.dispose();
-    const term = vscode.window.createTerminal({ name: "Luno Setup" });
-    term.show(true);
-    setTimeout(() => {
-      term.sendText(command, true);
-    }, 250);
-  }
-
-  /**
-   * Sign out. Luno owns auth state entirely (token in SecretStorage),
-   * so logout is a single durable operation: confirm → cancel any in-flight
-   * stream → delete the secret → flip the webview to the welcome screen.
-   * No CLI invocation, no `~/.claude/` file manipulation. The user can sign
-   * back in by pasting a fresh token on the welcome screen.
-   */
-  private async handleClaudeLogout(): Promise<void> {
-    const pick = await vscode.window.showWarningMessage(
-      "Sign out of Claude?",
-      {
-        modal: true,
-        detail:
-          "Removes the auth token stored in VS Code's SecretStorage and returns you to the welcome screen. Chat history, checkpoints, and pinned files are preserved."
-      },
-      "Sign out"
-    );
-    if (pick !== "Sign out") return;
-    this.abortTurn();
-    this.orchestrator = undefined;
-    this.resumeId = undefined;
-    await deleteToken(this.ctx);
-    // Clear the "Claude Code has stored creds" flag too — otherwise the
-    // user would stay authed via the CLI's own keychain entry even after
-    // we wiped our SecretStorage. Note: we don't `claude logout` because
-    // that triggers an interactive terminal flow; the next time the user
-    // signs in, `claude setup-token` will overwrite the stored creds.
-    await this.ctx.globalState.update(
-      ChatPanelProvider.CLAUDE_CREDS_READY_KEY,
-      false
-    );
-    this.signedOut = true;
-    await this.broadcastAuthState();
-  }
-
-  /**
-   * Accept a user-pasted token from the welcome screen. We do a
-   * format-only check (no network round-trip — the actual validation
-   * happens when the user's first prompt streams through the CLI). Posts
-   * `tokenResult` back for the form to show success/failure inline.
-   */
-  private async handleSubmitToken(rawToken: string): Promise<void> {
-    const token = rawToken.trim();
-    if (!token) {
-      this.post({ type: "tokenResult", ok: false, error: "Token is empty." });
-      return;
-    }
-    const kind = classifyToken(token);
-    if (kind === "unknown") {
-      this.post({
-        type: "tokenResult",
-        ok: false,
-        error:
-          "Unrecognized token format. Use a Claude Code OAuth token (sk-ant-oat…) or an Anthropic Console API key (sk-ant-api…)."
-      });
-      return;
-    }
-    await setToken(this.ctx, token);
-    this.signedOut = false;
-    this.post({ type: "tokenResult", ok: true });
-    await this.broadcastAuthState();
+    await this.auth.broadcast();
   }
 
   reveal() {
@@ -669,18 +452,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     },
 
     // ── Auth + setup ───────────────────────────────────────────
-    refreshAuth: () => this.broadcastAuthState(),
-    claudeLogout: () => this.handleClaudeLogout(),
+    refreshAuth: () => this.auth.broadcast(),
+    claudeLogout: () => this.auth.logout(),
     submitToken: async (m) => {
       const token = str(m, "token");
-      if (token) await this.handleSubmitToken(token);
+      if (token) await this.auth.submitToken(token);
     },
-    startClaudeSetup: () => this.handleStartClaudeSetup(),
-    cancelClaudeSetup: () => this.cancelClaudeSetup(),
-    confirmClaudeSetup: () => this.confirmClaudeSetup(),
+    startClaudeSetup: () => this.auth.startSetup(),
+    cancelClaudeSetup: () => this.auth.cancelSetup(),
+    confirmClaudeSetup: () => this.auth.confirmSetup(),
     runTerminalCommand: (m) => {
       const command = str(m, "command");
-      if (command) this.runTerminalCommand(command);
+      if (command) runInSetupTerminal(command);
     },
 
     // ── Settings ───────────────────────────────────────────────
@@ -1582,20 +1365,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // so it actually skips them at invocation time, not just visually.
     const disabledSkills = disabledSkillIds(this.ctx);
 
-    // Refuse to start a turn when the user is signed out or has neither a
-    // pasted token nor Claude Code's own stored credentials. `credsReady`
-    // is set when `claude setup-token` exits cleanly without emitting a
-    // token (the OAuth creds live in Claude Code's own credential store).
-    const token = await getToken(this.ctx);
-    const credsReady = this.ctx.globalState.get<boolean>(
-      ChatPanelProvider.CLAUDE_CREDS_READY_KEY,
-      false
-    );
-    if ((!token && !credsReady) || this.signedOut) {
-      this.signedOut = !token && !credsReady;
-      await this.broadcastAuthState();
-      return;
-    }
+    // Refuse the turn without a usable credential. `auth` owns what counts as
+    // one — a pasted token, or Claude Code's own stored creds — and repairs a
+    // stale signed-out flag on the way through. The token comes back with the
+    // verdict so it cannot be read without passing the check; it is undefined
+    // when the CLI holds its own creds and wants nothing injected.
+    const credential = await this.auth.ensureAuthedForTurn();
+    if (!credential.ok) return;
+    const token = credential.token;
 
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!workspaceRoot) {

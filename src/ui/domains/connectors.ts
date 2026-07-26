@@ -26,6 +26,7 @@ import {
   type CustomDraft
 } from "../../services/mcp/index.js";
 import { resolveClaudeBinary } from "../../providers/factory.js";
+import { openSetupTerminal } from "./terminal.js";
 import type { Post } from "../messages.js";
 
 export type { CustomDraft };
@@ -232,9 +233,10 @@ export async function setupConnectorViaClaudeCode(
     // best-effort — the point is to clear a stale record, not to succeed
   }
 
-  vscode.window.terminals.find((t) => t.name === "Luno Setup")?.dispose();
-  const term = vscode.window.createTerminal({ name: "Luno Setup" });
-  term.show(true);
+  // Same terminal `runTerminalCommand` uses — see `domains/terminal.ts`. Both
+  // features used to name it independently, which hid the fact that starting
+  // one disposes the other's.
+  const term = openSetupTerminal();
 
   // The second send is delayed so the TUI has booted and is reading stdin. If
   // the timing misses, the user types `/mcp` themselves — the card says so.
