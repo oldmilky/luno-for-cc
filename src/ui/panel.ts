@@ -32,6 +32,7 @@ import {
 } from "./messages.js";
 import { broadcastUsage } from "./domains/usage.js";
 import { SessionStore } from "./domains/session-store.js";
+import { scopeForWrite } from "./domains/settings-scope.js";
 import { AuthManager } from "./domains/auth.js";
 import { PlanHandlers } from "./domains/plan-handlers.js";
 import { runInSetupTerminal } from "./domains/terminal.js";
@@ -732,14 +733,32 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
   };
 
-  /** Write a `luno.*` setting globally, then re-broadcast so the UI follows. */
+  /**
+   * Write a `luno.*` setting, then re-broadcast so the UI follows.
+   *
+   * Writes to **the scope the value is actually being read from**, not always
+   * Global. VS Code resolves narrowest-wins, so a `luno.effort` in
+   * `.vscode/settings.json` silently beats every Global write: the click
+   * dispatched, the write succeeded, the effective value never moved, and
+   * `broadcastAuthState` echoed the old one back — so the control snapped
+   * straight back to where it was and looked like a dead button.
+   *
+   * That is exactly what happened with a workspace pinning `effort: max` and
+   * `permissionMode: auto`: neither could be changed from the picker, with no
+   * error anywhere.
+   */
   private async updateSetting(
     key: string,
     value: string | boolean
   ): Promise<void> {
-    await vscode.workspace
-      .getConfiguration("luno")
-      .update(key, value, vscode.ConfigurationTarget.Global);
+    const cfg = vscode.workspace.getConfiguration("luno");
+    const TARGETS = {
+      workspaceFolder: vscode.ConfigurationTarget.WorkspaceFolder,
+      workspace: vscode.ConfigurationTarget.Workspace,
+      global: vscode.ConfigurationTarget.Global
+    } as const;
+
+    await cfg.update(key, value, TARGETS[scopeForWrite(cfg.inspect(key))]);
     await this.broadcastAuthState();
   }
 
