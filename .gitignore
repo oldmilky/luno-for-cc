@@ -39,3 +39,6 @@ TESTING.md
 # allow-list, and the codex-threads directory is scratch state.
 .claude/settings.local.json
 .claude/codex-threads/
+
+# Playwright MCP scratch — screenshots and console logs from the harness.
+.playwright-mcp/

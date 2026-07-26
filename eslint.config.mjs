@@ -57,18 +57,24 @@ export default tseslint.config(
   },
 
   // ── Everything that runs on Node ────────────────────────────
-  // The extension host, the build scripts, and the agent hooks — the hooks are
-  // linted like any other source here, which is the point: they are the thing
-  // enforcing the rules and have no business being exempt from them.
+  // The extension host, the build and dev scripts, and the agent hooks. The
+  // tooling is linted like any other source here, which is the point: the
+  // scripts enforcing the rules have no business being exempt from them.
+  //
+  // Globbed by directory rather than named file by file — every time this list
+  // was explicit, the next script added to it arrived as a wall of
+  // `'process' is not defined`.
   {
     files: [
       "src/**/*.ts",
+      "scripts/**/*.{js,mjs}",
+      ".claude/hooks/**/*.mjs",
+      "*.config.{js,mjs,ts}",
       "esbuild.config.mjs",
-      "vitest.config.ts",
-      ".claude/hooks/*.mjs"
+      "vitest.config.ts"
     ],
     languageOptions: {
-      globals: { ...globals.node }
+      globals: { ...globals.node, ...globals.nodeBuiltin }
     }
   },
 
