@@ -8,9 +8,7 @@ import {
   PermissionMode,
   PermissionBehavior,
   StreamDelta,
-  PlanRevisionMeta,
-  PlanSections,
-  REQUIRED_PLAN_SECTIONS
+  PlanRevisionMeta
 } from "../core/types.js";
 import type { ChatProvider } from "../providers/base.js";
 import { buildSystemPrompt } from "./system-prompt.js";
@@ -35,6 +33,15 @@ import {
   type RawMessage
 } from "./messages.js";
 import { broadcastUsage } from "./domains/usage.js";
+import {
+  findCommentEvent,
+  findRevisionEvent,
+  incompletePlanSections,
+  isCommentRevisionProceeded,
+  isRevisionProceeded,
+  setTaskStatus,
+  type TaskStatus
+} from "./domains/plan-state.js";
 import {
   broadcastEditorContext,
   openFile,
@@ -367,13 +374,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Sign out. Luno owns auth state entirely (token in SecretStorage),
-   * so logout is a single durable operation: confirm → cancel any in-flight
-   * stream → delete the secret → flip the webview to the welcome screen.
-   * No CLI invocation, no `~/.claude/` file manipulation. The user can sign
-   * back in by pasting a fresh token on the welcome screen.
-   */
-  /**
    * Kick off the automated OAuth flow.
    *
    * `claude setup-token` is an interactive command — it prints a URL,
@@ -506,6 +506,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }, 250);
   }
 
+  /**
+   * Sign out. Luno owns auth state entirely (token in SecretStorage),
+   * so logout is a single durable operation: confirm → cancel any in-flight
+   * stream → delete the secret → flip the webview to the welcome screen.
+   * No CLI invocation, no `~/.claude/` file manipulation. The user can sign
+   * back in by pasting a fresh token on the welcome screen.
+   */
   private async handleClaudeLogout(): Promise<void> {
     const pick = await vscode.window.showWarningMessage(
       "Sign out of Claude?",
@@ -591,11 +598,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Cmd+U: pull the active editor's selection (or current line if no
-   * selection) and surface it inside the composer as a clean attachment.
-   * Strips stray slash prefixes and other formatting artifacts.
-   */
-  /**
    * Right-click → "Luno: Comment on selection". Anchors a plan_comment
    * to the active editor's current selection on the latest plan revision.
    * The comment carries `quote` = the selected text so the existing
@@ -636,6 +638,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       });
   }
 
+  /**
+   * Cmd+U: pull the active editor's selection (or current line if no
+   * selection) and surface it inside the composer as a clean attachment.
+   * Strips stray slash prefixes and other formatting artifacts.
+   */
   sendSelectionToChat() {
     const ed = vscode.window.activeTextEditor;
     if (!ed) {
@@ -1093,7 +1100,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   ) {
     const trimmed = body.trim();
     if (!trimmed) return;
-    if (this.isRevisionProceeded(revisionId)) {
+    if (isRevisionProceeded(this.session.timeline, revisionId)) {
       this.postLockedError();
       return;
     }
@@ -1115,11 +1122,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private handlePlanEditComment(commentId: string, body: string) {
     const trimmed = body.trim();
     if (!trimmed) return;
-    if (this.isCommentRevisionProceeded(commentId)) {
+    if (isCommentRevisionProceeded(this.session.timeline, commentId)) {
       this.postLockedError();
       return;
     }
-    const ev = this.findCommentEvent(commentId);
+    const ev = findCommentEvent(this.session.timeline, commentId);
     if (!ev) return;
     const meta = ev.meta as Record<string, unknown>;
     meta.body = trimmed;
@@ -1136,72 +1143,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * time.
    */
   private handlePlanDeleteComment(commentId: string) {
-    if (this.isCommentRevisionProceeded(commentId)) {
+    if (isCommentRevisionProceeded(this.session.timeline, commentId)) {
       this.postLockedError();
       return;
     }
-    const ev = this.findCommentEvent(commentId);
+    const ev = findCommentEvent(this.session.timeline, commentId);
     if (!ev) return;
     const meta = ev.meta as Record<string, unknown>;
     meta.deleted = true;
     this.post({ type: "timeline", event: ev });
     this.scheduleSave();
-  }
-
-  private findCommentEvent(commentId: string) {
-    return this.session.timeline.find(
-      (e) =>
-        e.kind === "plan_comment" &&
-        (e.meta as { commentId?: string } | undefined)?.commentId === commentId
-    );
-  }
-
-  private findRevisionEvent(revisionId: string) {
-    return this.session.timeline.find(
-      (e) =>
-        e.kind === "plan_revision" &&
-        (e.meta as { revisionId?: string } | undefined)?.revisionId ===
-          revisionId
-    );
-  }
-
-  /**
-   * Required plan sections that are missing entirely or present-but-empty,
-   * returned as display labels ("Risks", "Verification"). Gives the Proceed
-   * gate teeth: the completeness badge is otherwise cosmetic, so we surface
-   * the gaps in the approval modal before the user lets the agent start
-   * editing from a thin plan. Returns [] when sections weren't parsed (legacy
-   * plans predating section parsing) so we never warn on a false negative.
-   */
-  private incompletePlanSections(meta: PlanRevisionMeta | undefined): string[] {
-    const sections: PlanSections | undefined = meta?.sections;
-    if (!sections) return [];
-    const out: string[] = [];
-    for (const key of REQUIRED_PLAN_SECTIONS) {
-      const v = sections[key];
-      if (v === undefined || v.trim() === "") {
-        out.push(key.charAt(0).toUpperCase() + key.slice(1));
-      }
-    }
-    return out;
-  }
-
-  /**
-   * True when the plan revision has been "proceeded" by the user — the
-   * revision is locked from further comments / step mutations / re-Proceed
-   * until the user rewinds to its checkpoint, which clears the flag.
-   */
-  private isRevisionProceeded(revisionId: string): boolean {
-    const ev = this.findRevisionEvent(revisionId);
-    if (!ev) return false;
-    return (ev.meta as { proceeded?: boolean } | undefined)?.proceeded === true;
-  }
-
-  private isCommentRevisionProceeded(commentId: string): boolean {
-    const ev = this.findCommentEvent(commentId);
-    if (!ev) return false;
-    const revId = (ev.meta as { revisionId?: string } | undefined)?.revisionId;
-    return revId ? this.isRevisionProceeded(revId) : false;
   }
 
   private postLockedError(): void {
@@ -1219,11 +1170,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   ) {
     const trimmed = body.trim();
     if (!trimmed) return;
-    if (this.isRevisionProceeded(revisionId)) {
+    if (isRevisionProceeded(this.session.timeline, revisionId)) {
       this.postLockedError();
       return;
     }
-    const parent = this.findCommentEvent(parentCommentId);
+    const parent = findCommentEvent(this.session.timeline, parentCommentId);
     const parentMeta = parent?.meta as
       { taskId?: string; quote?: string } | undefined;
     this.session.emitPlanComment({
@@ -1240,11 +1191,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   /** Toggle a comment's manual resolved state. */
   private handlePlanResolveComment(commentId: string, resolve: boolean) {
-    if (this.isCommentRevisionProceeded(commentId)) {
+    if (isCommentRevisionProceeded(this.session.timeline, commentId)) {
       this.postLockedError();
       return;
     }
-    const ev = this.findCommentEvent(commentId);
+    const ev = findCommentEvent(this.session.timeline, commentId);
     if (!ev) return;
     const meta = ev.meta as Record<string, unknown>;
     if (resolve) meta.resolvedAt = Date.now();
@@ -1254,11 +1205,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Reveal a workspace-relative path at the given range and select that
-   * range so the user sees the slice the plan step is talking about.
-   */
-
-  /**
    * Mutate a single task's status on its plan_revision and re-post the event.
    * Returns the updated revision event (or null if it doesn't exist) so callers
    * can chain a follow-up agent prompt.
@@ -1266,21 +1212,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private mutateTaskStatus(
     revisionId: string,
     taskId: string,
-    nextStatus: "accepted" | "skipped" | "in_progress"
+    nextStatus: TaskStatus
   ) {
-    const ev = this.findRevisionEvent(revisionId);
-    if (!ev) return null;
-    const meta = ev.meta as {
-      tasks?: Array<{ id: string; status: string }>;
-    } & Record<string, unknown>;
-    const tasks = meta.tasks ?? [];
-    const idx = tasks.findIndex((t) => t.id === taskId);
-    if (idx === -1) return null;
-    tasks[idx] = { ...tasks[idx], status: nextStatus };
-    meta.tasks = tasks;
-    this.post({ type: "timeline", event: ev });
+    const result = setTaskStatus(
+      this.session.timeline,
+      revisionId,
+      taskId,
+      nextStatus
+    );
+    if (!result) return null;
+    this.post({ type: "timeline", event: result.ev });
     this.scheduleSave();
-    return { ev, task: tasks[idx] };
+    return result;
   }
 
   /**
@@ -1289,7 +1232,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * agent can start writing without the user having to manually flip mode.
    */
   private async handlePlanProceed(revisionId: string): Promise<void> {
-    if (this.isRevisionProceeded(revisionId)) {
+    if (isRevisionProceeded(this.session.timeline, revisionId)) {
       this.postLockedError();
       return;
     }
@@ -1299,14 +1242,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
     // Fetched up front so we can warn on an incomplete plan before the user
     // authorizes edits. Reused below for locking the revision.
-    const ev = this.findRevisionEvent(revisionId);
+    const ev = findRevisionEvent(this.session.timeline, revisionId);
     const planMeta = ev?.meta as unknown as PlanRevisionMeta | undefined;
 
     const baseDetail =
       currentMode === "plan"
         ? "Plan mode blocks edits. Approving switches into Agent mode so the agent can carry out the plan autonomously."
         : "The agent will continue with file edits and any necessary commands.";
-    const missing = this.incompletePlanSections(planMeta);
+    const missing = incompletePlanSections(planMeta);
     const detail =
       missing.length > 0
         ? `⚠ This plan is missing or has empty sections: ${missing.join(", ")}. ` +
@@ -1381,7 +1324,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async handlePlanAcceptStep(revisionId: string, taskId: string) {
-    if (this.isRevisionProceeded(revisionId)) {
+    if (isRevisionProceeded(this.session.timeline, revisionId)) {
       this.postLockedError();
       return;
     }
@@ -1404,11 +1347,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   ) {
     const trimmed = instruction.trim();
     if (!trimmed) return;
-    if (this.isRevisionProceeded(revisionId)) {
+    if (isRevisionProceeded(this.session.timeline, revisionId)) {
       this.postLockedError();
       return;
     }
-    const ev = this.findRevisionEvent(revisionId);
+    const ev = findRevisionEvent(this.session.timeline, revisionId);
     if (!ev) return;
     const meta = ev.meta as {
       tasks?: Array<{ id: string; content?: string; status: string }>;
@@ -1425,7 +1368,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private handlePlanSkipStep(revisionId: string, taskId: string) {
-    if (this.isRevisionProceeded(revisionId)) {
+    if (isRevisionProceeded(this.session.timeline, revisionId)) {
       this.postLockedError();
       return;
     }
@@ -1439,7 +1382,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * webview entry reads at boot.
    */
   private handlePlanOpenInEditor(revisionId: string) {
-    const ev = this.findRevisionEvent(revisionId);
+    const ev = findRevisionEvent(this.session.timeline, revisionId);
     if (!ev) {
       this.post({
         type: "error",
@@ -1458,7 +1401,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * a fresh plan_revision with parentRevisionId pointing at the old one.
    */
   private async handlePlanResubmit(revisionId: string) {
-    if (this.isRevisionProceeded(revisionId)) {
+    if (isRevisionProceeded(this.session.timeline, revisionId)) {
       this.postLockedError();
       return;
     }
