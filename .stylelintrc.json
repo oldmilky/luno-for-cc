@@ -1,0 +1,56 @@
+{
+  "extends": "stylelint-config-standard-scss",
+  "ignoreFiles": [
+    "node_modules/**",
+    "webview/node_modules/**",
+    "dist/**",
+    "webview/dist/**",
+    "ghost.one/**"
+  ],
+  "rules": {
+    "selector-pseudo-class-no-unknown": [
+      true,
+      { "ignorePseudoClasses": ["global", "local"] }
+    ],
+
+    "property-no-vendor-prefix": null,
+
+    "custom-property-pattern": null,
+    "scss/dollar-variable-pattern": null,
+    "scss/at-mixin-pattern": null,
+    "color-function-notation": null,
+    "alpha-value-notation": null,
+    "value-keyword-case": null,
+    "media-feature-range-notation": null,
+    "no-descending-specificity": null,
+    "color-hex-length": null,
+
+    "declaration-empty-line-before": null,
+    "custom-property-empty-line-before": null,
+    "rule-empty-line-before": null,
+    "at-rule-empty-line-before": null,
+    "comment-empty-line-before": null,
+    "scss/double-slash-comment-empty-line-before": null,
+    "scss/comment-no-empty": null
+  },
+  "overrides": [
+    {
+      "files": ["**/*.module.scss"],
+      "rules": {
+        "selector-class-pattern": [
+          "^[a-z][a-zA-Z0-9]*$|^[a-z][a-z0-9]*(-[a-z0-9]+)+$",
+          {
+            "message": "Module classes are camelCase (read as s.someName in TSX). kebab-case is allowed only for the imperatively-applied globals reached through :global()",
+            "resolveNestedSelectors": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["webview/src/themes/**/*.scss", "webview/src/**/*.css"],
+      "rules": {
+        "selector-class-pattern": null
+      }
+    }
+  ]
+}

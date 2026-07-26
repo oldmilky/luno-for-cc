@@ -193,14 +193,30 @@
     "dev:webview": "bun run --cwd webview dev",
     "package": "bunx @vscode/vsce package --no-dependencies --allow-star-activation --skip-license",
     "test": "vitest run",
-    "lint": "tsc --noEmit && bun run --cwd webview lint"
+    "lint": "bun run lint:types && bun run lint:js && bun run lint:css",
+    "lint:types": "tsc --noEmit && bun run --cwd webview lint",
+    "lint:js": "eslint .",
+    "lint:css": "stylelint \"webview/src/**/*.{scss,css}\"",
+    "format": "prettier --write \"**/*.{ts,tsx,js,mjs,json,scss,css,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,scss,css,md}\"",
+    "fix": "bun run format && eslint . --fix && stylelint \"webview/src/**/*.{scss,css}\" --fix"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.24.0",
+    "eslint": "^10.8.0",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.8.0",
+    "prettier": "^3.9.6",
+    "stylelint": "^17.14.1",
+    "stylelint-config-standard-scss": "^17.0.0",
     "typescript": "^5.5.0",
+    "typescript-eslint": "^8.65.0",
     "vitest": "^2.0.0"
   }
 }

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+webview/dist/
+webview/node_modules/
+ghost.one/
+assets/
+*.vsix
+bun.lock
