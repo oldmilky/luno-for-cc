@@ -1,0 +1,596 @@
+// ─────────────────────────────────────────────────────────────
+// Token meter — the header chip and its usage popover.
+// Converted from Tailwind in Ф2а.
+//
+// The chip, the usage bars and the over-limit pill all shift color
+// with pressure. That used to be four `var(--…)` strings computed in
+// TypeScript and dropped into style={{}}; it is now a `.tone*` class
+// that publishes `--tone` / `--tone-soft`, so the colors live here
+// and the component only decides *which* tone applies.
+// ─────────────────────────────────────────────────────────────
+
+.root {
+  position: relative;
+}
+
+// Worn by every number that counts to its new value. Rounding stops the digits
+// flickering; this stops them changing width. Most of these readouts sit in
+// `--font-mono` and were already safe, but `.serverRowReset` is body text — a
+// count there would shove the words after it sideways for the whole animation.
+.count {
+  font-variant-numeric: tabular-nums;
+}
+
+// ── Tone ─────────────────────────────────────────────────────
+// Set on the chip (where it also cascades into the mini bar) and on
+// each progress fill. `--tone-border` only differs for the accent tone,
+// hence the fallback.
+
+.toneOk {
+  --tone: var(--ok);
+  --tone-soft: var(--ok-soft);
+}
+
+.toneWarn {
+  --tone: var(--warn);
+  --tone-soft: var(--warn-soft);
+}
+
+.toneErr {
+  --tone: var(--err);
+  --tone-soft: var(--err-soft);
+}
+
+.toneAccent {
+  --tone: var(--accent-glow);
+  --tone-soft: var(--accent-soft);
+  --tone-border: var(--accent-mid);
+}
+
+// ── Header chip ──────────────────────────────────────────────
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--tone-border, var(--tone));
+  border-radius: var(--round);
+  background: var(--tone-soft);
+  color: var(--tone);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+}
+
+.chipShort {
+  opacity: 0.8;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.chipBar {
+  overflow: hidden;
+  width: 36px;
+  height: 5px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round-sm);
+  background: var(--s2);
+}
+
+// No width transition, deliberately. The fill and the percentage next to it
+// are the same number, so framer now drives both off one spring and writes
+// this width every frame; a CSS transition on top would ease each of those
+// frames in turn and leave the bar trailing its own label.
+.chipBarFill {
+  display: block;
+  height: 100%;
+  background: var(--tone);
+}
+
+// ── Popover shell ────────────────────────────────────────────
+
+.popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 80;
+  overflow: hidden;
+  width: 380px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    0 22px 56px color-mix(in srgb, var(--shadow-color) 60%, transparent),
+    0 0 0 1px var(--tint-weak) inset;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid var(--b1);
+}
+
+.headLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.headTitle {
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.15px;
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--t4);
+  font: inherit;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--s2);
+    color: var(--t1);
+  }
+}
+
+// ── Source badges ────────────────────────────────────────────
+
+%badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+// "Authoritative" / "Live" — the old rgba(52,211,153,.35) border was the
+// previous --ok in literal form; it now mixes from the live token.
+.badgeOk {
+  @extend %badge;
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.badgeMuted {
+  @extend %badge;
+  border: 1px solid var(--b1);
+  background: var(--s2);
+  color: var(--t3);
+}
+
+// ── Plan row ─────────────────────────────────────────────────
+
+.planRow {
+  position: relative;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--b1);
+}
+
+.planHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.planLabel {
+  color: var(--t4);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.planButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round);
+  background: var(--s2);
+  color: var(--t1);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b2);
+    background: var(--s3);
+  }
+}
+
+.planNote {
+  margin-top: 2px;
+  color: var(--t4);
+  font-size: 10px;
+}
+
+// Opaque on purpose: it opens *inside* the glass popover, and a second
+// translucent layer would let the timeline show through both.
+.planMenu {
+  position: absolute;
+  top: 42px;
+  right: 14px;
+  z-index: 10;
+  overflow: hidden;
+  width: 210px;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-sm);
+  background: var(--s1);
+  box-shadow: 0 14px 32px color-mix(in srgb, var(--shadow-color) 55%, transparent);
+}
+
+.planItem {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s2);
+  }
+}
+
+.planItemActive {
+  background: var(--accent-soft);
+
+  // The active row keeps its tint on hover instead of falling back to --s2.
+  &:hover {
+    background: var(--accent-soft);
+  }
+
+  .planItemName {
+    color: var(--accent-glow);
+  }
+}
+
+.planItemHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.planItemName {
+  color: var(--t1);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.planItemNote {
+  margin-top: 2px;
+  color: var(--t4);
+  font-size: 10px;
+}
+
+// ── Scrollable body ──────────────────────────────────────────
+
+.body {
+  max-height: 60vh;
+  padding: 12px 14px;
+  overflow-y: auto;
+}
+
+.sectionTitle {
+  color: var(--t1);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+// ── Server-reported limits ───────────────────────────────────
+
+.serverBlock {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--b1);
+}
+
+.serverHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.serverNote {
+  margin-top: 6px;
+  color: var(--t4);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.serverRow {
+  margin-bottom: 6px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.serverRowHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.serverRowLabel {
+  color: var(--t1);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.serverRowNums {
+  color: var(--t2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.serverRowLimit {
+  color: color-mix(in srgb, var(--t4) 70%, transparent);
+}
+
+.serverBar {
+  overflow: hidden;
+  height: 5px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round-sm);
+  background: var(--s2);
+}
+
+.serverRowReset {
+  margin-top: 2px;
+  color: var(--t4);
+  font-size: 10px;
+}
+
+// ── Usage row ────────────────────────────────────────────────
+
+.row {
+  margin-bottom: 12px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.rowHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.rowLabelWrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rowLabel {
+  color: var(--t1);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+// Holds a Solar `info` glyph, which draws its own ring — the border, radius
+// and fill that used to frame the `ⓘ` character would now be a circle around
+// a circle.
+.rowInfo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  color: var(--t3);
+  cursor: help;
+}
+
+.rowNoCap {
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.rowPct {
+  color: var(--t2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+// Amber rather than red: passing the bar usually means the plan preset is
+// wrong, not that the account is actually out of quota.
+.rowOver {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: 4px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.bar {
+  position: relative;
+  overflow: hidden;
+  height: 6px;
+  margin-bottom: 4px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round-sm);
+  background: var(--s2);
+}
+
+.barFill {
+  height: 100%;
+  background: var(--tone);
+}
+
+// Hatched cap on the right edge of a bar that ran past its limit.
+.barOver {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--warn),
+    var(--warn) 2px,
+    transparent 2px,
+    transparent 4px
+  );
+}
+
+.rowFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--t4);
+  font-size: 10.5px;
+}
+
+.rowNums {
+  font-family: var(--font-mono);
+}
+
+.rowUsed {
+  color: var(--t2);
+}
+
+.rowSlash {
+  margin: 0 4px;
+  color: color-mix(in srgb, var(--t4) 70%, transparent);
+}
+
+.limitInput {
+  width: 64px;
+  padding: 1px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--s0);
+  color: var(--t1);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  outline: none;
+}
+
+.limitButton {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-underline-offset: 2px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--accent-glow);
+    text-decoration: underline;
+  }
+}
+
+// ── Weekly group + footer ────────────────────────────────────
+
+.weekly {
+  margin-top: 16px;
+}
+
+.weeklyHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--b1);
+}
+
+.footerStamp {
+  color: var(--t4);
+  font-size: 10.5px;
+}
+
+.refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b1);
+    background: var(--s2);
+    color: var(--t1);
+  }
+}
+
+.disclaimer {
+  margin-top: 8px;
+  color: var(--t4);
+  font-size: 10px;
+  line-height: 1.45;
+}

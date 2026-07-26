@@ -1,0 +1,196 @@
+// ─────────────────────────────────────────────────────────────
+// Plan card — the chat-stream summary of a plan revision: icon,
+// title block, prose preview, task progress, stat pills, actions.
+// Converted from theme.css `.plan-mini*` in Ф2а.
+//
+// The unresolved-comments stat was a hard-coded amber (#fbbf24 on
+// rgba tints); it now reads --warn / --warn-soft, so a palette that
+// redefines its status colors gets a matching pill for free.
+// ─────────────────────────────────────────────────────────────
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 620px;
+  margin: 14px 0;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--b2);
+  border-radius: 12px;
+  background: var(--s2);
+  transition: border-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b3);
+  }
+}
+
+// `filter`, not `opacity`: the card root is a framer surface now, and its
+// enter lands on an inline `opacity: 1` that a class can never outrank.
+.locked {
+  filter: opacity(0.65);
+}
+
+// Revised after a rewind. The 3px rule replaces 3px of the left padding
+// so the content column stays put next to an unbranched card.
+.branched {
+  padding-left: 13px;
+  border-left: 3px solid var(--accent);
+}
+
+// ── Header ───────────────────────────────────────────────────
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--accent-mid);
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+}
+
+.titleblock {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  overflow: hidden;
+  color: var(--t1);
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.revtag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  color: var(--t3);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+
+  // The refresh glyph is a footnote, not a second label.
+  svg {
+    opacity: 0.7;
+  }
+}
+
+.chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+// Chip renders a bare <span> and drops any props it isn't given, so a chip
+// that has to animate needs an element of its own to carry the motion.
+.chipEnter {
+  display: inline-flex;
+}
+
+// ── Body ─────────────────────────────────────────────────────
+
+.preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  margin: 0;
+  color: var(--t2);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+// Both this block and `.meta` below come and go while the card is already on
+// screen, so they open and close on EXPAND — which animates height, and needs
+// somewhere for the content to hide while that height is short.
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.progressLabel {
+  display: flex;
+  justify-content: space-between;
+  color: var(--t3);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.progressBar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--s3);
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-glow));
+  // The fill grows as steps complete — that is an expand, not a hover tweak.
+  // It only ever runs one way, so it keeps the house curve, not --ease-soft.
+  transition: width var(--motion-expand) var(--ease-out);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--b1);
+  border-radius: 999px;
+  background: var(--s3);
+  color: var(--t2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+}
+
+.statWarn {
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.statAccent {
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px solid var(--b1);
+}

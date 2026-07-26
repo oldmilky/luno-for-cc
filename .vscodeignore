@@ -1,0 +1,39 @@
+.vscode/**
+.vscode-test/**
+src/**
+webview/src/**
+webview/node_modules/**
+test/**
+docs/**
+**/*.ts
+**/*.map
+esbuild.config.mjs
+tsconfig.json
+vitest.config.*
+.gitignore
+.claude/**
+*.vsix
+# Lockfiles are dev-only — they were leaking into the package
+# (bun.lock and webview/package-lock.json both shipped before).
+**/*.lock
+**/package-lock.json
+dist-vsix/**
+.cache/**
+**/*.tgz
+node_modules/.bin/**
+# A stray full copy of the ghost.one project lives in this repo on purpose
+# (kept as a quality reference). Never pack it — vsce otherwise walks 3.8 GB.
+ghost.one/**
+# Dev-only manifests for the webview sub-project. `webview/dist/**` is the built
+# UI and must stay; nothing reads these two at runtime. (The bare `tsconfig.json`
+# rule above only anchors at the root — vsce does not match it at depth.)
+webview/package.json
+webview/tsconfig.json
+# `assets/` is mostly README art: the banner and the screenshots are never read at
+# runtime, only the two icons the manifest names. Excluding the rest cut the VSIX
+# from 2.3 MB to well under a megabyte. Written as deny-then-allow so a re-shot
+# screenshot is excluded by default and cannot silently start shipping again —
+# adding a *new* runtime image means adding it here.
+assets/**
+!assets/luno-icon-500.png
+!assets/luno-activitybar.png

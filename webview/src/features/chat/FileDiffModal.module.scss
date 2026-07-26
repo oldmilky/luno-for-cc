@@ -1,0 +1,715 @@
+// ─────────────────────────────────────────────────────────────
+// File diff modal — the full-screen unified-diff viewer opened
+// from an edited-files row. Converted from Tailwind in Ф2а.
+//
+// The hard-coded rgba() wash, panel shadow and "emerald" write
+// pills are now mixed from --s0 / --shadow-color / --ok, so the
+// whole modal follows the active palette. Diff rows read the
+// --add-*/--del-* tokens rather than Tailwind arbitrary values.
+// ─────────────────────────────────────────────────────────────
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 12px;
+  background: color-mix(in srgb, var(--s0) 65%, transparent);
+  backdrop-filter: blur(4px);
+
+  @media (min-width: 40rem) {
+    padding: 24px;
+  }
+}
+
+// Deliberately NOT positioned: the note popover below is absolute and has
+// always resolved against the fixed overlay, not this panel. Adding
+// `position: relative` here would silently re-anchor it.
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 920px;
+  max-height: 100%;
+  margin-top: auto;
+  margin-bottom: auto;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-lg);
+  background: var(--s1);
+  overflow: hidden;
+  box-shadow:
+    0 28px 80px color-mix(in srgb, var(--shadow-color) 60%, transparent),
+    0 0 0 1px var(--tint) inset;
+}
+
+// ── Header ───────────────────────────────────────────────────
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--b1);
+  background: linear-gradient(
+    to bottom,
+    var(--s1),
+    color-mix(in srgb, var(--s1) 85%, transparent)
+  );
+  // Hairline under the border so the header keeps its edge while the body
+  // scrolls beneath it.
+  box-shadow: 0 1px 0 var(--b1);
+}
+
+.headerMain {
+  display: flex;
+  align-items: flex-start;
+  flex: 1;
+  gap: 12px;
+  min-width: 0;
+}
+
+.tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--accent-mid);
+  border-radius: var(--round-sm);
+  background: linear-gradient(
+    135deg,
+    var(--accent-soft),
+    color-mix(in srgb, var(--accent) 5%, transparent)
+  );
+  // Overridden inline with the language's brand color when the extension is
+  // known — see EXT_COLORS in the .tsx.
+  color: var(--accent-glow);
+  box-shadow: 0 2px 14px var(--accent-shadow);
+}
+
+.titleWrap {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fileName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t1);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1px;
+}
+
+.added {
+  color: var(--add-line);
+}
+
+.removed {
+  color: var(--del-line);
+}
+
+// ── Action pill (Created / Wrote vs Edited / Updated) ────────
+
+.actionPill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.actionNew {
+  border-color: color-mix(in srgb, var(--ok) 35%, transparent);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.actionEdit {
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+}
+
+// ── Breadcrumbs ──────────────────────────────────────────────
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.crumbSep {
+  color: color-mix(in srgb, var(--t4) 70%, transparent);
+}
+
+.crumbName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    color: var(--t2);
+  }
+}
+
+// ── Header buttons ───────────────────────────────────────────
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+.hBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--round);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+}
+
+.hBtnIdle {
+  border-color: var(--b1);
+  background: var(--s2);
+  color: var(--t2);
+
+  &:hover {
+    border-color: var(--b2);
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+// The "Copied" flash — deliberately inert on hover so the confirmation
+// colour holds for its full 1.4s.
+.hBtnActive {
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--round);
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s2);
+    color: var(--t1);
+  }
+}
+
+// ── Body ─────────────────────────────────────────────────────
+
+.body {
+  flex: 1;
+  padding: 14px;
+  overflow-y: auto;
+  background: var(--s0);
+}
+
+.changes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+// ── Empty state ──────────────────────────────────────────────
+
+.empty {
+  padding: 64px 24px;
+  text-align: center;
+}
+
+.emptyIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 12px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round-lg);
+  background: var(--s2);
+  color: var(--t4);
+}
+
+.emptyTitle {
+  margin-bottom: 4px;
+  color: var(--t2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.emptyPath {
+  color: var(--t4);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.emptyHint {
+  margin-top: 12px;
+  color: var(--t3);
+  font-size: 11.5px;
+}
+
+.emptyBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--round);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--accent-deep);
+  }
+}
+
+// ── One change block (a Write or an Edit) ────────────────────
+
+.change {
+  border: 1px solid var(--b1);
+  border-radius: var(--round-sm);
+  background: var(--s1);
+  overflow: hidden;
+  box-shadow: 0 1px 0 var(--b1) inset;
+}
+
+.changeHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--b1);
+  background: linear-gradient(
+    to bottom,
+    var(--s2),
+    color-mix(in srgb, var(--s2) 70%, transparent)
+  );
+  font: inherit;
+  cursor: pointer;
+  // background-color, not `background`: the fill is a gradient and Blink will
+  // interpolate one, which the Tailwind original never did — the swap on
+  // hover has to stay instant.
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: linear-gradient(to bottom, var(--s3), var(--s2));
+  }
+}
+
+.changeLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.changeChev {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--t3);
+}
+
+.kindPill {
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.kindWrite {
+  border-color: color-mix(in srgb, var(--ok) 30%, transparent);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.kindEdit {
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+}
+
+.changeIndex {
+  color: var(--t4);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.changeStats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.diff {
+  overflow-x: auto;
+  background: color-mix(in srgb, var(--s0) 50%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11.75px;
+  line-height: 1.65;
+}
+
+// ── One diff row ─────────────────────────────────────────────
+
+.line {
+  display: flex;
+  align-items: stretch;
+  transition:
+    filter var(--motion-hover) var(--ease-out),
+    background-color var(--motion-hover) var(--ease-out);
+}
+
+.lineClickable {
+  cursor: pointer;
+}
+
+// Changed rows already carry a tint, so hover brightens the whole row
+// instead of restating the background — that keeps the marker and text
+// lifting together.
+.lineAdd {
+  background: var(--add-bg);
+
+  &:hover {
+    filter: brightness(1.25);
+  }
+}
+
+.lineDel {
+  background: var(--del-bg);
+
+  &:hover {
+    filter: brightness(1.25);
+  }
+}
+
+.lineCtx:hover {
+  background: color-mix(in srgb, var(--s1) 40%, transparent);
+}
+
+.gutter {
+  flex-shrink: 0;
+  width: 40px;
+  padding: 2px 8px 2px 0;
+  border-right: 1px solid color-mix(in srgb, var(--b1) 40%, transparent);
+  color: color-mix(in srgb, var(--t4) 70%, transparent);
+  font-size: 10.5px;
+  text-align: right;
+  user-select: none;
+}
+
+.marker {
+  flex-shrink: 0;
+  width: 20px;
+  border-left: 2px solid transparent;
+  font-weight: 700;
+  text-align: center;
+  user-select: none;
+}
+
+.markerAdd {
+  border-left-color: color-mix(in srgb, var(--add-line) 60%, transparent);
+  color: var(--add-line);
+}
+
+.markerDel {
+  border-left-color: color-mix(in srgb, var(--del-line) 60%, transparent);
+  color: var(--del-line);
+}
+
+.markerCtx {
+  color: color-mix(in srgb, var(--t4) 50%, transparent);
+}
+
+.lineText {
+  position: relative;
+  flex: 1;
+  padding: 2px 12px 2px 8px;
+  color: var(--t1);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.noteChip {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  padding: 1px 4px;
+  border: 1px solid var(--accent-mid);
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  line-height: 1;
+  text-transform: uppercase;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-hover) var(--ease-out);
+}
+
+.line:hover .noteChip {
+  opacity: 1;
+}
+
+// ── Line-note popover ────────────────────────────────────────
+
+.note {
+  position: absolute;
+  left: 50%;
+  bottom: 48px;
+  z-index: 10;
+  width: 88%;
+  max-width: 640px;
+  padding: 12px;
+  border: 1px solid var(--accent-mid);
+  border-radius: var(--round-lg);
+  background: var(--s2);
+  box-shadow: 0 14px 36px color-mix(in srgb, var(--shadow-color) 50%, transparent);
+  // `translate`, not `transform`: framer-motion writes an inline `transform`
+  // for the enter/exit, which would wipe out a transform-based centering.
+  translate: -50%;
+}
+
+.noteHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.noteTitle {
+  color: var(--accent-glow);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.noteClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--round);
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+.noteContext {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  overflow: hidden;
+  border: 1px solid var(--b1);
+  border-radius: var(--round);
+  background: var(--s0);
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.noteInput {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round);
+  background: var(--s0);
+  color: var(--t1);
+  font: inherit;
+  font-size: 12px;
+  resize: none;
+  outline: none;
+  transition:
+    border-color var(--motion-hover) var(--ease-out),
+    box-shadow var(--motion-hover) var(--ease-out);
+
+  &::placeholder {
+    color: var(--t4);
+  }
+
+  &:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+}
+
+.noteFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.noteHint {
+  color: var(--t4);
+  font-size: 10px;
+}
+
+.noteKbd {
+  padding: 1px 4px;
+  border: 1px solid var(--b2);
+  border-radius: 4px;
+  background: var(--s3);
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.noteAdd {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--round);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--accent-deep);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+// ── Footer ───────────────────────────────────────────────────
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-top: 1px solid var(--b1);
+  background: color-mix(in srgb, var(--s1) 60%, transparent);
+  color: var(--t4);
+  font-size: 11px;
+}
+
+.footerKbd {
+  padding: 2px 6px;
+  border: 1px solid var(--b2);
+  border-radius: 4px;
+  background: var(--s2);
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.footerKbdLabel {
+  margin-left: 6px;
+}
+
+.footerCount {
+  font-family: var(--font-mono);
+}

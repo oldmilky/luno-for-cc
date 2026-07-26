@@ -1,0 +1,25 @@
+// ─────────────────────────────────────────────────────────────
+// Pink — magenta accent over plum-tinted surfaces. Warmer and more
+// pigmented than purple, which sits next to it in the picker.
+// The accent is light, so its fill takes a dark glyph.
+// ─────────────────────────────────────────────────────────────
+
+[data-theme="pink"] {
+  --s0: #0f0810;
+  --s1: #180f19;
+  --s2: #211622;
+  --s3: #2e1f30;
+
+  --t1: #f7e9f3;
+  --t2: #d8bcd0;
+  --t3: #9b7a92;
+  --t4: #614b5c;
+
+  --accent: #f472b6;
+  --accent-deep: #be185d;
+  --accent-glow: #fbaad4;
+  --on-accent: #2d0618;
+
+  --lift: #ffffff;
+  --brand-tile-gradient: linear-gradient(160deg, #fbaad4, #be185d);
+}

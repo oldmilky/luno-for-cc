@@ -1,0 +1,206 @@
+{
+  "name": "luno-for-cc",
+  "displayName": "LUNO for CC",
+  "description": "LUNO for CC — personal Claude Code chat for Cursor / VS Code.",
+  "version": "0.10.0",
+  "publisher": "lunoweb",
+  "license": "MIT",
+  "icon": "assets/luno-icon-500.png",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "ai",
+    "agent",
+    "coding assistant",
+    "anthropic",
+    "copilot",
+    "chat"
+  ],
+  "galleryBanner": {
+    "color": "#141619",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oldmilky/luno-for-cc.git"
+  },
+  "homepage": "https://github.com/oldmilky/luno-for-cc#readme",
+  "bugs": {
+    "url": "https://github.com/oldmilky/luno-for-cc/issues"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "luno",
+          "title": "LUNO for CC",
+          "icon": "assets/luno-activitybar.png"
+        }
+      ]
+    },
+    "views": {
+      "luno": [
+        {
+          "type": "webview",
+          "id": "luno.chat",
+          "name": "Chat",
+          "contextualTitle": "Luno"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "luno.newChat",
+        "title": "LUNO: New Chat"
+      },
+      {
+        "command": "luno.toggleChat",
+        "title": "LUNO: Toggle Chat Panel"
+      },
+      {
+        "command": "luno.cycleMode",
+        "title": "LUNO: Cycle Permission Mode"
+      },
+      {
+        "command": "luno.sendSelection",
+        "title": "LUNO: Send Selection to Chat"
+      },
+      {
+        "command": "luno.commentOnSelection",
+        "title": "LUNO: Comment on Selection"
+      },
+      {
+        "command": "luno.generateConventions",
+        "title": "LUNO: Generate CLAUDE.md"
+      },
+      {
+        "command": "luno.openConnectors",
+        "title": "LUNO: Open Connectors"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "luno.toggleChat",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i"
+      },
+      {
+        "command": "luno.cycleMode",
+        "key": "shift+tab",
+        "when": "luno.chatFocused"
+      },
+      {
+        "command": "luno.sendSelection",
+        "key": "ctrl+u",
+        "mac": "cmd+u",
+        "when": "editorHasSelection"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "luno.commentOnSelection",
+          "group": "luno@1",
+          "when": "editorHasSelection"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Luno",
+      "properties": {
+        "luno.model": {
+          "type": "string",
+          "default": "default",
+          "description": "Model passed to 'claude -p --model'. Defaults to a CLI alias (sonnet, opus, haiku, opusplan, default) that always tracks the latest model for that tier; an explicit version (e.g. claude-sonnet-4-6) also works."
+        },
+        "luno.effort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "default": "high",
+          "description": "Reasoning effort passed to 'claude --effort'. Higher levels let the model reason longer (and spend more tokens) before answering. Set from the model picker in the chat composer."
+        },
+        "luno.thinking": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable extended thinking (sets 'alwaysThinkingEnabled' for the session). When on, the model reasons step-by-step before answering — higher quality on complex work, at a higher token cost. Toggle from the model picker in the chat composer."
+        },
+        "luno.claudeBinaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the 'claude' CLI binary Luno runs. Leave empty to auto-detect: Luno searches PATH and the standard install locations (~/.claude/local, npm global, Homebrew). Set this only to pin a specific install, or if auto-detection fails — run 'where claude' (Windows) or 'which claude' to find yours. On Windows point it at claude.exe, not the claude.cmd shim. Model aliases (opus, sonnet, default) resolve to whatever models that binary knows, so a self-updating native install picks up new models without waiting for a Luno release."
+        },
+        "luno.devServerUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Dev only. When set to a running Vite dev server (bun run dev:webview → http://localhost:5173), the panel loads the webview sources from it instead of the built bundle, so UI edits hot-reload instantly — no rebuild, no repackage, no Reload Window. Leave empty for normal use. Note: changes to extension-host code (src/) still need a window reload."
+        },
+        "luno.devAutoRestart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Dev only. In an Extension Development Host (F5), restart the extension host automatically whenever 'bun run watch' rebuilds dist/extension.js — the closest thing to hot-reload for extension-host code, which VS Code cannot reload in place. Ignored entirely in a normally installed extension."
+        },
+        "luno.permissionMode": {
+          "type": "string",
+          "enum": [
+            "default",
+            "plan",
+            "auto"
+          ],
+          "default": "default",
+          "description": "Tool approval behavior. 'default' prompts before each action; 'plan' is read-only / no execution; 'auto' auto-approves the Claude CLI's standard read/search tools and bash commands matching allowedBashPatterns."
+        },
+        "luno.maxTokens": {
+          "type": "number",
+          "default": 4096,
+          "description": "Max output tokens per assistant turn. Lower = fewer rate-limit hits on subscription tokens."
+        },
+        "luno.allowedBashPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "^git (status|diff|log|branch)$",
+            "^npm (test|run test)$"
+          ],
+          "description": "Regex patterns of bash commands auto-approved in auto mode."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "install:all": "bun install && bun install --cwd webview",
+    "build": "bun run esbuild.config.mjs && bun run --cwd webview build",
+    "watch": "bun run esbuild.config.mjs --watch",
+    "dev:webview": "bun run --cwd webview dev",
+    "package": "bunx @vscode/vsce package --no-dependencies --allow-star-activation --skip-license",
+    "test": "vitest run",
+    "lint": "tsc --noEmit && bun run --cwd webview lint"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

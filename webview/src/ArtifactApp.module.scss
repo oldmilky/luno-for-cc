@@ -1,0 +1,39 @@
+// ─────────────────────────────────────────────────────────────
+// Plan artifact shell — hosts PlanFullView in a full editor tab.
+// Only the shell box lives here. The `artifact-shell` global
+// class stays on the same element because theme.css keys the
+// artifact-mode overrides of the plan view (`.artifact-shell
+// .plan-inline*`) off it — those belong to the plan feature.
+// Converted from Tailwind + theme.css in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--s0);
+}
+
+// ── Missing-revision fallback ────────────────────────────────
+
+.empty {
+  padding: 60px 40px;
+  color: var(--t3);
+  text-align: center;
+}
+
+.emptyTitle {
+  margin-bottom: 8px;
+  color: var(--t1);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.emptyBody {
+  max-width: 440px;
+  margin: 0 auto;
+  font-size: 13px;
+  line-height: 1.5;
+}

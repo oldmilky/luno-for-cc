@@ -1,0 +1,138 @@
+// ─────────────────────────────────────────────────────────────
+// Theme picker — reference SCSS module.
+//
+// House rules on display here: every color, radius and duration is
+// a token; nothing is hard-coded, and no Tailwind class is involved.
+// ─────────────────────────────────────────────────────────────
+
+.trigger {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--round-sm);
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+
+  &[aria-expanded="true"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+}
+
+.root {
+  position: relative;
+  display: inline-flex;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  // Matches Dropdown's `.below`: the scale has to grow out of the edge
+  // nearest the trigger, or the menu reads as arriving from nowhere.
+  transform-origin: top center;
+  min-width: 208px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--b2);
+  border-radius: var(--round);
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  box-shadow:
+    0 12px 32px -12px rgb(0 0 0 / 0.55),
+    0 0 0 1px var(--b1) inset;
+}
+
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--round-sm);
+  background: transparent;
+  color: var(--t2);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--tint);
+    color: var(--t1);
+  }
+
+  &[aria-selected="true"] {
+    background: var(--accent-soft);
+    color: var(--t1);
+  }
+}
+
+.label {
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.note {
+  display: block;
+  margin-top: 1px;
+  color: var(--t3);
+  font-size: 10.5px;
+  font-weight: 400;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.check {
+  flex-shrink: 0;
+  color: var(--accent);
+  display: inline-flex;
+}
+
+// The swatch previews a palette the honest way: the element carries that
+// palette's own `data-theme`, so these tokens resolve to *its* values.
+// No palette colors are ever duplicated in TS or in this file.
+.swatch {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--b2);
+  background:
+    radial-gradient(circle at 32% 30%, var(--accent-glow), transparent 55%),
+    var(--brand-tile-gradient);
+  box-shadow: 0 0 0 3px var(--s1) inset;
+  transition: box-shadow var(--motion-hover) var(--ease-out);
+
+  .item:hover &,
+  .item[aria-selected="true"] & {
+    box-shadow:
+      0 0 0 2px var(--s1) inset,
+      0 0 10px var(--accent-shadow);
+  }
+}

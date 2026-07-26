@@ -1,0 +1,214 @@
+// ─────────────────────────────────────────────────────────────
+// Permission request — the inline approve/deny card.
+// Converted from Tailwind + inline styles in Ф2а.
+//
+// The risk tone used to be a JS string ("var(--err)" | "var(--warn)"
+// | "var(--accent)") threaded through three inline styles. It is now
+// a single modifier class on the card, so the stripe, the tool tag
+// and the Allow fill stay in sync without the TSX naming a color.
+//
+// The Allow glyph was a hard-coded #fff; --on-accent is the palette's
+// "readable label on a filled control", so amber/red fills now get a
+// legible label in the light-glyph palettes too.
+// ─────────────────────────────────────────────────────────────
+
+.card {
+  overflow: hidden;
+  border: 1px solid var(--b2);
+  // The 3px left edge is the whole risk signal — tone overrides only its color.
+  border-left: 3px solid var(--accent);
+  border-radius: var(--round-sm);
+  background: var(--s1);
+}
+
+.danger {
+  border-left-color: var(--err);
+}
+
+.network {
+  border-left-color: var(--warn);
+}
+
+// ── Header ───────────────────────────────────────────────────
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 12px 0;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.toolTag {
+  flex-shrink: 0;
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.danger .toolTag {
+  color: var(--err);
+}
+
+.network .toolTag {
+  color: var(--warn);
+}
+
+// ── Preview ──────────────────────────────────────────────────
+
+.preview {
+  padding: 8px 12px 10px;
+}
+
+.edits {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+// Recessed surface shared by the command block and the input table.
+%recessed {
+  padding: 8px 10px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round);
+  background: color-mix(in srgb, var(--s0) 50%, transparent);
+}
+
+.command {
+  @extend %recessed;
+  margin: 0;
+  max-height: 160px;
+  overflow-y: auto;
+  color: var(--t1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  // break-all, not break-word: long one-token paths in a shell line must
+  // wrap rather than push the card wider than the chat column.
+  word-break: break-all;
+}
+
+.prompt {
+  color: var(--t4);
+  user-select: none;
+}
+
+.inputs {
+  @extend %recessed;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inputRow {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.inputKey {
+  flex-shrink: 0;
+  min-width: 56px;
+  color: var(--t3);
+  font-family: var(--font-mono);
+}
+
+.inputValue {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--t1);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// ── Actions ──────────────────────────────────────────────────
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0 10px 10px;
+}
+
+%action {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--round);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+%ghost {
+  @extend %action;
+  background: transparent;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s2);
+    color: var(--t1);
+  }
+
+  // The card focuses a button on mount so ↵/Esc work without a click; the
+  // default ring would read as an error state, so focus is shown as a wash
+  // and only for keyboard focus.
+  &:focus {
+    outline: none;
+  }
+
+  &:focus-visible {
+    background: var(--s2);
+  }
+}
+
+.deny {
+  @extend %ghost;
+  color: var(--t2);
+  font-weight: 600;
+}
+
+.allowTurn {
+  @extend %ghost;
+  color: var(--t3);
+  font-weight: 500;
+}
+
+.allow {
+  @extend %action;
+  padding: 6px 14px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  transition: filter var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    filter: brightness(1.1);
+  }
+
+  &:focus {
+    outline: none;
+  }
+}
+
+.danger .allow {
+  background: var(--err);
+}
+
+.network .allow {
+  background: var(--warn);
+}

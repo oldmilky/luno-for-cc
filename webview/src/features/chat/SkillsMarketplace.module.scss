@@ -1,0 +1,736 @@
+// ─────────────────────────────────────────────────────────────
+// Skills Marketplace — the full-screen catalog modal: backdrop,
+// panel, toolbar (search + tabs), card grid, toast and footer.
+// Converted from the theme.css "Modal — Skills Marketplace"
+// section in Ф2а.
+//
+// The hard-coded rgba() values it carried are all tokens in
+// disguise: the scope-user badge was --accent at 14%, the danger
+// button and the error toast were --err, the split-button divider
+// was the on-accent glyph color at 22%, and the black scrims are
+// --shadow-color. They now follow the palette.
+//
+// The install split-button's popover is NOT re-created here — it
+// borrows the shared Dropdown surface (see SkillsMarketplace.tsx);
+// only the two-line item layout lives in this file.
+// ─────────────────────────────────────────────────────────────
+
+@use "../../themes/motion" as motion;
+
+// ── Backdrop + panel ─────────────────────────────────────────
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: color-mix(in srgb, var(--shadow-color) 72%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+
+// theme.css declared `.modal` twice; the padding came from the FIRST
+// (rewind-dialog) block, which the marketplace block never reset — so it
+// was live here, and the toast's `bottom: 64px` is measured from inside
+// it. Kept verbatim.
+.modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 920px;
+  height: min(720px, calc(100vh - 48px));
+  padding: 22px 22px 18px;
+  border: 1px solid var(--b2);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--s1);
+  box-shadow:
+    0 30px 80px color-mix(in srgb, var(--shadow-color) 70%, transparent),
+    0 0 0 1px var(--tint-weak) inset;
+}
+
+// The CSS twin of the OVERLAY_PANEL framer preset — same travel, same scale,
+// same curve — so this modal and the framer-driven SkillDetailModal arrive as
+// the same motion. CSS Modules scope @keyframes names, so the connectors modal
+// declares its own identical copy.
+
+@media (max-width: 640px) {
+  .backdrop {
+    padding: 12px 8px;
+  }
+
+  .modal {
+    max-width: 100%;
+    height: calc(100vh - 24px);
+    border-radius: 12px;
+  }
+}
+
+// ── Header ───────────────────────────────────────────────────
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--b1);
+}
+
+.headTitles {
+  flex: 1;
+  min-width: 0;
+}
+
+// Kept in the DOM for screen-reader context but never painted — the
+// modal title alone carries the visual hierarchy.
+.eyebrow {
+  display: none;
+}
+
+.title {
+  margin: 0;
+  color: var(--t1);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.sub {
+  margin: 2px 0 0;
+  color: var(--t3);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.link {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+// ── Toolbar: search + tabs ───────────────────────────────────
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--b1);
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  flex: 1 1 280px;
+  gap: 8px;
+  min-width: 220px;
+  padding: 8px 11px;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-sm);
+  background: var(--s2);
+  transition:
+    border-color var(--motion-hover) var(--ease-out),
+    box-shadow var(--motion-hover) var(--ease-out);
+
+  &:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  svg {
+    flex-shrink: 0;
+    color: var(--t3);
+  }
+
+  input {
+    flex: 1;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--t1);
+    font-family: inherit;
+    font-size: 13px;
+
+    &::placeholder {
+      color: var(--t4);
+    }
+  }
+}
+
+.searchCount {
+  flex-shrink: 0;
+  padding: 0 4px;
+  color: var(--t4);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tab {
+  padding: 5px 11px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--t3);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.tabActive {
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+  color: var(--accent);
+
+  // theme.css wrote this as `.market-tab.active`, which tied with
+  // `.market-tab:hover` and won on order. A standalone module class is one
+  // notch weaker, so without this the selected tab greys out under the
+  // cursor.
+  &:hover {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .tabCount {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+}
+
+.tabCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: var(--round-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+@media (max-width: 520px) {
+  .toolbar {
+    gap: 8px;
+    padding: 10px 14px;
+  }
+
+  .tabs {
+    width: 100%;
+  }
+}
+
+// ── Grid ─────────────────────────────────────────────────────
+
+.grid {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+  align-content: start;
+  min-height: 320px;
+  padding: 10px 16px;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  transition: opacity var(--motion-hover) var(--ease-out);
+}
+
+// Dimmed while a new query is in flight. The previous results stay
+// mounted on purpose — clearing them collapses the grid on every
+// keystroke — so they are frozen instead of removed.
+.gridSearching {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  grid-column: 1 / -1;
+  gap: 8px;
+  padding: 32px 16px;
+  color: var(--t3);
+  font-size: 13px;
+  text-align: center;
+
+  svg {
+    color: var(--t4);
+  }
+}
+
+.loadMore {
+  display: flex;
+  justify-content: center;
+  grid-column: 1 / -1;
+  padding: 8px 0 4px;
+}
+
+@media (max-width: 520px) {
+  .grid {
+    grid-template-columns: 1fr;
+    padding: 12px 14px;
+  }
+}
+
+// ── Card ─────────────────────────────────────────────────────
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid var(--b1);
+  border-radius: 9px;
+  background: var(--s2);
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    transform var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b3);
+    transform: translateY(-1px);
+  }
+}
+
+.cardInstalled {
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+
+  // Same specificity story as .tabActive: `.card:hover` would otherwise
+  // pull the border back to --b3 and drop the installed accent ring.
+  // The lift from `.card:hover` still applies — only the color is pinned.
+  &:hover {
+    border-color: var(--accent-mid);
+  }
+
+  .cardIcon {
+    background: var(--accent);
+    color: var(--on-accent);
+    box-shadow: 0 2px 10px var(--accent-shadow);
+  }
+}
+
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.cardIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--s3);
+  color: var(--accent);
+}
+
+.cardTitles {
+  min-width: 0;
+}
+
+.cardName {
+  display: block;
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.cardPub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  color: var(--t3);
+  font-size: 10.5px;
+}
+
+.cardCat {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
+.cardDot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--t4);
+}
+
+.cardDesc {
+  flex: 1;
+  margin: 0;
+  color: var(--t2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cardActions {
+  display: flex;
+  gap: 6px;
+}
+
+@media (max-width: 520px) {
+  .cardActions {
+    flex-wrap: wrap;
+  }
+}
+
+// ── Card buttons ─────────────────────────────────────────────
+
+.cardBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    box-shadow var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out),
+    transform var(--motion-hover) var(--ease-out);
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  // Inside the split pair the halo belongs to the pair, not to each half —
+  // two stacked shadows darken the seam between them. Declared here, ahead
+  // of `.primary:hover`, so hovering a half still raises its own shadow.
+  .split & {
+    margin: 0;
+    box-shadow: none;
+  }
+}
+
+.ghost {
+  border: 1px solid var(--b2);
+  background: transparent;
+  color: var(--t3);
+
+  &:hover {
+    border-color: var(--b3);
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+.primary {
+  margin-left: auto;
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 1px 6px var(--accent-shadow);
+
+  &:hover {
+    background: var(--accent-deep);
+    box-shadow: 0 3px 14px var(--accent-shadow);
+    transform: translateY(-1px);
+  }
+}
+
+.danger {
+  border: 1px solid var(--b2);
+  background: transparent;
+  color: var(--err);
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--err) 40%, transparent);
+    background: color-mix(in srgb, var(--err) 8%, transparent);
+  }
+}
+
+// ── Installed badge ──────────────────────────────────────────
+
+.installedBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.scopeUser {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.scopeProject {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+// ── Install split button ─────────────────────────────────────
+
+.split {
+  position: relative;
+  display: inline-flex;
+  margin-left: auto;
+  border-radius: 6px;
+  box-shadow: 0 1px 6px var(--accent-shadow);
+}
+
+.splitMain {
+  border-radius: 6px 0 0 6px;
+  // Divider drawn in the glyph color so it reads on any accent fill.
+  border-right: 1px solid color-mix(in srgb, var(--on-accent) 22%, transparent);
+}
+
+.splitToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 7px;
+  border-radius: 0 6px 6px 0;
+
+  // Kept in lockstep with the popover it announces: the Dropdown surface
+  // opens at --motion-overlay, so the chevron turns over the same window.
+  svg {
+    transition: transform var(--motion-overlay) var(--ease-out);
+  }
+
+  &[aria-expanded="true"] svg {
+    transform: rotate(180deg);
+  }
+}
+
+@media (max-width: 520px) {
+  .split {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  // The install button can be disabled, so Tooltip wraps it in a pointer gate —
+  // and the flex child of `.split` is now that span rather than the button
+  // itself. `.splitMain`'s `flex: 1` still fills the span, but the span also has
+  // to fill the row, or the button stops stretching at this width.
+  .split > *:first-child {
+    flex: 1;
+  }
+
+  .splitMain {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+// Two-line menu row. The surrounding popover surface comes from
+// Dropdown.module.scss; only this layout is local.
+.installItem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--t1);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+  }
+
+  + .installItem {
+    margin-top: 2px;
+    padding-top: 9px;
+    border-top: 1px solid var(--b1);
+  }
+}
+
+.itemTitle {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.itemSub {
+  color: var(--t3);
+  font-size: 10.5px;
+}
+
+// ── Toast ────────────────────────────────────────────────────
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 64px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--round-sm);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--shadow-color) 35%, transparent);
+  transform: translateX(-50%);
+  animation: market-toast-in var(--motion-enter) var(--ease-out);
+}
+
+.toastOk {
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.toastErr {
+  border: 1px solid color-mix(in srgb, var(--err) 40%, transparent);
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+  color: var(--err);
+}
+
+// Keeps the -50% centering while sliding up, so the toast does not
+// drift sideways during the entrance. The rise matches the ENTER preset,
+// which is what everything else that appears uses.
+@keyframes market-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, var(--travel-sm));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+// ── Footer ───────────────────────────────────────────────────
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 10px;
+  padding: 7px 16px;
+  border-top: 1px solid var(--b1);
+  background: var(--tint-weak);
+  color: var(--t3);
+  font-size: 11px;
+}
+
+.inlineBtn {
+  padding: 5px 11px;
+  border: 1px solid var(--accent-mid);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-glow);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--t1);
+  }
+}
+
+// ── Spinners ─────────────────────────────────────────────────
+// Only the ring's *look* is local — a track-plus-head ring (--b3 track,
+// --accent head) rather than ToolCard's currentColor arc. The rotation
+// itself is the shared one, so this ring, the connectors ring and
+// ToolCard's all turn at --motion-spin instead of the three different
+// rates they drifted to. .spinnerLg is imported by SkillDetailModal.
+
+%market-ring {
+  display: inline-block;
+  flex-shrink: 0;
+  border: 2px solid var(--b3);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  @include motion.spin;
+}
+
+.searchSpinner {
+  @extend %market-ring;
+  width: 12px;
+  height: 12px;
+}
+
+.spinnerLg {
+  @extend %market-ring;
+  width: 22px;
+  height: 22px;
+  border-width: 2.5px;
+}

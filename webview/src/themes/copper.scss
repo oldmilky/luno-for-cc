@@ -1,0 +1,35 @@
+// ─────────────────────────────────────────────────────────────
+// Copper — the original "Forge Premium" palette, and the default.
+//
+// Warm charcoal surfaces, copper accent matched to the Luno brand
+// mark (tile gradient #E08A68 → #C75C39, cream glyph #FBF3E9);
+// `--accent` is the gradient midpoint so it reads as brand copper.
+//
+// Doubles as the fallback: the `:root` selector keeps every token
+// defined even if nothing stamps `data-theme` (e.g. the artifact
+// editor tab before the store mounts).
+// ─────────────────────────────────────────────────────────────
+
+:root,
+[data-theme="copper"] {
+  // Surfaces — neutral dark greys, 4 elevations.
+  --s0: #0c0c0d;
+  --s1: #131315;
+  --s2: #1a1a1d;
+  --s3: #232328;
+
+  // Text — cool neutrals.
+  --t1: #ececef;
+  --t2: #c2c2c8;
+  --t3: #7a7a82;
+  --t4: #4a4a52;
+
+  // Accent — brand copper.
+  --accent: #d37350;
+  --accent-deep: #c75c39;
+  --accent-glow: #edab8a;
+  --on-accent: #fbf3e9;
+
+  --lift: #ffffff;
+  --brand-tile-gradient: linear-gradient(160deg, #e08a68, #c75c39);
+}

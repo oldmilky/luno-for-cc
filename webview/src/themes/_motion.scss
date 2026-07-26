@@ -1,0 +1,61 @@
+// ─────────────────────────────────────────────────────────────
+// Ambient loop mixins — the CSS half of the motion language.
+//
+// motion.ts owns everything that starts and finishes; these are the
+// loops that run for as long as a condition holds, and they cannot
+// live there because they belong to pseudo-elements and decorative
+// layers that were never React components.
+//
+// Why mixins and not one shared @keyframes: CSS Modules scope keyframe
+// names to the module that declares them, so a module cannot reference
+// a keyframe declared anywhere else — not another module, not theme.css.
+// The workaround people reach for, `:global(name)` inside an `animation`
+// shorthand, does not work in this Vite version; it compiles, and the
+// reference is silently dead.
+//
+// So the sharing happens in the source instead of the output. One
+// definition here, `@include`d where needed, each module emitting its
+// own scoped copy. The duplication that mattered was never the bytes —
+// it was that `halo-breathe` existed three times at 1.8s, 3.6s and 4s,
+// and one spinner shape existed four times at 700ms, 700ms, 800ms and
+// 1400ms. Same drift the thirteen hand-tuned springs had before
+// motion.ts, in the language CSS speaks.
+// ─────────────────────────────────────────────────────────────
+
+/// Breathing glow behind an icon or avatar.
+///
+/// Two periods, because they are two different jobs. `--motion-ambient`
+/// (1.8s) means *something is happening right now* — it is the pulse
+/// behind a streaming reply, and it has to read as activity. The default
+/// `--motion-halo` (3.6s) is decorative: a logo or a modal icon that
+/// glows because the surface is alive, not because work is in flight. A
+/// decorative halo at the activity period reads as a progress indicator
+/// that never finishes.
+@mixin halo-breathe($period: var(--motion-halo)) {
+  animation: halo-breathe $period var(--ease-soft) infinite;
+
+  @keyframes halo-breathe {
+    0%,
+    100% {
+      opacity: 0.45;
+      transform: scale(0.92);
+    }
+    50% {
+      opacity: 0.9;
+      transform: scale(1.08);
+    }
+  }
+}
+
+/// Loading ring. `linear` is mandatory — an eased curve makes a spinner
+/// stutter once per revolution, which reads as the app hitching rather
+/// than as a curve.
+@mixin spin($period: var(--motion-spin)) {
+  animation: spinner-rotate $period linear infinite;
+
+  @keyframes spinner-rotate {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}

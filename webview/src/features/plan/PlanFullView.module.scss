@@ -1,0 +1,440 @@
+// ─────────────────────────────────────────────────────────────
+// Inline expanded plan view — the card the chat stream swaps in
+// where the compact PlanCard was: header, progress rule, rendered
+// plan markdown, then the comments / steps / questions / footer
+// stack.
+// Converted from theme.css `.plan-inline*` + `.plan-modal-*` in Ф2а.
+//
+// Two things here are deliberately not local:
+//   · `.artifact-shell` — ArtifactApp's outer shell, still a global
+//     class, so the full-tab overrides hook it with :global().
+//   · `.plan-modal-section` — SidebarCommentsList still carries it;
+//     the tightening rule stays until that component gets a module.
+// ─────────────────────────────────────────────────────────────
+
+.plan {
+  display: flex;
+  flex-direction: column;
+  margin: 12px 0;
+  border: 1px solid var(--b2);
+  border-radius: var(--round);
+  background: var(--s1);
+  overflow: hidden;
+
+  // In the artifact editor tab the card *is* the page.
+  :global(.artifact-shell) & {
+    flex: 1;
+    height: 100%;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+  }
+}
+
+// ── Header ───────────────────────────────────────────────────
+
+.head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--b1);
+  background: var(--s2);
+}
+
+.headLeft {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+}
+
+.titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  color: var(--t1);
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subtitle {
+  margin-top: 1px;
+  color: var(--t3);
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.path {
+  color: var(--t3);
+  font-family: var(--font-mono);
+}
+
+.dot {
+  padding: 0 2px;
+  color: var(--t4);
+}
+
+.superseded {
+  color: var(--t3);
+  font-style: italic;
+}
+
+.headRight {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+// IconButton drops any prop it isn't given, so a header control that has to
+// animate in needs an element of its own to carry the motion.
+.headSlot {
+  display: inline-flex;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--b1);
+  border-radius: 5px;
+  background: var(--s3);
+  color: var(--t2);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b3);
+    color: var(--t1);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  // Compounded, and declared after `:hover`, so the open Review button keeps
+  // its accent outline while the pointer is still on it.
+  &.toggleActive {
+    border-color: var(--accent-mid);
+    background: var(--accent-soft);
+    color: var(--accent-glow);
+  }
+}
+
+// ── "Plan in progress" banner ────────────────────────────────
+// Was the editor's own `--vscode-inputValidation-*` blues. Those are always
+// defined inside a webview, so the fallback never fired and this banner was
+// the one surface that ignored the palette — it reads --info now.
+
+// Appears the moment the plan is approved, under a card that stays mounted,
+// so it opens and closes on EXPAND — which animates height and needs
+// somewhere for the row to hide while that height is short.
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--info) 40%, transparent);
+  border-radius: 6px;
+  background: var(--info-soft);
+  color: var(--t1);
+  font-size: 12px;
+}
+
+// ── Progress rule ────────────────────────────────────────────
+
+.progress {
+  flex-shrink: 0;
+  height: 3px;
+  background: var(--s0);
+  overflow: hidden;
+}
+
+.progressBar {
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--ok) 72%, var(--s0)),
+    var(--ok)
+  );
+  // Expand role — the bar grows along its width as steps complete. Same bar
+  // as PlanCard's `.progressFill`, just the expanded view of it, so it has to
+  // carry the identical timing and curve. It only ever runs forwards (the
+  // rewind button collapses this card), hence the house curve, not --ease-soft.
+  transition: width var(--motion-expand) var(--ease-out);
+}
+
+// ── Document pane ────────────────────────────────────────────
+
+.doc {
+  position: relative;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--b1);
+  background: var(--s0);
+  max-height: 540px;
+  overflow: auto;
+
+  :global(.artifact-shell) & {
+    flex: 1;
+    padding: 32px 36px;
+    max-height: none;
+    min-height: 0;
+  }
+}
+
+// Positioning context for the inline comment threads portalled into
+// the rendered markdown.
+.docStack {
+  position: relative;
+}
+
+// The plan body. Element selectors, not classes: renderMarkdown emits its
+// own `.md-*` classes and these rules have to outrank them.
+//
+// Both classes are named on purpose. The element also carries the global
+// `.md`, and theme.css is bundled *after* the CSS modules — so a single
+// class here only ties with `.md`, `h3.md-h`, `.md-table th` and
+// `.md-code code`, and the tie goes to theme.css. The second class buys
+// back the point `.plan-inline-md` got for free by sitting later in the
+// same file.
+.docMd:global(.md) {
+  color: var(--t1);
+  font-size: 13px;
+  line-height: 1.6;
+
+  h1,
+  h2,
+  h3 {
+    margin-top: 1.2em;
+    margin-bottom: 0.4em;
+    font-weight: 700;
+  }
+
+  // The plan title — sits at the very top, separated by a hairline rule.
+  h1 {
+    margin-top: 0;
+    margin-bottom: 0.9em;
+    padding-bottom: 0.55em;
+    border-bottom: 1px solid var(--b1);
+    font-size: 18px;
+    letter-spacing: -0.3px;
+  }
+
+  // The 5 plan sections (Context / Approach / Conventions / Risks /
+  // Verification). Treated as anchored section markers — an accent bar +
+  // uppercase label + a divider rule above — so the plan reads as a set of
+  // scannable sections rather than one wall of prose.
+  h2 {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 1.7em;
+    padding-top: 1.1em;
+    border-top: 1px solid var(--b1);
+    color: var(--accent-glow);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+
+    &::before {
+      content: "";
+      flex-shrink: 0;
+      width: 3px;
+      height: 13px;
+      border-radius: 2px;
+      background: linear-gradient(180deg, var(--accent-glow), var(--accent));
+    }
+  }
+
+  // The first section follows the title directly — drop the divider so we
+  // don't double up on the title's bottom rule.
+  h1 + h2 {
+    margin-top: 0.4em;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  h3 {
+    color: var(--t1);
+    font-size: 13px;
+    letter-spacing: -0.1px;
+  }
+
+  // Tighten the gap between a section heading and its opening paragraph.
+  h2 + p,
+  h2 + ul,
+  h2 + ol {
+    margin-top: 0.5em;
+  }
+
+  table {
+    width: 100%;
+    margin: 0.8em 0;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  th,
+  td {
+    padding: 5px 8px;
+    border: 1px solid var(--b1);
+    text-align: left;
+  }
+
+  th {
+    background: var(--s2);
+  }
+
+  code {
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--s2);
+    font-size: 11.5px;
+  }
+
+  // Selecting plan text is how a comment gets anchored, so the selection
+  // wash is the comment green rather than the accent.
+  ::selection {
+    background: color-mix(in srgb, var(--ok) 32%, transparent);
+    color: inherit;
+  }
+
+  :global(.artifact-shell) & {
+    max-width: 760px;
+    font-size: 14px;
+    line-height: 1.7;
+
+    h1 {
+      font-size: 22px;
+    }
+
+    h2 {
+      font-size: 17px;
+    }
+
+    h3 {
+      font-size: 15px;
+    }
+  }
+}
+
+// The one plan-body rule that must stay on a single class: a fenced block
+// sits inside `.md-code-wrap`, which already draws the border and radius
+// and flattens the `<pre>` with `.md-code-wrap .md-code`. Two classes here
+// would outrank that and draw a second border inside the code chrome.
+.docMd pre {
+  padding: 8px 10px;
+  border: 1px solid var(--b1);
+  border-radius: 6px;
+  background: var(--s0);
+  font-size: 11.5px;
+  overflow: auto;
+}
+
+// ── Section stack below the doc ──────────────────────────────
+
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--s1);
+
+  :global(.artifact-shell) & {
+    border-top: 1px solid var(--b1);
+    max-height: 320px;
+    overflow-y: auto;
+  }
+}
+
+// Steps and questions only exist once the agent has produced them, so a
+// section can open long after the card itself settled — same EXPAND, same
+// need to clip while the height is short.
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--b1);
+  border-radius: 7px;
+  background: var(--s2);
+  overflow: hidden;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t3);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+// ── Gated step list ──────────────────────────────────────────
+// Only the step awaiting a decision is at full strength; done steps
+// recede and upcoming ones recede further.
+
+.stepList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stepActive {
+  opacity: 1;
+}
+
+// `filter`, not `opacity`: each row is a framer surface now, and its enter
+// settles on an inline `opacity: 1` that a class can never outrank — the
+// recession would have been flattened away the moment the row arrived.
+.stepCompleted {
+  filter: opacity(0.78);
+}
+
+.stepUpcoming {
+  filter: opacity(0.55);
+}

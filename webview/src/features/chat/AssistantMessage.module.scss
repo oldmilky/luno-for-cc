@@ -1,0 +1,161 @@
+// ─────────────────────────────────────────────────────────────
+// Assistant message — converted from Tailwind to an SCSS module
+// in Ф1. Reads design tokens only; see docs/TOKENS.md.
+// ─────────────────────────────────────────────────────────────
+
+@use "../../themes/motion" as motion;
+
+// The streaming heartbeat. `--motion-ambient` is the activity period: it runs
+// for as long as the model is talking, which is why the halo here takes it and
+// the decorative halos in Header/RewindModal take the slower `--motion-halo`
+// instead. One value for both ambient loops in this file (halo + caret),
+// mirrored by `STREAM_PULSE` in AssistantMessage.tsx so the avatar pulses on the
+// same beat.
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.avatarWrap {
+  position: relative;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+// Soft breathing halo behind the mark — alive while streaming.
+.halo {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0.5;
+  background: radial-gradient(circle, var(--accent-shadow), transparent 70%);
+  filter: blur(4px);
+}
+
+// The activity period, not the decorative default: this halo means the model is
+// mid-sentence, so it has to read as work in flight rather than as a surface
+// that merely glows.
+.haloLive {
+  opacity: 1;
+  @include motion.halo-breathe(var(--motion-ambient));
+}
+
+.avatar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: linear-gradient(
+    to bottom right,
+    var(--accent-glow),
+    var(--accent),
+    var(--accent-deep)
+  );
+  color: var(--on-accent);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  box-shadow:
+    0 2px 14px var(--accent-shadow),
+    0 0 0 1px var(--sheen) inset;
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+  padding-top: 4px;
+  color: var(--t2);
+  font-size: 13.5px;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+// Caret trailing the streamed text. It used to hard-blink on `steps(2)` at 1s
+// — a terminal emulator's caret, and the one piece of movement in the app that
+// read as cheap. Now it breathes on the same beat and curve as the halo, so
+// the whole streaming state is one pulse rather than two that beat against
+// each other.
+.caret {
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: middle;
+  border-radius: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-shadow);
+  animation: caret-breathe var(--motion-ambient) var(--ease-soft) infinite;
+}
+
+.actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--motion-hover) var(--ease-out);
+
+  .row:hover &,
+  &:focus-within {
+    opacity: 1;
+  }
+}
+
+%action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: var(--round-sm);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+}
+
+.copy {
+  @extend %action-button;
+  border: 1px solid var(--b1);
+  background: var(--s2);
+  color: var(--t3);
+
+  &:hover {
+    border-color: var(--b2);
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+.continue {
+  @extend %action-button;
+  border: 1px solid var(--accent-mid);
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+
+  &:hover {
+    border-color: var(--accent);
+    background: var(--accent-mid);
+    color: var(--t1);
+  }
+}
+
+// Never reaches 0: a caret that vanishes is a blink, and the point of the
+// retime is that it doesn't blink any more.
+@keyframes caret-breathe {
+  50% {
+    opacity: 0.25;
+  }
+}

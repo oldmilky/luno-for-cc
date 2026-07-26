@@ -1,0 +1,128 @@
+// ─────────────────────────────────────────────────────────────
+// Per-step comment thread — the flat comment list hung under a
+// plan task plus its compose row.
+// Converted from theme.css `.plan-thread*` / `.plan-comment*` in Ф2а.
+//
+// The "addressed" tag was a fixed emerald pair; it now reads --ok,
+// which is what the plan surfaces mean by "resolved" everywhere.
+// ─────────────────────────────────────────────────────────────
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  // The left margin lines the thread up under the task text, clear of
+  // the task's status glyph column.
+  margin: 6px 0 4px 26px;
+  padding: 6px 8px 8px;
+  border: 1px solid var(--b1);
+  border-radius: 6px;
+  background: var(--s0);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  // EXPAND animates height — clip the rows while the list opens on the
+  // first comment, or they overhang the compose row underneath.
+  overflow: hidden;
+}
+
+.comment {
+  padding: 6px 8px;
+  border: 1px solid var(--b1);
+  border-radius: 5px;
+  background: var(--s2);
+}
+
+// `filter`, not `opacity`: the comment is a framer surface now, and its enter
+// settles on an inline `opacity: 1` that no class can outrank — as `opacity`
+// this rule died the moment the comment arrived, and an addressed comment read
+// as an open one.
+.resolved {
+  filter: opacity(0.65);
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+  color: var(--t3);
+  font-size: 10.5px;
+}
+
+.time {
+  color: var(--t3);
+}
+
+.tag {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.body {
+  color: var(--t1);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.compose {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.input {
+  flex: 1;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid var(--b2);
+  border-radius: 5px;
+  background: var(--s1);
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 12px;
+  resize: vertical;
+
+  &:focus {
+    border-color: var(--accent-mid);
+    outline: none;
+  }
+}
+
+.submit {
+  padding: 5px 12px;
+  border: 1px solid var(--accent-mid);
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:not(:disabled):hover {
+    background: var(--accent-mid);
+    color: var(--t1);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}

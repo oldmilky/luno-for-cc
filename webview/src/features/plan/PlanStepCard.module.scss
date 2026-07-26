@@ -1,0 +1,281 @@
+// ─────────────────────────────────────────────────────────────
+// Plan step card — one gated step in three densities (active /
+// completed / upcoming) plus its file chips, action row and the
+// inline "modify" composer.
+// Converted from theme.css `.plan-step*` in Ф2а.
+//
+// The status glyphs and the destructive/approve actions carried a
+// fixed emerald+red pair (#34d399 / #f87171 / #10b981); they now
+// read --ok and --err, so plan status matches every other status
+// surface in the app.
+// ─────────────────────────────────────────────────────────────
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 11px;
+  border: 1px solid var(--b1);
+  border-radius: 7px;
+  background: var(--s1);
+  transition:
+    border-color var(--motion-hover) var(--ease-out),
+    background-color var(--motion-hover) var(--ease-out);
+}
+
+// ── Densities ────────────────────────────────────────────────
+
+.active {
+  border-color: var(--accent-mid);
+  background: linear-gradient(180deg, var(--s2), var(--s1));
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+.completed {
+  background: var(--s0);
+
+  .content {
+    color: var(--t2);
+  }
+}
+
+.upcoming {
+  background: var(--s0);
+}
+
+.statusSkipped {
+  opacity: 0.6;
+
+  .content {
+    text-decoration: line-through;
+  }
+}
+
+// ── Header row ───────────────────────────────────────────────
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--t3);
+  font-size: 11px;
+}
+
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--s3);
+  color: var(--t3);
+}
+
+// `completed` and `accepted` share one look — both mean "done here".
+.glyphDone {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  color: var(--ok);
+}
+
+.glyphInProgress {
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+}
+
+.glyphSkipped {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.num {
+  color: var(--t2);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.statusChip {
+  display: inline-flex;
+}
+
+.commentsChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--accent-mid);
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.content {
+  color: var(--t1);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+// ── File refs ────────────────────────────────────────────────
+
+.files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.file {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border: 1px solid var(--b1);
+  border-radius: 4px;
+  background: var(--s0);
+  color: var(--t2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--accent-mid);
+    background: var(--accent-soft);
+    color: var(--accent-glow);
+  }
+}
+
+.fileLabel {
+  font-weight: 500;
+}
+
+.fileRange {
+  color: var(--t3);
+}
+
+// ── Action row ───────────────────────────────────────────────
+
+// This row and the composer below trade places in the same slot, on EXPAND —
+// one collapses to nothing before the other opens, so both need somewhere for
+// their content to hide while the height is short.
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  // Same trade as `.modify`: the clip is for EXPAND, the padding keeps it from
+  // eating the keyboard focus outline on the buttons inside.
+  padding: 2px;
+  margin: 2px -2px 0;
+  overflow: hidden;
+}
+
+.actionSpacer {
+  flex: 1;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--b2);
+  border-radius: 5px;
+  background: var(--s2);
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+  }
+}
+
+// Each variant re-states its hover: the plain `.action:hover` above
+// outweighs a variant's base rule, so without one the fills would be
+// dropped the moment the pointer lands.
+.actionSkip {
+  border-color: var(--b1);
+  color: var(--t3);
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--err) 40%, transparent);
+    background: color-mix(in srgb, var(--err) 8%, transparent);
+    color: var(--err);
+  }
+}
+
+.actionModify {
+  color: var(--t2);
+
+  &:hover {
+    border-color: var(--accent-mid);
+    background: var(--accent-soft);
+    color: var(--t1);
+  }
+}
+
+.actionAccept {
+  border-color: color-mix(in srgb, var(--ok) 74%, black);
+  background: var(--ok);
+  color: var(--on-status);
+
+  &:hover {
+    background: color-mix(in srgb, var(--ok) 74%, black);
+  }
+}
+
+// ── Inline modify composer ───────────────────────────────────
+
+.modify {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  // The clip is what EXPAND needs — without it the textarea keeps its natural
+  // height and spills out of the shrinking box. The padding is what the clip
+  // needs: `.modifyInput`'s focus ring is a 2px box-shadow painted outside its
+  // border box, and an ancestor's `overflow: hidden` cuts it off on all four
+  // sides. The negative margin puts the box back exactly where it was.
+  padding: 2px;
+  margin: 2px -2px 0;
+  overflow: hidden;
+}
+
+.modifyInput {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 10px;
+  border: 1px solid var(--b2);
+  border-radius: 5px;
+  background: var(--s0);
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 12.5px;
+  resize: vertical;
+
+  &:focus {
+    outline: none;
+    border-color: var(--accent-mid);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+}
+
+.modifyActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}

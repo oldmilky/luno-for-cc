@@ -1,0 +1,29 @@
+// ─────────────────────────────────────────────────────────────
+// Red — crimson accent over surfaces carrying the same warm red
+// undertone.
+//
+// The accent is deliberately deeper and more saturated than --err
+// (#f87171): in this palette alone the two live side by side, and an
+// error badge has to stay distinguishable from ordinary accent chrome.
+// The fill is dark enough to take a light glyph.
+// ─────────────────────────────────────────────────────────────
+
+[data-theme="red"] {
+  --s0: #0d0809;
+  --s1: #150f11;
+  --s2: #1d1518;
+  --s3: #2a1e22;
+
+  --t1: #f5eaec;
+  --t2: #d4bcc0;
+  --t3: #967a80;
+  --t4: #5f4b50;
+
+  --accent: #e5484d;
+  --accent-deep: #b91c1c;
+  --accent-glow: #ff8085;
+  --on-accent: #fff1f2;
+
+  --lift: #ffffff;
+  --brand-tile-gradient: linear-gradient(160deg, #ff8085, #b91c1c);
+}

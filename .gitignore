@@ -1,0 +1,34 @@
+node_modules/
+dist/
+webview/dist/
+*.vsix
+.vscode-test/
+.DS_Store
+*.log
+
+# Full copy of the ghost.one project, kept in-tree on purpose as a quality
+# reference. Never committed here (it has its own repo) and never packed into
+# a VSIX — 3.8 GB that vsce would otherwise walk on every package.
+ghost.one/
+
+# The toolchain is bun: bun.lock IS tracked. npm lockfiles are not — if one
+# reappears, something ran npm install and the two would drift apart.
+package-lock.json
+webview/package-lock.json
+
+# Working notes, kept local on purpose — written for us, not for a reader of the
+# repo. PLAN.md is the phase log, DESIGN.md the rationale behind decisions already
+# made, and TESTING.md a point-in-time coverage report carrying a known-issues
+# list, which reads as current documentation and is not.
+#
+# `docs/TOKENS.md` is deliberately NOT here: it is the contract a theme has to
+# satisfy, seven files in `webview/src/` point a reader at it, and anyone touching
+# the UI needs it.
+docs/PLAN.md
+docs/DESIGN.md
+TESTING.md
+
+# Personal workspace preferences — `luno.permissionMode: auto` in particular has
+# no business being a default for anyone who clones this. `launch.json` and
+# `tasks.json` stay: those are the dev loop, and they are the same for everyone.
+.vscode/settings.json

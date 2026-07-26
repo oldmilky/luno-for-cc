@@ -1,0 +1,122 @@
+// ─────────────────────────────────────────────────────────────
+// Plan task tree — the flat todo list of a revision, one row per
+// task with a comment-thread toggle.
+// Converted from theme.css `.plan-task*` in Ф2а.
+//
+// The "done" glyph was a fixed emerald (#34d399 on an rgba tint);
+// it now mixes from --ok like every other completed marker.
+// ─────────────────────────────────────────────────────────────
+
+.tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.empty {
+  padding: 4px 0;
+  color: var(--t3);
+  font-size: 12px;
+}
+
+.task {
+  padding: 4px 6px;
+  border-radius: 6px;
+
+  // The pseudo-class outranks the flat status variants below, so pointing at
+  // the running task reads as a hover instead of keeping its accent tint.
+  &:hover {
+    background: var(--tint-weak);
+  }
+}
+
+.taskInProgress {
+  background: var(--accent-soft);
+}
+
+// `filter`, not `opacity`: each row is a framer surface now, and its enter
+// settles on an inline `opacity: 1` that a class can never outrank — the
+// recession would have been flattened away the moment the row arrived.
+.taskCompleted {
+  filter: opacity(0.78);
+}
+
+// The comment thread collapses on EXPAND, which animates height; PlanCommentThread
+// draws its own box, so the clipping has to happen on a wrapper.
+.threadWrap {
+  overflow: hidden;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--t1);
+  font-size: 12px;
+}
+
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--s3);
+  color: var(--t3);
+}
+
+.glyphCompleted {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  color: var(--ok);
+}
+
+.glyphInProgress {
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+}
+
+.index {
+  flex-shrink: 0;
+  color: var(--t3);
+  font-variant-numeric: tabular-nums;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.commentBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border: 1px solid var(--b1);
+  border-radius: 5px;
+  background: var(--s3);
+  color: var(--t3);
+  font-size: 10px;
+  cursor: pointer;
+  transition: color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    color: var(--t1);
+  }
+}
+
+.hasComments {
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+}
+
+.commentCount {
+  font-variant-numeric: tabular-nums;
+}

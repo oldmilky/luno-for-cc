@@ -1,0 +1,33 @@
+// ─────────────────────────────────────────────────────────────
+// White — the studio's silver gradient (#FFFFFF → #A8AFC3) used as
+// the accent, over neutral-cold graphite surfaces.
+//
+// Still a dark theme: it is the accent that goes white, not the panel.
+// Two consequences worth knowing:
+//   · --accent doubles as a text color on dark surfaces, so it sits at
+//     the light end of the gradient. Its fill is near-white and takes
+//     a very dark glyph.
+//   · The glow tints (accent-soft/mid/shadow, aurora) derive from a
+//     white accent, which reads as a cool haze rather than a colour
+//     wash — the intended "frosted" look.
+// ─────────────────────────────────────────────────────────────
+
+[data-theme="white"] {
+  --s0: #0a0b0e;
+  --s1: #111319;
+  --s2: #171a21;
+  --s3: #21252e;
+
+  --t1: #f2f4f8;
+  --t2: #c6cbd6;
+  --t3: #838a99;
+  --t4: #525968;
+
+  --accent: #e4e8f0;
+  --accent-deep: #a8afc3;
+  --accent-glow: #ffffff;
+  --on-accent: #0a0b0e;
+
+  --lift: #ffffff;
+  --brand-tile-gradient: linear-gradient(160deg, #ffffff, #a8afc3);
+}

@@ -1,0 +1,330 @@
+// ─────────────────────────────────────────────────────────────
+// Sidebar comments list — the whole-plan comment rows in the
+// PlanModal / PlanFullView sidebar.
+//
+// Converted from theme.css in Ф2а. The old hard-coded emerald
+// rail is `--ok` and the delete red is `--err`, so both follow
+// the active palette.
+// ─────────────────────────────────────────────────────────────
+
+// ── Section shell ────────────────────────────────────────────
+// Was the global `.plan-modal-section` pair. PlanFullView — the only
+// place this list renders — already moved its own sections into a
+// module, so the padding here is the tightened one its column applied
+// (`.plan-inline-sections .plan-modal-section`), not the 10px/12px base.
+
+// EXPAND animates height, and a `height: 0` box still shows its own padding
+// and border — so the collapse happens on a wrapper and the section keeps
+// its chrome intact inside it.
+.sectionWrap {
+  overflow: hidden;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--b1);
+  border-radius: 7px;
+  background: var(--s2);
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t3);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 380px;
+  margin: 0;
+  padding: 0 2px 0 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+// ── Row ──────────────────────────────────────────────────────
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid var(--b1);
+  // The left rule is the row's type marker; `--t4` is the resolved fallback.
+  border-left: 3px solid var(--t4);
+  border-radius: 6px;
+  background: var(--s1);
+  transition:
+    border-color var(--motion-hover) var(--ease-out),
+    background-color var(--motion-hover) var(--ease-out);
+
+  &.inline {
+    border-left-color: var(--ok);
+  }
+
+  &.general {
+    border-left-color: var(--accent);
+  }
+
+  &.editing {
+    border-color: var(--accent-mid);
+    background: var(--s2);
+  }
+
+  // Declared last so it wins over the type marker above.
+  &.resolved {
+    border-left-color: var(--t4);
+    // `filter`, not `opacity`: the row is a framer surface now, and its enter
+    // settles on an inline `opacity: 1` that no class can outrank. Written as
+    // `opacity` this rule was silently dead the moment the row arrived, and a
+    // resolved comment looked exactly like an open one.
+    filter: opacity(0.7);
+  }
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.time {
+  flex: 1;
+  color: var(--t3);
+  font-size: 10.5px;
+}
+
+.tag {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.quote {
+  display: block;
+  width: 100%;
+  padding: 5px 7px;
+  border: 1px solid var(--b1);
+  border-radius: 4px;
+  background: var(--s0);
+  color: var(--t3);
+  font: inherit;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--ok);
+    color: var(--t2);
+  }
+}
+
+.body {
+  padding: 2px 0;
+  color: var(--t1);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  // Half of the body ⇄ editor accordion; EXPAND wipes it rather than
+  // letting the text spill past the collapsing box.
+  overflow: hidden;
+  cursor: text;
+}
+
+// A resolved row can't be edited, so the caret would be a lie.
+.row.resolved .body {
+  cursor: default;
+}
+
+// ── Edit / reply composer ────────────────────────────────────
+
+// The editor's other half. Textarea and action row used to be direct
+// children of `.row`; they are wrapped now so AnimatePresence has a single
+// node to collapse, and this reproduces the column they sat in.
+.editWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.edit {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 60px;
+  padding: 7px 9px;
+  border: 1px solid var(--b2);
+  border-radius: 5px;
+  background: var(--s0);
+  color: var(--t1);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+  resize: vertical;
+
+  &:focus {
+    outline: none;
+    border-color: var(--accent-mid);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+// Save / Cancel / Reply are the shared PlanButton; only their size is
+// tightened here. Doubled class for 0,2,0 — PlanButton.module.scss may be
+// emitted after this file in the bundle, and at equal specificity its
+// padding would win.
+.compact.compact {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--err);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--err) 30%, transparent);
+    background: var(--err-soft);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+// ── Threaded replies ─────────────────────────────────────────
+
+.replies {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0 12px;
+  padding: 0 0 0 8px;
+  border-left: 2px solid var(--b1);
+  list-style: none;
+  // Expands the first time a reply lands.
+  overflow: hidden;
+}
+
+.reply {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 7px;
+  border: 1px solid var(--b1);
+  border-radius: 4px;
+  background: var(--s0);
+}
+
+.replyMeta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--t3);
+  font-size: 9.5px;
+}
+
+.replyBody {
+  color: var(--t1);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.replyCompose {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+// ── Hover footer ─────────────────────────────────────────────
+
+.foot {
+  display: flex;
+  gap: 4px;
+  margin-top: -2px;
+  opacity: 0;
+  transition: opacity var(--motion-hover) var(--ease-out);
+}
+
+.row:hover .foot {
+  opacity: 1;
+}
+
+%foot-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border: 1px solid var(--b1);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.footBtn {
+  @extend %foot-button;
+
+  &:hover {
+    border-color: var(--b3);
+    color: var(--t1);
+  }
+}
+
+.footDelete {
+  @extend %foot-button;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--err) 40%, transparent);
+    background: color-mix(in srgb, var(--err) 8%, transparent);
+    color: var(--err);
+  }
+}

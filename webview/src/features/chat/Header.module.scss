@@ -1,0 +1,184 @@
+// ─────────────────────────────────────────────────────────────
+// Panel header — brand mark, identity chips, session actions.
+// Converted from Tailwind in Ф2а.
+//
+// The two hard-coded rgba() values it carried were tokens in
+// disguise: the tile's inner highlight is --sheen (the token
+// _base.scss defines for exactly this) and the drop shadow now
+// mixes from --shadow-color instead of literal black.
+// ─────────────────────────────────────────────────────────────
+
+@use "../../themes/motion" as motion;
+
+.header {
+  // Sticky is what makes ::after resolve against the header; there is
+  // deliberately no extra `position: relative`.
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 8px;
+  min-height: 46px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--b1);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--s1) 95%, transparent),
+    color-mix(in srgb, var(--s1) 75%, transparent)
+  );
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    0 1px 0 var(--b1),
+    0 8px 24px -16px color-mix(in srgb, var(--shadow-color) 50%, transparent);
+
+  // Accent hairline that fades out at both ends. Sits one pixel below the
+  // box so it lands *on* the border-bottom rather than adding a second rule.
+  &::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: -1px;
+    left: 0;
+    height: 1px;
+    opacity: 0.6;
+    background: linear-gradient(
+      to right,
+      transparent,
+      var(--accent-mid),
+      transparent
+    );
+  }
+}
+
+.left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+// ── Brand mark ───────────────────────────────────────────────
+
+.tile {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--round-sm);
+  background: var(--brand-tile-gradient);
+  color: var(--on-accent);
+  box-shadow:
+    0 1px 10px var(--accent-shadow),
+    0 0 0 1px var(--sheen) inset;
+}
+
+// Decorative, so it takes the mixin's default `--motion-halo`. It used to run at
+// a hand-written 4s, which meant the brand mark and the rewind dialog's icon
+// breathed at periods 400ms apart and drifted visibly against each other
+// whenever both were on screen.
+.halo {
+  position: absolute;
+  inset: -4px;
+  z-index: -10;
+  border-radius: var(--round);
+  pointer-events: none;
+  background: radial-gradient(circle, var(--accent-shadow), transparent 72%);
+  filter: blur(4px);
+  @include motion.halo-breathe;
+}
+
+.title {
+  flex-shrink: 0;
+  color: var(--t1);
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+// ── Chip contents ────────────────────────────────────────────
+
+// The subscription chip's status dot — currentColor so it follows the
+// chip tone rather than pinning a status color.
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+// Ring spinner inside the "streaming" chip. ToolCard's `.spinner` looks
+// identical but spins from a CSS animation; here framer-motion owns the
+// transform, and an animation would win over its inline style.
+.chipSpinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+}
+
+// ── Action cluster ───────────────────────────────────────────
+
+.right {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+.divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--b1);
+}
+
+.newChat {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--round);
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+.newChatGlyph {
+  display: inline-flex;
+}
+
+// One-shot glow that expands out of the button when a new chat starts.
+.ripple {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--round);
+  pointer-events: none;
+  background: radial-gradient(
+    circle at center,
+    var(--accent-glow),
+    transparent 70%
+  );
+}

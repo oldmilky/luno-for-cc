@@ -1,0 +1,299 @@
+// ─────────────────────────────────────────────────────────────
+// Skill detail modal — the in-panel SKILL.md preview opened from
+// SkillSuggestion. Converted from Tailwind + inline box-shadows
+// in Ф2а.
+//
+// The three inline shadows carried literal whites: the panel's
+// hairline and the two accent fills' inner highlights. Those are
+// --tint and --sheen; the black casts are --shadow-color. Motion
+// (fade/scale/slide) stays on framer-motion, not here.
+// ─────────────────────────────────────────────────────────────
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--shadow-color) 40%, transparent);
+}
+
+.panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 620px;
+  max-width: 94vw;
+  max-height: 82vh;
+  border: 1px solid var(--b2);
+  border-radius: 16px;
+  overflow: hidden;
+  background: linear-gradient(to bottom, var(--s2), var(--s1));
+  box-shadow:
+    0 28px 70px color-mix(in srgb, var(--shadow-color) 60%, transparent),
+    0 0 0 1px var(--tint) inset,
+    0 0 40px -16px var(--accent-shadow);
+}
+
+// Accent light-line along the top edge of the panel.
+.hairline {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--accent),
+    transparent
+  );
+  opacity: 0.6;
+}
+
+// ── Header ───────────────────────────────────────────────────
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  flex-shrink: 0;
+  gap: 12px;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--b1);
+}
+
+.tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: linear-gradient(
+    to bottom right,
+    var(--accent-glow),
+    var(--accent),
+    var(--accent-deep)
+  );
+  color: var(--on-accent);
+  box-shadow:
+    0 4px 16px var(--accent-shadow),
+    0 0 0 1px var(--sheen) inset;
+}
+
+.titles {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--t1);
+  font-size: 15px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  color: var(--t3);
+  font-size: 11px;
+}
+
+.dot {
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: var(--t4);
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--round);
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+// ── Body ─────────────────────────────────────────────────────
+
+// `min-height: 0` is what lets the flex child actually scroll instead
+// of growing the panel past its max-height.
+.body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px 20px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 0;
+  color: var(--t3);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.desc {
+  margin: 0 0 12px;
+  color: var(--t2);
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-wrap: break-word;
+}
+
+.empty {
+  margin: 0;
+  color: var(--t4);
+  font-size: 12px;
+  font-style: italic;
+}
+
+// Rendered SKILL.md. Sits on the global `.md` prose styles; these
+// rules only constrain it to the panel width and tame the headings,
+// which arrive from an arbitrary README-sized document.
+.markdown {
+  min-width: 0;
+  max-width: 100%;
+  font-size: 12.5px;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+
+  pre {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  h1 {
+    font-size: 1.28em;
+  }
+
+  h2 {
+    font-size: 1.14em;
+  }
+
+  img {
+    max-width: 100%;
+  }
+}
+
+// ── Footer ───────────────────────────────────────────────────
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--b1);
+  background: color-mix(in srgb, var(--s2) 40%, transparent);
+}
+
+.footActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+%foot-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--round-sm);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.6;
+  }
+}
+
+.btn {
+  @extend %foot-button;
+  border: 1px solid var(--b2);
+  background: var(--s3);
+  color: var(--t2);
+  transition:
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b3);
+    color: var(--t1);
+  }
+}
+
+.btnPrimary {
+  @extend %foot-button;
+  border: 0;
+  background: linear-gradient(
+    to bottom right,
+    var(--accent-glow),
+    var(--accent),
+    var(--accent-deep)
+  );
+  color: var(--on-accent);
+  box-shadow:
+    0 2px 12px var(--accent-shadow),
+    0 0 0 1px var(--sheen) inset;
+  // Hover role, not tap: the lift is what animates and :active only cancels
+  // it. Timing it as press feedback would make the hover-in the odd one out.
+  transition: transform var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+}
+
+.result {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+}
+
+.resultOk {
+  color: var(--accent-glow);
+}
+
+.resultBad {
+  color: var(--warn);
+}

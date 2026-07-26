@@ -1,0 +1,155 @@
+// ─────────────────────────────────────────────────────────────
+// Chat screen — the scroll column, the turn rail, the scroll-to-
+// bottom FAB, and the composer dock. Converted from Tailwind +
+// theme.css in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+// Sits directly under `.app` next to the header. z-index lifts it clear of the
+// ambient aurora (z 0) while staying under the header (z 10), so a popover
+// opened from the header is not covered by the log — this component is later
+// in the DOM, and an equal z-index would let it win.
+.screen {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.log {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 16px 24px;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+
+  > * {
+    flex-shrink: 0;
+  }
+}
+
+.center {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin: auto;
+}
+
+// The vertical rail that ties a turn's rows together.
+.rail {
+  position: relative;
+  margin: 0 6px;
+  padding-left: 36px;
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 15px;
+    width: 1px;
+    opacity: 0.5;
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      var(--accent-mid),
+      var(--b1),
+      transparent
+    );
+  }
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.stackWide {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.narrative {
+  padding: 4px;
+  color: var(--t1);
+  font-size: 13px;
+  line-height: 1.55;
+
+  > p:first-child {
+    margin-top: 0;
+  }
+
+  > p:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.fab {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  cursor: pointer;
+  box-shadow: 0 4px 16px -4px var(--accent-shadow);
+}
+
+.dock {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 12px 12px;
+  border-top: 1px solid var(--b1);
+  background: var(--s0);
+}
+
+// ── Inline edit (a user message turned back into a composer) ──
+
+.editing {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.editingAvatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  margin-top: 2px;
+  margin-right: 4px;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-sm);
+  background: linear-gradient(135deg, var(--s3), var(--s2));
+  color: var(--t2);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.editingBody {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}

@@ -1,0 +1,205 @@
+// ─────────────────────────────────────────────────────────────
+// Token base layer — everything a theme does NOT have to declare.
+//
+// Reading order (see index.scss):
+//   1. this file    — non-color tokens + derived tokens + default semantics
+//   2. themes/*     — each palette's core tokens (and any overrides)
+//
+// Derived tokens live on `:root` and are computed from the core
+// tokens with color-mix(). Because a custom property's value is
+// resolved against the element it lands on, `var(--accent)` inside
+// a `:root` declaration picks up whatever the active `[data-theme]`
+// block set — so one formula serves every palette.
+//
+// A theme may still hard-override any derived token: theme blocks
+// are emitted after this file at equal specificity, so they win.
+//
+// See `docs/TOKENS.md` for the contract every theme must satisfy.
+// ─────────────────────────────────────────────────────────────
+
+:root {
+  // ── Non-color: shape, type, motion ─────────────────────────
+  // Named `--round*`, not `--radius*`: Tailwind v4 owns the `--radius-*`
+  // namespace in its @theme block, and theme.css bridges ours into it.
+  --round-sm: 8px;
+  --round: 10px;
+  --round-lg: 14px;
+
+  --font-sans: "Geist", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    system-ui, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", "SF Mono", "Fira Code",
+    ui-monospace, Menlo, monospace;
+
+  // ── Motion ─────────────────────────────────────────────────
+  // Durations are named by ROLE, not by speed. "How fast should this be?"
+  // is a question with no good answer; "what is this element doing?" has
+  // exactly one. Nothing here exceeds 220ms: past that, movement in a
+  // coding tool stops reading as polish and starts reading as latency.
+  --motion-tap: 90ms; // press feedback — must feel immediate
+  --motion-hover: 120ms; // hover, color shifts, focus rings
+  --motion-enter: 180ms; // an element appears
+  --motion-expand: 220ms; // open / collapse
+  --motion-overlay: 200ms; // modal, popover, drawer
+  --theme-morph: 280ms; // palette swap — the one deliberate exception
+
+  // Two curves, not three.
+  // `--ease-out` is the house curve: an aggressive start that decays into a
+  // long, soft stop. The eye reads it as fast, the body reads it as gentle —
+  // which is exactly the "soft but quick" the tool needs.
+  // `--ease-soft` is symmetric, for things that move both ways (expanding
+  // and collapsing look wrong with an asymmetric curve).
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-soft: cubic-bezier(0.65, 0, 0.35, 1);
+
+  // Travel distance, four steps. Amplitude carries as much of the feel as
+  // duration does, and it was drifting across five ad-hoc values (2–8px).
+  --travel-sm: 4px; // inline bits, pills, chips
+  --travel-md: 8px; // cards, rows, banners
+  --travel-lg: 12px; // overlays
+  --travel-xl: 28px; // edge-anchored panels — a drawer needs a direction, not a nudge
+
+  // Ambient loops are the one thing the roles above cannot describe: a role
+  // times a transition, something that starts and ends, and every one caps at
+  // 220ms. These run for as long as a condition holds — the model is talking,
+  // a tool is working. One period for all of them, so the streaming avatar,
+  // the halo, the caret and the live dot breathe on a single beat instead of
+  // drifting against each other at 1.4s, 1.6s and 1.8s as they used to.
+  --motion-ambient: 1.8s;
+  // A decorative glow is not an activity signal. Halos behind a logo or a
+  // modal icon breathe at half the ambient rate, or they read as a progress
+  // indicator that never resolves.
+  --motion-halo: 3.6s;
+  // One-shot attention flash on a jumped-to line. Coupled to FLASH_MS in
+  // features/plan/PlanFullView.tsx, which strips the class that runs it —
+  // if the two disagree the flash is cut off before its final keyframe.
+  --motion-flash: 1.4s;
+  // One revolution of a loading ring. Was 1.4s here while the three CSS rings
+  // ran at 700, 700 and 800ms — nothing was reading this token.
+  --motion-spin: 0.8s; // continuous rotation; always paired with `linear`
+
+  // ── Derived: borders / elevation tints ─────────────────────
+  // All keyed off `--lift` — the color a theme lifts its surfaces with
+  // (white on dark palettes; a light variant would flip it to black in Ф2).
+  --b1: color-mix(in srgb, var(--lift) 5.5%, transparent);
+  --b2: color-mix(in srgb, var(--lift) 8.5%, transparent);
+  --b3: color-mix(in srgb, var(--lift) 13%, transparent);
+
+  --tint-weak: color-mix(in srgb, var(--lift) 2%, transparent);
+  --tint: color-mix(in srgb, var(--lift) 4%, transparent);
+  --tint-strong: color-mix(in srgb, var(--lift) 6%, transparent);
+
+  --scrollbar-thumb: color-mix(in srgb, var(--lift) 8%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--lift) 18%, transparent);
+
+  // ── Derived: accent tints ──────────────────────────────────
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-mid: color-mix(in srgb, var(--accent) 22%, transparent);
+  --accent-shadow: color-mix(in srgb, var(--accent) 38%, transparent);
+  // Legacy alias — same role as --on-accent (glyph color on an accent fill).
+  --ink: var(--on-accent);
+
+  // ── Derived: sheen + shadows ───────────────────────────────
+  // `--sheen` is the inner highlight painted on filled controls (the send
+  // button, the brand tile) so they read as lit rather than flat.
+  --sheen: color-mix(in srgb, var(--lift) 12%, transparent);
+  --sheen-strong: color-mix(in srgb, var(--lift) 18%, transparent);
+
+  // Cast shadows. Kept as whole box-shadow values, not just a color, so
+  // elevation stays consistent instead of being re-invented per component.
+  --shadow-color: #000000;
+  --shadow-1: 0 2px 10px -6px color-mix(in srgb, var(--shadow-color) 50%, transparent);
+  --shadow-2: 0 12px 32px -12px color-mix(in srgb, var(--shadow-color) 55%, transparent);
+
+  // ── Derived: glass + ambient aurora ────────────────────────
+  --glass: color-mix(in srgb, var(--s1) 90%, transparent);
+  --glass-border: color-mix(in srgb, var(--lift) 7%, transparent);
+
+  --aurora-1: color-mix(in srgb, var(--accent) 18%, transparent);
+  --aurora-2: color-mix(in srgb, var(--accent-glow) 12%, transparent);
+  --aurora-top: color-mix(in srgb, var(--accent) 10%, transparent);
+
+  // ── Default semantics ──────────────────────────────────────
+  // Status colors read the same across palettes on purpose: green means
+  // ok everywhere. A theme is free to override them for a stronger look.
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --err: #f87171;
+  --info: #60a5fa;
+  --ok-soft: color-mix(in srgb, var(--ok) 12%, transparent);
+  --warn-soft: color-mix(in srgb, var(--warn) 13%, transparent);
+  --err-soft: color-mix(in srgb, var(--err) 12%, transparent);
+  --info-soft: color-mix(in srgb, var(--info) 12%, transparent);
+
+  // Ink for text/glyphs sitting on a *status* fill (a filled approve button on
+  // --ok, a destructive button on --err). --on-accent is tuned for the accent
+  // ramp and is near-white in every palette, which fails on a bright --ok.
+  // The deepest surface reads correctly on all four status colors.
+  --on-status: var(--s0);
+
+  // ── Derived: syntax highlighting ───────────────────────────
+  // highlight.js emits its own class names, so these are consumed by the
+  // global layer rather than a module. Roles map onto tokens that are already
+  // semantically distinct, which keeps code readable in every palette while
+  // still following it: keywords ride the accent, strings the "ok" green,
+  // numbers the warn amber, function names the info blue. A theme can
+  // override any single one.
+  --syn-comment: var(--t3);
+  --syn-keyword: var(--accent-glow);
+  --syn-string: var(--ok);
+  --syn-number: var(--warn);
+  --syn-title: var(--info);
+  --syn-type: color-mix(in srgb, var(--warn) 65%, var(--t1));
+  --syn-variable: var(--t1);
+  --syn-regexp: color-mix(in srgb, var(--info) 55%, var(--ok));
+  --syn-meta: var(--t3);
+  --syn-doctag: color-mix(in srgb, var(--info) 55%, var(--accent-glow));
+  --syn-deletion: var(--err);
+
+  // ── Derived: diff ──────────────────────────────────────────
+  --add-line: var(--ok);
+  --del-line: var(--err);
+  --add-bg: color-mix(in srgb, var(--ok) 8%, transparent);
+  --del-bg: color-mix(in srgb, var(--err) 8%, transparent);
+}
+
+// ── Palette morph ────────────────────────────────────────────
+// Color transitions stay off during normal use — they would smear every hover
+// and every streaming repaint. The theme store stamps `.theme-switching` on
+// <html> only for the length of a swap.
+//
+// Scope is deliberate. This used to animate seven properties on `*` plus both
+// pseudo-elements, i.e. every node in the tree — thousands of transitions for
+// one click, most of them on elements whose colour never changes. Now only the
+// properties that actually carry a palette move, and `text-shadow`/`fill`/
+// `stroke` are left out: glyphs inherit `currentColor`, so they come along for
+// free with `color`.
+//
+// `will-change` is absent on purpose. It would promote every element to its own
+// layer for the duration, which costs far more than the transition it helps.
+html.theme-switching,
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition:
+    background-color var(--theme-morph) var(--ease-soft),
+    border-color var(--theme-morph) var(--ease-soft),
+    color var(--theme-morph) var(--ease-soft) !important;
+}
+
+// The ambient aurora and any gradient-filled surface morph too, but they are a
+// handful of elements rather than the whole tree, so they can afford the more
+// expensive properties.
+html.theme-switching .app-ambient::before,
+html.theme-switching .app-ambient::after,
+html.theme-switching .app-ambient-top {
+  transition: background-image var(--theme-morph) var(--ease-soft) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.theme-switching,
+  html.theme-switching *,
+  html.theme-switching *::before,
+  html.theme-switching *::after {
+    transition: none !important;
+  }
+}

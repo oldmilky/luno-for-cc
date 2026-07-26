@@ -1,0 +1,117 @@
+// ─────────────────────────────────────────────────────────────
+// Dropdown — the shared popover surface.
+//
+// Not just for the Dropdown primitive: ModelPicker and SkillsPicker
+// import this module too and layer their own module on top, which is
+// how the three stay visually identical without a global class.
+// Converted from theme.css in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+.picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.menu {
+  position: absolute;
+  z-index: 100;
+  min-width: 220px;
+  padding: 5px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--round);
+  background: var(--glass);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  box-shadow:
+    var(--shadow-2),
+    0 0 0 1px var(--tint-weak) inset;
+}
+
+.below {
+  top: calc(100% + 6px);
+  transform-origin: top center;
+}
+
+.above {
+  bottom: calc(100% + 6px);
+  transform-origin: bottom center;
+}
+
+.left {
+  left: 0;
+}
+
+.center {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.right {
+  right: 0;
+}
+
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--t2);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+.active {
+  background: var(--accent-soft);
+  color: var(--t1);
+
+  .main {
+    color: var(--accent);
+  }
+}
+
+.danger {
+  color: var(--err);
+
+  &:hover {
+    background: var(--err-soft);
+  }
+}
+
+.main {
+  font-weight: 600;
+}
+
+.note {
+  flex: 1;
+  color: var(--t4);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.check {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 13px;
+  color: currentColor;
+}

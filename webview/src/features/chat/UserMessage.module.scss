@@ -1,0 +1,254 @@
+// ─────────────────────────────────────────────────────────────
+// User message — converted from Tailwind to an SCSS module in Ф1.
+// Reads design tokens only; see docs/TOKENS.md.
+//
+// The bubble keeps the global `md` class (shared markdown prose
+// styles) and `msg-user` (which theme.css hangs the mono/accent
+// treatment for label-only bold lines off); layout and skin live
+// here.
+// ─────────────────────────────────────────────────────────────
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 20px;
+
+  &:first-child {
+    margin-top: 4px;
+  }
+}
+
+.avatar {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-top: 2px;
+  border: 1px solid var(--b2);
+  border-radius: 9px;
+  background: linear-gradient(to bottom right, var(--s3), var(--s2));
+  color: var(--t2);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  box-shadow:
+    var(--shadow-1),
+    0 0 0 1px var(--tint) inset;
+}
+
+.bubble {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 80px 10px 14px;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-lg);
+  border-top-left-radius: 5px;
+  background: linear-gradient(
+    to bottom right,
+    color-mix(in srgb, var(--s2) 70%, transparent),
+    color-mix(in srgb, var(--s1) 50%, transparent)
+  );
+  backdrop-filter: blur(2px);
+  box-shadow: var(--shadow-1);
+  color: var(--t1);
+  font-size: 13.5px;
+  line-height: 1.65;
+  overflow-wrap: break-word;
+  user-select: text;
+  transition:
+    background var(--motion-hover) var(--ease-out),
+    box-shadow var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    transform var(--motion-hover) var(--ease-out);
+
+  // The accent rail down the left edge — brightens when the bubble is
+  // interactive and hovered.
+  &::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 10px;
+    bottom: 10px;
+    width: 2px;
+    border-radius: 999px;
+    background: linear-gradient(
+      to bottom,
+      var(--accent),
+      var(--accent-deep)
+    );
+    opacity: 0.5;
+    transition: opacity var(--motion-hover) var(--ease-out);
+  }
+
+  > p {
+    margin: 0;
+  }
+
+  > p + p {
+    margin-top: 8px;
+  }
+}
+
+// Click-to-edit affordance: the whole bubble re-opens the prompt.
+.editable {
+  cursor: text;
+
+  &:hover,
+  &:focus-visible {
+    border-color: var(--accent-mid);
+    background: var(--accent-soft);
+    box-shadow: 0 4px 18px -6px var(--accent-shadow);
+
+    &::before {
+      opacity: 1;
+    }
+  }
+
+  &:focus-visible {
+    outline: none;
+    border-color: var(--accent-glow);
+  }
+}
+
+.content {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+// A bold-only line (e.g. **myflow.py:18-19**) is a file label the user tagged
+// in the composer. It gets the same mono + accent treatment it had while being
+// typed, so a tag looks identical before and after sending.
+.bubble :global(p) > strong:only-child,
+.bubble > strong:only-child {
+  color: var(--accent-glow);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: -0.1px;
+}
+
+// Fades the clamped tail of a long prompt into the bubble surface.
+.fade {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 40px;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--s2), transparent);
+}
+
+// ── Actions ──────────────────────────────────────────────────
+
+%action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--round-sm);
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+}
+
+.toggle {
+  @extend %action-button;
+  margin-top: 4px;
+  margin-left: -8px;
+
+  &:hover {
+    background: var(--s3);
+    border-color: var(--b2);
+    color: var(--t1);
+  }
+}
+
+.actions {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.6;
+  transition: opacity var(--motion-hover) var(--ease-out);
+
+  .row:hover &,
+  &:focus-within {
+    opacity: 1;
+  }
+}
+
+.action {
+  @extend %action-button;
+
+  &:hover {
+    background: var(--s3);
+    border-color: var(--b2);
+    color: var(--t1);
+  }
+}
+
+.rewind {
+  @extend %action-button;
+
+  &:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent-mid);
+    color: var(--accent-glow);
+  }
+}
+
+// ── Inline image chip ────────────────────────────────────────
+
+.imageChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  padding: 4px 8px 4px 6px;
+  vertical-align: middle;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-sm);
+  background: var(--s3);
+  color: var(--t1);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: color-mix(in srgb, var(--s3) 80%, transparent);
+    border-color: var(--accent-mid);
+  }
+}
+
+.imageChipName {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.badgeWrap {
+  display: inline-flex;
+  margin: 2px 0;
+  vertical-align: middle;
+}

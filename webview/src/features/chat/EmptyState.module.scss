@@ -1,0 +1,178 @@
+// ─────────────────────────────────────────────────────────────
+// Empty state — the hero shown while a session has no messages:
+// brand orb, headline, and the grouped suggestion cards.
+// Converted from Tailwind + theme.css in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+.root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 480px;
+  // `margin: auto` is what centers the hero inside the scrolling log —
+  // the column is a flex parent, so this absorbs the free space.
+  margin: auto;
+  padding: 16px 8px 32px;
+  text-align: center;
+}
+
+.title {
+  margin-top: 4px;
+  margin-bottom: 8px;
+  color: var(--t1);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.6px;
+  line-height: 1.18;
+}
+
+.sub {
+  margin-bottom: 24px;
+  color: var(--t3);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+// ── Suggestion group ─────────────────────────────────────────
+
+.section {
+  width: 100%;
+  margin-bottom: 16px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 0 2px;
+}
+
+.sectionBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--accent-mid);
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+// Hairline that fades out to the right so the badge reads as a label
+// on a rule rather than a full divider.
+.sectionLine {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, var(--b2), transparent);
+}
+
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+// ── Suggestion card ──────────────────────────────────────────
+
+.suggestion {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--b1);
+  border-radius: 12px;
+  background: linear-gradient(
+    to bottom right,
+    var(--s1),
+    color-mix(in srgb, var(--s2) 40%, transparent)
+  );
+  color: var(--t1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    background var(--motion-hover) var(--ease-out),
+    box-shadow var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    transform: translateY(-1px);
+    border-color: var(--accent-mid);
+    background: linear-gradient(
+      to bottom right,
+      var(--accent-soft),
+      color-mix(in srgb, var(--accent-soft) 30%, transparent)
+    );
+    box-shadow: 0 4px 18px color-mix(in srgb, var(--accent) 16%, transparent);
+
+    .suggestionIcon {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: var(--on-accent);
+      box-shadow: 0 2px 12px var(--accent-shadow);
+    }
+
+    .suggestionArrow {
+      transform: translateX(4px);
+      color: var(--accent);
+    }
+  }
+}
+
+.suggestionIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round-sm);
+  background: var(--s2);
+  color: var(--accent);
+  transition:
+    border-color var(--motion-hover) var(--ease-out),
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out),
+    box-shadow var(--motion-hover) var(--ease-out);
+}
+
+.suggestionBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.suggestionTitle {
+  display: block;
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+}
+
+.suggestionSub {
+  display: block;
+  margin-top: 2px;
+  color: var(--t3);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.suggestionArrow {
+  flex-shrink: 0;
+  color: var(--t4);
+  transition:
+    transform var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+}

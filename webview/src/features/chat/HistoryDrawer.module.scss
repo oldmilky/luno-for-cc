@@ -1,0 +1,474 @@
+// ─────────────────────────────────────────────────────────────
+// History drawer — slide-in panel listing prior chat sessions.
+// Converted from Tailwind in Ф2а. Reads design tokens only.
+//
+// The `.drawer-*` / `.history-*` block in theme.css is a different,
+// older drawer: this component never referenced it. Nothing here was
+// ported from it — the styles below come from the Tailwind strings.
+//
+// Enter/exit motion (slide, fade, backdrop blur, row stagger) stays
+// in Framer Motion; only the resting look lives here.
+// ─────────────────────────────────────────────────────────────
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  justify-content: flex-end;
+  // Scrim only. Motion owns opacity + backdrop-filter on this element,
+  // so declaring either here would fight the animation.
+  // Mixed from --shadow-color, not --s0: a scrim must darken on every
+  // palette, and --s0 would invert to a light wash once light themes land.
+  background: color-mix(in srgb, var(--shadow-color) 50%, transparent);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: min(380px, 100vw);
+  height: 100%;
+  border-left: 1px solid var(--b2);
+  background: var(--s1);
+  // Second layer thickens the left edge so the panel still separates
+  // from the chat once the backdrop blur softens the boundary.
+  box-shadow:
+    -16px 0 56px color-mix(in srgb, var(--shadow-color) 50%, transparent),
+    -2px 0 0 var(--b2);
+  // The exit animation scales the panel; anchor it to the screen edge.
+  transform-origin: right center;
+}
+
+// ── Header ───────────────────────────────────────────────────
+
+.head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--b1);
+  background: linear-gradient(
+    to bottom,
+    var(--s1),
+    color-mix(in srgb, var(--s1) 85%, transparent)
+  );
+}
+
+.headLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.headIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--accent-mid);
+  border-radius: var(--round-sm);
+  background: linear-gradient(
+    135deg,
+    var(--accent-soft),
+    color-mix(in srgb, var(--accent) 4%, transparent)
+  );
+  color: var(--accent-glow);
+  box-shadow: 0 2px 10px var(--accent-shadow);
+}
+
+.headTitle {
+  margin: 0;
+  color: var(--t1);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--round);
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s2);
+    color: var(--t1);
+  }
+}
+
+// ── Search ───────────────────────────────────────────────────
+
+.search {
+  flex-shrink: 0;
+  padding: 12px 16px 8px;
+}
+
+.searchField {
+  position: relative;
+}
+
+.searchIcon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  transform: translateY(-50%);
+  color: var(--t4);
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  // Side padding clears the glyph on the left and the clear button on the right.
+  padding: 6px 28px 6px 32px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round-sm);
+  background: var(--s0);
+  color: var(--t1);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+  transition:
+    border-color var(--motion-hover) var(--ease-out),
+    box-shadow var(--motion-hover) var(--ease-out);
+
+  &::placeholder {
+    color: var(--t4);
+  }
+
+  &:hover {
+    border-color: var(--b2);
+  }
+
+  &:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+}
+
+.searchClear {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--t4);
+  font: inherit;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--s2);
+    color: var(--t1);
+  }
+}
+
+// ── Body · groups ────────────────────────────────────────────
+
+.body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.group {
+  margin-bottom: 8px;
+}
+
+.groupLabel {
+  padding: 8px 8px 4px;
+  color: var(--t4);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+// ── Session row ──────────────────────────────────────────────
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--round-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    transform var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b1);
+    background: color-mix(in srgb, var(--s2) 60%, transparent);
+  }
+
+  &:active {
+    background: var(--s3);
+  }
+
+  // The row is a div with role="button"; suppress the UA ring but keep a
+  // visible keyboard state, otherwise tab-navigation has no target.
+  &:focus {
+    outline: none;
+  }
+
+  &:focus-visible {
+    border-color: var(--accent-mid);
+    background: color-mix(in srgb, var(--accent-soft) 30%, transparent);
+  }
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--t4);
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  .item:hover & {
+    background: var(--accent);
+  }
+}
+
+.itemMain {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0;
+}
+
+.itemTitle {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  color: var(--t1);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.05px;
+  overflow-wrap: break-word;
+}
+
+.itemSnippet {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  color: var(--t3);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: break-word;
+}
+
+.itemMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 1px;
+  color: var(--t4);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.itemMetaDot {
+  color: color-mix(in srgb, var(--t4) 60%, transparent);
+}
+
+.itemDelete {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: var(--round);
+  background: transparent;
+  color: var(--t4);
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+  // Reveal-on-hover plus the colour flip and the armed nudge below: all of it
+  // is hover-class, including the transform — that scale is a state, not a press.
+  transition:
+    opacity var(--motion-hover) var(--ease-out),
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out),
+    transform var(--motion-hover) var(--ease-out);
+
+  .item:hover & {
+    opacity: 1;
+  }
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--err) 35%, transparent);
+    background: var(--err-soft);
+    color: var(--err);
+  }
+}
+
+// Armed for the confirming second click. Written as a compound so it also
+// outranks `.itemDelete:hover` — the armed row must not soften on hover.
+.itemDelete.armed {
+  opacity: 1;
+  border-color: var(--err);
+  background: var(--err-soft);
+  color: var(--err);
+  transform: scale(1.05);
+}
+
+// ── Loading skeleton ─────────────────────────────────────────
+
+.skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+
+.skeleton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--round-sm);
+  background: color-mix(in srgb, var(--s2) 50%, transparent);
+  // Ambient and endless, so the period stays off the --motion-* scale —
+  // nothing there exceeds 280ms and a skeleton that breathed that fast would
+  // read as a strobe. The curve is the shared symmetric one: the pulse plays
+  // in both directions. Per-row delay is set inline, so the bars are out of phase.
+  animation: soft-pulse var(--motion-ambient) var(--ease-soft) infinite;
+}
+
+.skeletonDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--b2);
+}
+
+.skeletonLines {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skeletonBar {
+  height: 10px;
+  border-radius: 4px;
+  background: var(--b2);
+}
+
+.skeletonBarSub {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--b1);
+}
+
+// ── Empty / no-match state ───────────────────────────────────
+
+.empty {
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.emptyIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 12px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round-lg);
+  background: var(--s2);
+  color: var(--t4);
+}
+
+.emptyTitle {
+  color: var(--t2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.emptySub {
+  margin-top: 4px;
+  color: var(--t4);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+// ── Footer ───────────────────────────────────────────────────
+
+.foot {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--b1);
+  background: color-mix(in srgb, var(--s1) 60%, transparent);
+  color: var(--t4);
+  font-size: 10.5px;
+}
+
+.kbd {
+  padding: 2px 6px;
+  border: 1px solid var(--b2);
+  border-radius: 4px;
+  background: var(--s2);
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.footHint {
+  margin-left: 6px;
+}
+
+// Local copy — CSS Modules scope keyframe names.
+@keyframes soft-pulse {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}

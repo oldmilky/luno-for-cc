@@ -1,0 +1,18 @@
+// ─────────────────────────────────────────────────────────────
+// Theme entry point. Order matters:
+//   base first (non-color + derived + defaults), palettes after —
+//   both land at equal specificity, so a palette can override any
+//   derived token simply by declaring it.
+//
+// Adding a theme = one file here + one entry in `lib/theme.ts`.
+// Components are never touched. See `docs/TOKENS.md`.
+// ─────────────────────────────────────────────────────────────
+
+@use "base";
+@use "copper";
+@use "purple";
+@use "red";
+@use "blue";
+@use "green";
+@use "pink";
+@use "white";

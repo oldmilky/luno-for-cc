@@ -1,0 +1,75 @@
+// ─────────────────────────────────────────────────────────────
+// Header "Review ▾" popover — the whole-plan comment composer.
+// A fixed-position dialog (the caller measures the trigger and
+// passes viewport coordinates), not an anchored menu, so it keeps
+// its own solid surface instead of composing Dropdown.module.scss.
+// Converted from theme.css `.plan-review-*` in Ф2а.
+//
+// The drop shadow was a raw rgba black; it now uses the --shadow-2
+// elevation token shared with every other floating surface.
+// ─────────────────────────────────────────────────────────────
+
+.popover {
+  position: fixed;
+  z-index: 240;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 420px;
+  max-width: calc(100vw - 24px);
+  padding: 14px;
+  border: 1px solid var(--b3);
+  border-radius: 9px;
+  background: var(--s2);
+  box-shadow: var(--shadow-2);
+  // Motion comes from the POPOVER preset, not from a keyframe. A CSS animation
+  // plays on mount and has nothing left to play on unmount — this dropdown
+  // opened smoothly and vanished on a frame, the same defect every other
+  // floating surface in the app had.
+  transform-origin: top right;
+}
+
+.title {
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 70px;
+  padding: 10px 12px;
+  border: 1px solid var(--b2);
+  border-radius: 6px;
+  background: var(--s0);
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+
+  &:focus {
+    outline: none;
+    border-color: var(--accent-mid);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+
+// Doubled class for 0,2,0: PlanButton.module.scss may be emitted after
+// this file in the bundle, and at equal specificity its padding would
+// then win and shrink the button back.
+.submit.submit {
+  height: 38px;
+  padding: 0 18px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--t3);
+  font-size: 11.5px;
+  text-align: center;
+}

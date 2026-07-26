@@ -1,0 +1,35 @@
+// ─────────────────────────────────────────────────────────────
+// Icon button — bare square button carrying a single glyph.
+// Converted from Tailwind in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--round-sm);
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover:not(:disabled) {
+    background: var(--s3);
+    color: var(--t1);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.active {
+  background: var(--s3);
+  color: var(--t1);
+}

@@ -1,0 +1,331 @@
+// ─────────────────────────────────────────────────────────────
+// Tool card — one tool call: a one-line header (verb · target ·
+// meta · status) that expands into input/result sections.
+// Converted from theme.css in Ф2а.
+//
+// Hard-coded rgba borders on the exit pills and the stderr tint are
+// now mixed from --ok/--err, and the bash-command surface reads
+// --s0 instead of a flat black wash, so both follow the palette.
+// ─────────────────────────────────────────────────────────────
+
+@use "../../themes/motion" as motion;
+
+// The CSS twin of the framer ENTER preset — same opacity + --travel-sm rise,
+// same timing. The row is a plain div, so it can't spread ENTER directly.
+@keyframes tool-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--travel-sm));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tool {
+  margin-left: 36px;
+  border: 0;
+  background: transparent;
+  overflow: hidden;
+  font-size: 12.5px;
+  animation: tool-in var(--motion-enter) var(--ease-out);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--t1);
+  font: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s2);
+  }
+}
+
+.verb {
+  flex-shrink: 0;
+  color: var(--t3);
+  font-weight: 400;
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--t3);
+}
+
+.target {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.error .target {
+  color: var(--err);
+}
+
+.meta {
+  flex-shrink: 0;
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.pill {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--s3);
+  color: var(--t2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--t4);
+  font-size: 10px;
+  transition: color var(--motion-hover) var(--ease-out);
+}
+
+.statusPending {
+  color: var(--warn);
+}
+
+// Settling out of `pending` is the one moment a tool call reports a result, so
+// it gets a beat of acknowledgement rather than swapping glyphs on a frame.
+// Scale only — the colour is already transitioning above, and moving both at
+// the same time reads as a flinch.
+.statusOk,
+.statusError {
+  animation: status-settle var(--motion-expand) var(--ease-out);
+}
+
+@keyframes status-settle {
+  0% {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.statusOk {
+  color: var(--t4);
+}
+
+.statusError {
+  color: var(--err);
+}
+
+.chev {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--t4);
+}
+
+// ── Expanded body ────────────────────────────────────────────
+
+// EXPAND drives `height` from 0 to auto and back, so this element must not
+// fight it: the old `min-height: 28px` floor clamped the collapse 28px short
+// of closed, and without `overflow: hidden` the full input/output stack stays
+// at full size and spills past the shrinking box all the way down.
+.body {
+  margin: 4px 0 6px 14px;
+  padding: 8px 12px;
+  overflow: hidden;
+  border-left: 2px solid var(--b1);
+  border-radius: 4px;
+  background: var(--s0);
+}
+
+.section {
+  margin-bottom: 10px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.label {
+  color: var(--t4);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.labelErr {
+  color: var(--err);
+}
+
+.pre {
+  margin: 0;
+  max-height: 280px;
+  min-height: 18px;
+  overflow-y: auto;
+  color: var(--t2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.exit {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.exitOk {
+  border: 1px solid color-mix(in srgb, var(--ok) 25%, transparent);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.exitBad {
+  border: 1px solid color-mix(in srgb, var(--err) 25%, transparent);
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.copy {
+  padding: 2px 8px;
+  border: 1px solid var(--b1);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--accent-mid);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+}
+
+.stdout {
+  color: var(--t2);
+}
+
+.stderr {
+  padding: 7px 9px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--err) 5%, transparent);
+  color: color-mix(in srgb, var(--err) 85%, var(--t1));
+}
+
+// Bash command body — the real command, not the wrapped JSON. Reads like a
+// terminal prompt: recessed surface, accent rule, accent-glow text.
+.bashCmd {
+  min-height: 20px;
+  max-height: none;
+  padding: 9px 11px;
+  border-left: 2px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--s0) 65%, black);
+  color: var(--accent-glow);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bashDesc {
+  color: var(--t3);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.empty {
+  color: var(--t4);
+  font-size: 11.5px;
+  font-style: italic;
+}
+
+// Small spinner shown while a call is in flight. Also used by
+// ToolGroupCard and EditedFilesCard, which import this module.
+// The rotation comes from the shared mixin so this one stays in phase with
+// every other loading ring; the local copy was a fourth hand-written 0.8s.
+.spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+
+  @include motion.spin;
+}
+
+// ── File-extension badge ─────────────────────────────────────
+
+.fileBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 16px;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--tint-strong);
+  color: var(--t2);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.fileBadgeFolder {
+  padding: 0;
+  background: transparent;
+  color: var(--t3);
+}

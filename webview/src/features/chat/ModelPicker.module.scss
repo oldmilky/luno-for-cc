@@ -1,0 +1,352 @@
+// ─────────────────────────────────────────────────────────────
+// Model picker — the composer's model chip and the panel it opens:
+// a scrolling list of aliases with the Effort ramp and the Thinking
+// switch pinned underneath.
+//
+// The popover surface (glass, shadow, entry animation, placement)
+// comes from Dropdown.module.scss; this module only reshapes it and
+// styles what goes inside. Converted from theme.css in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+// ── Trigger chip ─────────────────────────────────────────────
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+  margin-right: 4px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b2);
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+.triggerName {
+  letter-spacing: -0.1px;
+}
+
+// ── Panel ────────────────────────────────────────────────────
+
+// Doubled class on purpose: this has to outrank Dropdown.module.scss's
+// `.menu` (equal single-class specificity), and which of the two modules
+// the bundler emits first is a build detail, not a contract.
+.menu.menu {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  max-height: min(440px, calc(100vh - 120px));
+  padding: 0;
+  overflow: hidden;
+}
+
+.head {
+  flex-shrink: 0;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--b1);
+}
+
+.title {
+  display: block;
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--t3);
+  font-size: 11px;
+}
+
+.subStrong {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: -0.1px;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 6px 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+// ── One model row ────────────────────────────────────────────
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: var(--round-sm);
+  background: transparent;
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+  }
+}
+
+// Compound (not a bare `.selected`) so it ties with `.row:hover` and,
+// coming later, keeps the accent wash while the pointer is over it.
+.row.selected {
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+
+  .rowLabel {
+    color: var(--accent);
+  }
+}
+
+.rowBody {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 3px;
+}
+
+.rowHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.rowLabel {
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.1px;
+}
+
+.rowTag {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border: 1px solid var(--accent-mid);
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.rowVersion {
+  color: var(--accent-glow);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+}
+
+.rowVersionPending {
+  color: var(--t4);
+  font-weight: 500;
+  font-style: italic;
+}
+
+.rowNote {
+  color: var(--t3);
+  font-size: 11px;
+}
+
+.rowCheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+// ── Effort + Thinking controls ───────────────────────────────
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 12px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--b1);
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.controlRow {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.controlHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.controlHeadInline {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+}
+
+.controlLabel {
+  color: var(--t1);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+}
+
+.controlValue {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.controlNote {
+  color: var(--t3);
+  font-size: 10.5px;
+}
+
+// Segmented effort ramp — cells fill up to the active level.
+.seg {
+  display: flex;
+  gap: 3px;
+  width: 100%;
+}
+
+.cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
+  padding: 5px 4px;
+  border: 1px solid var(--b2);
+  border-radius: 5px;
+  background: var(--s1);
+  color: var(--t4);
+  font-family: inherit;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b3);
+    color: var(--t2);
+  }
+}
+
+// Both compounds, and both after `.cell:hover`: a filled or active cell
+// must not fall back to the hover treatment under the pointer.
+.cell.filled {
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cell.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 1px 8px var(--accent-shadow);
+}
+
+// The label swallows clicks otherwise — the handler lives on the cell.
+.cellLabel {
+  pointer-events: none;
+}
+
+// Pill toggle (Thinking).
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 19px;
+  padding: 0;
+  border: 1px solid var(--b2);
+  border-radius: 999px;
+  background: var(--s1);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out);
+}
+
+.switch.on {
+  border-color: var(--accent);
+  background: var(--accent);
+
+  .knob {
+    background: var(--on-accent);
+    transform: translate(15px, -50%);
+  }
+}
+
+.knob {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--t2);
+  transform: translateY(-50%);
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    transform var(--motion-hover) var(--ease-out);
+}

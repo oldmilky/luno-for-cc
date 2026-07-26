@@ -1,0 +1,26 @@
+// ─────────────────────────────────────────────────────────────
+// Blue — azure accent over cold, slightly navy surfaces.
+//
+// Deeper than --info (#60a5fa) so an info badge does not read as
+// accent chrome. The fill is saturated enough to take a light glyph.
+// ─────────────────────────────────────────────────────────────
+
+[data-theme="blue"] {
+  --s0: #070a10;
+  --s1: #0e131b;
+  --s2: #141b25;
+  --s3: #1e2734;
+
+  --t1: #e8eefa;
+  --t2: #b8c6dc;
+  --t3: #74849c;
+  --t4: #475366;
+
+  --accent: #3b82f6;
+  --accent-deep: #1d4ed8;
+  --accent-glow: #7cb2ff;
+  --on-accent: #f0f7ff;
+
+  --lift: #ffffff;
+  --brand-tile-gradient: linear-gradient(160deg, #7cb2ff, #1d4ed8);
+}

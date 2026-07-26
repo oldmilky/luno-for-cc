@@ -1,0 +1,127 @@
+// ─────────────────────────────────────────────────────────────
+// Edit-confirm dialog — "submit from a previous message?" with
+// Cancel / Don't revert / Revert. Converted from Tailwind in Ф2а.
+//
+// Nothing was ported from theme.css: the pre-conversion dialog
+// was pure Tailwind, and the `.edit-modal` / `.modal-btn-*` /
+// `.modal-kbd` block there is an older markup generation that no
+// component references any more. Its `bg-black/55` backdrop and
+// `text-on-accent/85` kbd hint were the only two literal colors.
+// ─────────────────────────────────────────────────────────────
+
+.overlay {
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--s0) 55%, transparent);
+  backdrop-filter: blur(2px);
+
+  // This dialog mounts as a direct child of `.app`, and the app shell
+  // flattens those to `position: relative; z-index: 1` unless the child is on
+  // its exclusion list (theme.css `.app > *:not(…)`). That selector scores
+  // 0-5-1, so a module class cannot out-specify it and the backdrop would
+  // drop into normal flow — stretching the document and scrolling the whole
+  // sidebar. The exclusion list keys on global class names we no longer
+  // carry, so the two properties it clobbers are forced here instead.
+  position: fixed !important;
+  z-index: 1000 !important;
+}
+
+.dialog {
+  width: 460px;
+  max-width: 92vw;
+  padding: 20px;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-lg);
+  background: var(--s1);
+  box-shadow: 0 24px 60px color-mix(in srgb, var(--shadow-color) 55%, transparent);
+}
+
+.title {
+  margin: 0 0 6px;
+  color: var(--t1);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.body {
+  margin: 0 0 18px;
+  color: var(--t2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+%button {
+  padding: 6px 14px;
+  border-radius: var(--round);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+}
+
+.cancel {
+  @extend %button;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--t2);
+
+  &:hover {
+    background: var(--s2);
+    color: var(--t1);
+  }
+}
+
+.secondary {
+  @extend %button;
+  border: 1px solid var(--b2);
+  background: var(--s2);
+  color: var(--t1);
+
+  &:hover {
+    border-color: var(--b3);
+    background: var(--s3);
+  }
+}
+
+.primary {
+  @extend %button;
+  border: 1px solid var(--accent-mid);
+  background: var(--accent);
+  color: var(--on-accent);
+
+  &:hover {
+    background: var(--accent-deep);
+  }
+}
+
+// The keyboard hint riding inside each button.
+.hint {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.7;
+}
+
+// On the accent fill, dimming with opacity muddies the glyph — step the
+// color down against --on-accent instead.
+.hintOnAccent {
+  margin-left: 6px;
+  color: color-mix(in srgb, var(--on-accent) 85%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}

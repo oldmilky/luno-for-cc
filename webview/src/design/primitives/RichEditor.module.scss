@@ -1,0 +1,171 @@
+// ─────────────────────────────────────────────────────────────
+// RichEditor — the contenteditable composer surface plus the two
+// atomic pills that flow inside it (code badge, @file mention).
+// Converted from theme.css in Ф2а.
+//
+// The pills are built imperatively (document.createElement) and are
+// also rendered by UserMessage, which imports this same module — so
+// a sent message shows exactly the pill the user typed.
+// ─────────────────────────────────────────────────────────────
+
+.wrap {
+  position: relative;
+  width: 100%;
+}
+
+.editor {
+  width: 100%;
+  min-height: 44px;
+  max-height: 260px;
+  padding: 11px 14px 6px;
+  overflow-y: auto;
+  outline: none;
+  color: var(--t1);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  caret-color: var(--accent-glow);
+
+  &[contenteditable="false"] {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+
+  &::selection,
+  *::selection {
+    background: color-mix(in srgb, var(--accent) 32%, transparent);
+  }
+}
+
+.placeholder {
+  position: absolute;
+  top: 11px;
+  right: 14px;
+  left: 14px;
+  color: var(--t4);
+  pointer-events: none;
+  user-select: none;
+  white-space: pre-wrap;
+}
+
+// Subtle entrance so a newly inserted pill feels responsive. Stays a keyframe
+// rather than the framer ENTER preset because both pills are built with
+// document.createElement and never pass through React.
+// Same "appear" character as ENTER — fade plus a small rise — at the pill's
+// travel step; it used to drop 2px, which read differently from every other
+// element that arrives on screen.
+@keyframes pill-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--travel-sm)) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+// ── Inline code badge ────────────────────────────────────────
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 2px;
+  padding: 3px 12px 3px 14px;
+  border: 1px solid var(--accent-mid);
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  line-height: 1.4;
+  vertical-align: baseline;
+  cursor: pointer;
+  user-select: none;
+  animation: pill-in var(--motion-enter) var(--ease-out);
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    box-shadow var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--accent-mid);
+    border-color: var(--accent);
+    color: var(--t1);
+    box-shadow: 0 2px 10px var(--accent-mid);
+
+    .badgeIcon {
+      color: var(--t1);
+    }
+  }
+}
+
+.badgeIcon {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+.badgeLabel {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// ── Inline @file mention pill (lighter than the code badge) ──
+
+.mention {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 1px;
+  padding: 0 6px 0 5px;
+  border: 1px solid var(--b2);
+  border-radius: 5px;
+  background: var(--s3);
+  color: var(--t2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  vertical-align: baseline;
+  cursor: pointer;
+  user-select: none;
+  animation: pill-in var(--motion-enter) var(--ease-out);
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent-mid);
+    color: var(--t1);
+  }
+}
+
+.mentionAt {
+  margin-right: 1px;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.mentionLabel {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// theme.css also carried `.reditor :where(span.re-mention)` giving mentions an
+// accent-soft fill. It was dead: equal specificity to `.re-mention`, declared
+// earlier, so the neutral fill above always won. Not carried over.

@@ -1,0 +1,229 @@
+// ─────────────────────────────────────────────────────────────
+// Command palette — the Cmd+K spotlight overlay: scrim, panel,
+// search row, grouped result rows, footer legend.
+// Converted from Tailwind + inline styles in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 16px;
+  padding-top: 15vh;
+  background: color-mix(in srgb, var(--s0) 60%, transparent);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 560px;
+  max-height: 70vh;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-lg);
+  background: var(--s1);
+  box-shadow: 0 28px 80px color-mix(in srgb, var(--shadow-color) 60%, transparent);
+  overflow: hidden;
+}
+
+// ── Search row ───────────────────────────────────────────────
+
+.search {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--b1);
+  background: linear-gradient(
+    to bottom,
+    var(--s1),
+    color-mix(in srgb, var(--s1) 85%, transparent)
+  );
+}
+
+.searchIcon {
+  flex-shrink: 0;
+  color: var(--accent-glow);
+}
+
+.input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--t1);
+  // Only the family is inherited: the 14px below is the field's own size.
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+
+  &::placeholder {
+    color: var(--t4);
+  }
+}
+
+// Shared shape for the Esc / arrow / return key caps.
+%key {
+  padding: 2px 6px;
+  border: 1px solid var(--b2);
+  border-radius: 4px;
+  background: var(--s2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.escKey {
+  @extend %key;
+  flex-shrink: 0;
+  color: var(--t4);
+}
+
+.key {
+  @extend %key;
+  color: var(--t3);
+}
+
+// ── Results ──────────────────────────────────────────────────
+
+.results {
+  flex: 1;
+  padding: 4px 0;
+  overflow-y: auto;
+}
+
+.empty {
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.emptyText {
+  color: var(--t3);
+  font-size: 12.5px;
+}
+
+.group {
+  margin-bottom: 4px;
+}
+
+.groupLabel {
+  padding: 8px 12px 4px;
+  color: var(--t4);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+%truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 4px;
+  padding: 8px 12px;
+  // Transparent by default so the active row's border does not resize it.
+  border: 1px solid transparent;
+  border-radius: var(--round);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out);
+
+  // Pointer-over promotes a row to active, so hover must not repaint the
+  // accent fill of the row it just selected.
+  &:not(.active):hover {
+    background: color-mix(in srgb, var(--s2) 60%, transparent);
+  }
+
+  &.active {
+    border-color: var(--accent-mid);
+    background: var(--accent-soft);
+  }
+}
+
+.tile {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round);
+  background: var(--s2);
+  color: var(--t3);
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &.active {
+    border-color: transparent;
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+}
+
+.rowBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.rowTitle {
+  @extend %truncate;
+  color: var(--t1);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.rowSubtitle {
+  @extend %truncate;
+  color: var(--t4);
+  font-size: 10.5px;
+}
+
+.rowEnter {
+  flex-shrink: 0;
+  color: var(--accent-glow);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+// ── Footer legend ────────────────────────────────────────────
+
+.footer {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-top: 1px solid var(--b1);
+  background: color-mix(in srgb, var(--s1) 60%, transparent);
+  color: var(--t4);
+  font-size: 10.5px;
+}
+
+%footer-hint {
+  display: flex;
+  align-items: center;
+}
+
+.footerNav {
+  @extend %footer-hint;
+  gap: 8px;
+}
+
+.footerSelect {
+  @extend %footer-hint;
+  gap: 6px;
+}

@@ -1,0 +1,232 @@
+// ─────────────────────────────────────────────────────────────
+// Turn timeline — the collapsible turn wrapper, its "thought"
+// preamble, interleaved narrative, and tool-group rows.
+//
+// Shared by TurnHeader, ThoughtBlock, ToolGroupCard and the turn
+// layout in ChatScreen; they all import this one module because
+// the pieces only make sense as one timeline.
+// Converted from theme.css in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+.turn {
+  margin: 4px 14px 12px;
+}
+
+// Shared shape for the two collapse toggles (turn header, thought head).
+%disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1px;
+  cursor: pointer;
+  transition: color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    color: var(--t2);
+  }
+}
+
+.turnHeader {
+  @extend %disclosure;
+  margin-bottom: 2px;
+  margin-left: -2px;
+  border-radius: var(--round-sm);
+  font-weight: 600;
+  transition:
+    color var(--motion-hover) var(--ease-out),
+    background-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: color-mix(in srgb, var(--s2) 60%, transparent);
+  }
+}
+
+// Pulsing dot while the turn is still running. Ambient and endless, like the
+// spinner — it has no start or end to time, so the 1.4s period stays off the
+// --motion-* scale (nothing there exceeds 280ms). The curve is tokenised
+// though: `--ease-soft` is the house symmetric curve, the same one the header
+// halo breathes on, so the two ambient signals read as one family.
+.liveDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-shadow);
+  animation: live-pulse var(--motion-ambient) var(--ease-soft) infinite;
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.chev {
+  display: inline-flex;
+  opacity: 0.5;
+}
+
+.turnBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.turnResponse {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+// ── Thought preamble ─────────────────────────────────────────
+
+.thought {
+  border: 0;
+  background: transparent;
+}
+
+.thoughtHead {
+  @extend %disclosure;
+}
+
+.thoughtBody {
+  margin-left: 6px;
+  padding: 4px 4px 6px 16px;
+  border-left: 1px solid var(--b1);
+  color: var(--t2);
+  font-size: 12.5px;
+  line-height: 1.5;
+  // ThoughtBlock spreads EXPAND onto this element, which animates height to 0.
+  // Height alone does not stop the markdown inside from painting: without the
+  // clip the full body keeps its natural height and spills out of the box for
+  // the whole collapse.
+  overflow: hidden;
+
+  p:first-child {
+    margin-top: 0;
+  }
+
+  p:last-child {
+    margin-bottom: 0;
+  }
+}
+
+// Assistant prose interleaved between tool groups.
+.narrative {
+  padding: 4px;
+  color: var(--t1);
+  font-size: 13px;
+  line-height: 1.55;
+
+  p:first-child {
+    margin-top: 0;
+  }
+
+  p:last-child {
+    margin-bottom: 0;
+  }
+}
+
+// ── Tool group ───────────────────────────────────────────────
+
+// No enter animation here: ToolGroupCard renders this element as a
+// motion.div and spreads ENTER, which animates the same opacity + rise.
+// The old `group-in` keyframe was a second, slightly different copy of it.
+.group {
+  border: 0;
+  background: transparent;
+}
+
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--t1);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s2);
+  }
+}
+
+.groupIcon {
+  display: inline-flex;
+  justify-content: center;
+  width: 14px;
+  color: var(--t3);
+}
+
+.groupLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t1);
+}
+
+.groupPending .groupLabel {
+  color: var(--t2);
+}
+
+.groupError .groupLabel {
+  color: var(--err);
+}
+
+.groupCount {
+  color: var(--t3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.groupStatus {
+  display: inline-flex;
+  opacity: 0.7;
+}
+
+.groupOk {
+  color: var(--t3);
+}
+
+.groupErr {
+  color: var(--err);
+}
+
+.groupChev {
+  display: inline-flex;
+  opacity: 0.5;
+  color: var(--t3);
+}
+
+.groupBody {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0 4px;
+}
+
+// Tool rows nested inside a group indent under its header.
+.groupBody .nested {
+  margin-left: 16px;
+}

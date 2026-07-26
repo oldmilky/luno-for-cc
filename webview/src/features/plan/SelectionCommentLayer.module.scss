@@ -1,0 +1,98 @@
+// ─────────────────────────────────────────────────────────────
+// Selection comment layer — the "+" pip that follows a text
+// selection in the plan body, and the popover it opens.
+//
+// Both are position: fixed and get their coordinates inline from
+// the selection's DOMRect; only the look lives here. Both used to
+// carry `animation: sel-pop`, which is half an animation — a
+// keyframe plays on mount and there is nothing left to run when
+// React drops the node, so the pip and the popover appeared
+// smoothly and vanished on a frame. They take the POPOVER preset
+// under AnimatePresence now; no timing lives in this file.
+//
+// Converted from theme.css in Ф2а. The emerald pip is `--ok`
+// (the same green the inline thread rail uses), so the selection
+// affordance and the resulting thread stay visually paired.
+// ─────────────────────────────────────────────────────────────
+
+.trigger {
+  // One step deeper than --ok, for the outline and the pressed-in hover.
+  // Local name, not `--ok-deep`: that is not in the token contract, and a
+  // token-shaped name here would shadow one if a theme ever declared it.
+  --pip-deep: color-mix(in srgb, var(--ok) 78%, var(--s0));
+
+  position: fixed;
+  z-index: 220;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--pip-deep);
+  border-radius: 5px;
+  background: var(--ok);
+  color: var(--on-status);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--ok) 35%, transparent);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--pip-deep);
+  }
+}
+
+.popover {
+  position: fixed;
+  z-index: 230;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--b3);
+  border-radius: var(--round-sm);
+  background: var(--s2);
+  box-shadow: var(--shadow-2);
+}
+
+.quote {
+  max-height: 80px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--ok);
+  border-radius: 3px;
+  background: var(--s0);
+  color: var(--t2);
+  font-size: 11.5px;
+  line-height: 1.4;
+  overflow: auto;
+}
+
+.input {
+  min-height: 60px;
+  padding: 8px 10px;
+  border: 1px solid var(--b2);
+  border-radius: 5px;
+  background: var(--s0);
+  color: var(--t1);
+  font: inherit;
+  font-size: 12px;
+  resize: vertical;
+
+  &:focus {
+    outline: none;
+    border-color: var(--accent-mid);
+  }
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+// Both footer buttons come from PlanButton.module.scss; only their size is
+// tightened here. Doubled class for 0,2,0 — PlanButton may be emitted after
+// this file in the bundle, and at equal specificity its padding would win.
+.compact.compact {
+  padding: 5px 12px;
+  font-size: 11.5px;
+}

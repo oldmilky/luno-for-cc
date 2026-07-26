@@ -1,0 +1,27 @@
+// ─────────────────────────────────────────────────────────────
+// Green — emerald accent over surfaces with a cool green undertone.
+//
+// Pitched darker and more saturated than --ok (#4ade80) so a success
+// badge still separates from accent chrome. The fill is bright, so it
+// takes a dark glyph — light text on emerald fails contrast.
+// ─────────────────────────────────────────────────────────────
+
+[data-theme="green"] {
+  --s0: #060c09;
+  --s1: #0c1410;
+  --s2: #121c17;
+  --s3: #1b2a22;
+
+  --t1: #e7f5ed;
+  --t2: #b9d4c5;
+  --t3: #739483;
+  --t4: #485c52;
+
+  --accent: #22c55e;
+  --accent-deep: #15803d;
+  --accent-glow: #5ee89a;
+  --on-accent: #04240f;
+
+  --lift: #ffffff;
+  --brand-tile-gradient: linear-gradient(160deg, #5ee89a, #15803d);
+}

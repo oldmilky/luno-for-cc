@@ -1,0 +1,25 @@
+// ─────────────────────────────────────────────────────────────
+// Purple — violet accent over surfaces tinted the same way, so the
+// whole panel reads purple rather than "grey panel, purple button".
+// Accent is light enough that its fill takes a dark glyph.
+// ─────────────────────────────────────────────────────────────
+
+[data-theme="purple"] {
+  --s0: #0a0812;
+  --s1: #120f1c;
+  --s2: #191426;
+  --s3: #241d35;
+
+  --t1: #edeaf5;
+  --t2: #c4bcd8;
+  --t3: #837a99;
+  --t4: #524b66;
+
+  --accent: #a78bfa;
+  --accent-deep: #8b64ff;
+  --accent-glow: #c4b5fd;
+  --on-accent: #16102b;
+
+  --lift: #ffffff;
+  --brand-tile-gradient: linear-gradient(160deg, #c4b5fd, #8b64ff);
+}

@@ -1,0 +1,199 @@
+// ─────────────────────────────────────────────────────────────
+// KeyboardHints — the "?" shortcut overlay: scrim, panel, and the
+// grouped key rows.
+// Converted from Tailwind in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: color-mix(in srgb, var(--s0) 55%, transparent);
+  // The blur is animated inline by framer-motion, so it is deliberately
+  // absent here — declaring it would fight the enter/exit tween.
+}
+
+.panel {
+  width: 100%;
+  max-width: 460px;
+  border: 1px solid var(--b2);
+  border-radius: 16px;
+  background: var(--s1);
+  box-shadow: 0 28px 80px color-mix(in srgb, var(--shadow-color) 60%, transparent);
+  // Clips the header/footer fills to the rounded corners.
+  overflow: hidden;
+}
+
+// ── Header ───────────────────────────────────────────────────
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--b1);
+  background: linear-gradient(
+    to bottom,
+    var(--s1),
+    color-mix(in srgb, var(--s1) 85%, transparent)
+  );
+}
+
+.headTitles {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.headTile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--accent-mid);
+  border-radius: var(--round-sm);
+  background: linear-gradient(
+    135deg,
+    var(--accent-soft),
+    color-mix(in srgb, var(--accent) 4%, transparent)
+  );
+  color: var(--accent-glow);
+  box-shadow: 0 2px 10px var(--accent-shadow);
+}
+
+.headTitle {
+  margin: 0;
+  color: var(--t1);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--round);
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s2);
+    color: var(--t1);
+  }
+}
+
+// ── Groups ───────────────────────────────────────────────────
+
+.body {
+  max-height: 60vh;
+  padding: 12px 16px;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--s0) 40%, transparent);
+}
+
+.group {
+  margin-bottom: 16px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.groupLabel {
+  margin-bottom: 6px;
+  padding: 0 4px;
+  color: var(--t4);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: var(--round);
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: color-mix(in srgb, var(--s2) 60%, transparent);
+  }
+}
+
+.desc {
+  color: var(--t2);
+  font-size: 12.5px;
+}
+
+.keys {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.key {
+  // Wider than the glyph so ⌘ and ⇧ line up in a column of chips.
+  min-width: 18px;
+  padding: 2px 6px;
+  border: 1px solid var(--b2);
+  border-radius: 5px;
+  background: var(--s2);
+  box-shadow: 0 1px 0 var(--b1);
+  color: var(--t1);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+}
+
+// ── Footer ───────────────────────────────────────────────────
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-top: 1px solid var(--b1);
+  background: color-mix(in srgb, var(--s1) 60%, transparent);
+  color: var(--t4);
+  font-size: 10.5px;
+}
+
+.footKey {
+  padding: 2px 6px;
+  border: 1px solid var(--b2);
+  border-radius: 4px;
+  background: var(--s2);
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}

@@ -1,0 +1,79 @@
+// ─────────────────────────────────────────────────────────────
+// Brand orb + spinner — conic accent ring with a counter-rotating
+// inner glow. Rotation stays in framer-motion; the paint is here.
+// Converted from Tailwind + inline styles in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+.orb {
+  position: relative;
+  margin-bottom: 22px;
+  font-size: 0;
+}
+
+.halo {
+  position: absolute;
+  inset: -22px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle, var(--accent-shadow), transparent 70%);
+  filter: blur(10px);
+}
+
+.ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 180deg,
+    var(--accent),
+    var(--accent-glow),
+    var(--accent)
+  );
+  filter: blur(0.5px);
+  box-shadow:
+    0 0 60px var(--accent-shadow),
+    0 0 120px var(--accent-soft);
+}
+
+// Punches the ring into an annulus by covering its middle.
+.core {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--s0);
+}
+
+.inner {
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    var(--accent) 0%,
+    transparent 25%,
+    var(--accent-glow) 50%,
+    transparent 75%,
+    var(--accent) 100%
+  );
+  filter: blur(6px);
+}
+
+.spinner {
+  position: relative;
+  display: inline-block;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 180deg,
+    var(--accent),
+    var(--accent-glow),
+    var(--accent)
+  );
+  box-shadow: 0 0 30px var(--accent-shadow);
+}
+
+.spinnerCore {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--s0);
+}

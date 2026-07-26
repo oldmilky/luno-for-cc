@@ -1,0 +1,118 @@
+// ─────────────────────────────────────────────────────────────
+// Tooltip surface.
+//
+// Reads as a raised chip rather than as a menu: it sits one step
+// brighter than the panel, borrows the composer's border, and is
+// the smallest text in the app that is still meant to be read.
+// ─────────────────────────────────────────────────────────────
+
+.bubble {
+  position: fixed;
+  // Above every overlay in the app, not level with them. Three modals also
+  // claim 1000, and a tie is broken by DOM order — so a tooltip opened before
+  // a modal would end up behind it, which is exactly the case where a modal's
+  // own icon buttons need their labels.
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  // `max-content`, not shrink-to-fit. A fixed-position box with no width sizes
+  // itself against whatever space is left beside its `left` — so the same
+  // label was 340px wide when measured at the origin and 150px once moved next
+  // to a trigger near the right edge. The measured height then belonged to a
+  // layout that no longer existed, and the bubble sat at the wrong offset.
+  // This makes the width answer only to the content and the cap below.
+  width: max-content;
+  max-width: 260px;
+  padding: 5px 9px;
+  border: 1px solid var(--b3);
+  border-radius: var(--round-sm);
+  background: var(--glass);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-2);
+  // The label describes what is under the cursor, so it must never become
+  // what is under the cursor — without this the bubble steals the hover it
+  // was opened by and flickers against its own trigger.
+  pointer-events: none;
+  // Set by the motion preset, which flips it with the placement.
+  transform-origin: center;
+}
+
+// Wrapper used only for triggers that can be disabled. A disabled control
+// swallows the hit test without firing anything, so the events have to be
+// caught out here — and the control has to stop absorbing them.
+.gate {
+  display: inline-flex;
+
+  > :disabled {
+    pointer-events: none;
+  }
+}
+
+.icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  // Dimmer than the label: the glyph is a category marker, not the message.
+  color: var(--t3);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.label {
+  color: var(--t1);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  // Wrapping is the default, and `width: max-content` above is what makes that
+  // safe: a short label still sizes to its own text and occupies one line, so
+  // nothing wraps that did not have to. The first version pinned this to
+  // `nowrap` with an ellipsis guard, which quietly truncated every label past
+  // roughly forty characters — including "Your usage is above the limit for
+  // this plan — pick the right plan above…", where the half that tells you what
+  // to do is the half that got cut. A hint that ends in an ellipsis has failed
+  // at the one job it has.
+  white-space: normal;
+}
+
+.hint {
+  color: var(--t3);
+  font-size: 10.5px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+// Value mode — a path, a URL, a quoted passage. These arrive here precisely
+// because they were too long for the UI, so the layout has to expect length
+// rather than fight it.
+.wrap {
+  max-width: 340px;
+  align-items: flex-start;
+
+  .icon {
+    // The glyph would sit vertically centred against a four-line block and
+    // read as unattached; pin it to the first line instead.
+    margin-top: 1px;
+  }
+
+  .label {
+    // `anywhere`, not `break-all`: a path or a URL has no spaces to break at,
+    // but a quoted sentence does — this breaks mid-token only when there is no
+    // alternative, so prose still wraps at its words.
+    overflow-wrap: anywhere;
+    // A comment can quote a whole paragraph. Past a few lines a tooltip stops
+    // being a hint and starts being a panel that covers what you were reading.
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .hint {
+    white-space: normal;
+  }
+}

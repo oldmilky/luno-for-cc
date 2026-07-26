@@ -1,0 +1,76 @@
+// ─────────────────────────────────────────────────────────────
+// Chip — small status/label pill. Converted from Tailwind in Ф2а.
+//
+// Tone borders used to be hard-coded rgba (e.g. rgba(52,211,153,.32)
+// on a green that isn't even --ok); they are now mixed from the tone
+// token itself, so a theme that overrides --ok/--warn/--err/--info
+// gets matching borders for free.
+// ─────────────────────────────────────────────────────────────
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--b1);
+  border-radius: 6px;
+  background: var(--s2);
+  color: var(--t3);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+}
+
+@mixin tone($color, $soft, $border: 32%) {
+  color: $color;
+  background: $soft;
+  border-color: color-mix(in srgb, #{$color} #{$border}, transparent);
+}
+
+.accent {
+  color: var(--accent-glow);
+  background: var(--accent-soft);
+  border-color: var(--accent-mid);
+}
+
+.success {
+  @include tone(var(--ok), var(--ok-soft));
+}
+
+.warn {
+  @include tone(var(--warn), var(--warn-soft));
+}
+
+.error,
+.danger {
+  @include tone(var(--err), var(--err-soft), 35%);
+}
+
+.info {
+  @include tone(var(--info), var(--info-soft));
+}
+
+.active {
+  box-shadow: 0 0 0 1px var(--accent-mid);
+}
+
+.interactive {
+  cursor: pointer;
+
+  &:hover {
+    filter: brightness(1.1);
+  }
+}
+
+.pulseInner {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}

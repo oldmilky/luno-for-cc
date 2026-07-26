@@ -1,0 +1,17 @@
+// File-type badge. The fill/ink come from the per-language table in
+// FileBadge.tsx (language brand colors — data, not theme), so only the
+// shape lives here. Converted from Tailwind in Ф2а.
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  user-select: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, black 15%, transparent) inset;
+}

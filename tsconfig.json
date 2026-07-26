@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "lib": ["ES2022"],
+    "outDir": "dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"],
+  // `webview` is excluded here because it is a separate project with its own
+  // tsconfig (JSX, DOM libs, different module resolution) — not because it
+  // should go unchecked. `bun run lint` runs both configs in sequence; it used
+  // to run only this one, which is how five type errors accumulated in
+  // features/plan without anything going red.
+  "exclude": ["node_modules", "webview", "dist", "test"]
+}

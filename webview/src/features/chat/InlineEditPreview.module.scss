@@ -1,0 +1,142 @@
+// ─────────────────────────────────────────────────────────────
+// Inline edit preview — a compact file-edit card with a diff
+// excerpt. Converted from Tailwind in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+.card {
+  border: 1px solid var(--b1);
+  border-radius: var(--round-sm);
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: color-mix(in srgb, var(--s2) 50%, transparent);
+  }
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t1);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.05px;
+}
+
+.failed {
+  color: var(--del-line);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.added {
+  color: var(--add-line);
+}
+
+.removed {
+  color: var(--del-line);
+}
+
+.pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--t3);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.pendingDot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--t3);
+  box-shadow: 0 0 4px var(--t3);
+}
+
+// ── Diff excerpt ─────────────────────────────────────────────
+
+.diff {
+  border-top: 1px solid var(--b1);
+  background: color-mix(in srgb, var(--s0) 40%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.7;
+  overflow-x: auto;
+}
+
+.rowAdd {
+  background: var(--add-bg);
+}
+
+.rowDel {
+  background: var(--del-bg);
+}
+
+.line {
+  display: block;
+  padding: 1px 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  word-break: break-all;
+  color: var(--t3);
+}
+
+// Changed lines read at full contrast; context stays quiet.
+.rowAdd .line,
+.rowDel .line {
+  color: var(--t1);
+}
+
+.more {
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--b1);
+  background: transparent;
+  color: var(--t4);
+  font: inherit;
+  font-size: 10.5px;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: color-mix(in srgb, var(--s2) 40%, transparent);
+    color: var(--t2);
+  }
+}

@@ -1,0 +1,389 @@
+// ─────────────────────────────────────────────────────────────
+// Inline comment thread — the bubble hydrated into the plan doc,
+// plus the slot that hosts it.
+//
+// Slot and bubble share this module on purpose: the reveal is a
+// two-layer animation (slot animates max-height, bubble animates
+// opacity/transform) and CSS modules cannot name a class that
+// lives in another module. InlineCommentThreads.tsx creates the
+// slot element and imports `.slot` from here.
+//
+// Converted from theme.css in Ф2а. The old `--plan-accent`
+// (a hard-coded emerald) is now `--ok`, so the thread rail
+// follows the active palette's status green.
+// ─────────────────────────────────────────────────────────────
+
+// ── Slot ─────────────────────────────────────────────────────
+// The slot is injected as a sibling right after the commented
+// block. When it lands inside a UL/OL it has to be an <li> to keep
+// the HTML valid — so kill the marker and pull it back out of the
+// bullet column. Collapsed to zero height so the doc reserves no
+// space until the thread is actually revealed.
+
+.slot {
+  list-style: none;
+  margin-left: 0;
+  max-height: 0;
+  overflow: hidden;
+  // A transition, not a keyframe — so unlike the rest of this surface it
+  // already ran both ways. What it got wrong was the curve: it carried
+  // `--ease-out` written out longhand, and an asymmetric curve makes the
+  // close look like a different gesture from the open. This is the expand
+  // role, so it takes the symmetric curve at the expand duration — the CSS
+  // spelling of the EXPAND preset. Its trigger is `:hover` on a DOM node
+  // React never sees, which is the only reason it is not the preset itself.
+  transition: max-height var(--motion-expand) var(--ease-soft);
+}
+
+li.slot::marker {
+  content: "";
+}
+
+ul .slot,
+ol .slot {
+  margin-left: -1.4em;
+}
+
+// ── Bubble ───────────────────────────────────────────────────
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 14px;
+  padding: 11px 13px;
+  border: 1px solid var(--b1);
+  border-left: 3px solid var(--ok);
+  border-radius: 0 var(--round-sm) var(--round-sm) 0;
+  background: linear-gradient(180deg, var(--s2), var(--s1));
+  color: var(--t1);
+  font-size: 12.5px;
+  box-shadow: var(--shadow-1);
+
+  &:hover {
+    border-color: var(--b2);
+    box-shadow: var(--shadow-2);
+  }
+
+  // Modifiers stay compound with `.thread`: `.resolved` is also carried by
+  // the pin badge, which must not inherit the card's own resolved look.
+  &.editing,
+  &.replying {
+    border-color: var(--accent-mid);
+    border-left-color: var(--accent);
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
+  &.resolved {
+    border-left-color: var(--t4);
+    background: var(--s1);
+    opacity: 0.78;
+
+    &:hover {
+      opacity: 0.95;
+    }
+  }
+}
+
+// ── Header ───────────────────────────────────────────────────
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--t3);
+  font-size: 10.5px;
+}
+
+// Numbered badge, matched to the pin appended to the commented line.
+.pin {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--ok);
+  color: var(--on-status);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  // Ring in the card's own surface so the badge reads as lifted off it.
+  box-shadow: 0 0 0 2px var(--s2);
+
+  &.resolved {
+    background: var(--t4);
+    color: var(--s0);
+  }
+}
+
+.time {
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: var(--s3);
+  color: var(--t3);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+// ── Quoted passage ───────────────────────────────────────────
+
+.quote {
+  margin: 0;
+  padding: 6px 10px;
+  border-left: 2px solid var(--ok);
+  border-radius: 0 5px 5px 0;
+  background: color-mix(in srgb, var(--ok) 8%, transparent);
+  color: var(--t2);
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.5;
+  word-wrap: break-word;
+
+  &::before {
+    content: "“";
+    margin-right: 1px;
+    color: var(--t3);
+  }
+
+  &::after {
+    content: "”";
+    margin-left: 1px;
+    color: var(--t3);
+  }
+}
+
+.thread.resolved .quote {
+  border-left-color: var(--t4);
+  background: var(--tint-weak);
+}
+
+// ── Body ─────────────────────────────────────────────────────
+
+.body {
+  margin: 0;
+  padding: 3px 4px;
+  border-radius: 4px;
+  color: var(--t1);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  // EXPAND animates height; without this the text spills out of the
+  // collapsing box instead of being wiped by it.
+  overflow: hidden;
+  cursor: text;
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  // Only the editable body is a button; it still keeps the text caret so it
+  // doesn't advertise itself as a control the way a pointer would.
+  &[role="button"]:hover {
+    background: var(--tint);
+    cursor: text;
+  }
+}
+
+.strike {
+  color: var(--t2);
+  text-decoration: line-through;
+  text-decoration-color: var(--t4);
+  text-decoration-thickness: 1px;
+}
+
+// ── Inline editor ────────────────────────────────────────────
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  // See `.body` — this is the other half of the same accordion.
+  overflow: hidden;
+}
+
+.textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 56px;
+  padding: 7px 9px;
+  border: 1px solid var(--b2);
+  border-radius: 5px;
+  background: var(--s0);
+  color: var(--t1);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  resize: vertical;
+
+  &:focus {
+    outline: none;
+    border-color: var(--accent-mid);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+// Save/Cancel are the shared PlanButton; only their size is tightened here.
+// Doubled class for 0,2,0 — PlanButton.module.scss may be emitted after this
+// file in the bundle, and at equal specificity its padding would win.
+.compact.compact {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+// ── Replies — continuous rail, no nested boxes ───────────────
+
+.replies {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 0 0;
+  border-top: 1px dashed var(--b1);
+  // The list expands the first time a reply lands; clip it while it does.
+  overflow: hidden;
+}
+
+.reply {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.replyRail {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 14px;
+  color: var(--t4);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.4;
+  user-select: none;
+}
+
+.replyContent {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.replyMeta {
+  color: var(--t3);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.replyBody {
+  color: var(--t1);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+// ── Footer chip row ──────────────────────────────────────────
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--b1);
+  // Collapses under EXPAND whenever an editor takes its place.
+  overflow: hidden;
+}
+
+.footSpacer {
+  flex: 1;
+}
+
+.footBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color var(--motion-hover) var(--ease-out),
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    transform var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b2);
+    background: var(--s3);
+    color: var(--t1);
+  }
+
+  &:active {
+    transform: scale(0.96);
+  }
+
+  &.active {
+    border-color: var(--accent-mid);
+    background: var(--accent-soft);
+    color: var(--accent-glow);
+  }
+
+  &.danger:hover {
+    border-color: color-mix(in srgb, var(--err) 32%, transparent);
+    background: var(--err-soft);
+    color: var(--err);
+  }
+}
+
+// ── Visibility ───────────────────────────────────────────────
+// Threads stay collapsed until the user hovers the commented line
+// or the slot, or pins the thread open by clicking the line.
+// `.plan-line-commented` is stamped on the block by
+// useQuoteHighlights and `.is-pinned` by InlineCommentThreads /
+// PlanFullView — both are global DOM contracts, not module classes.
+
+// Travel was a loose 6px; it drops out of the line above it, which is
+// POPOVER's gesture, so it takes POPOVER's amplitude.
+.slot .thread {
+  opacity: 0;
+  transform: translateY(calc(-1 * var(--travel-sm))) scale(0.98);
+  pointer-events: none;
+  transition:
+    opacity var(--motion-expand) var(--ease-soft),
+    transform var(--motion-expand) var(--ease-soft);
+}
+
+:global(.plan-line-commented):hover + .slot,
+.slot:hover,
+.slot:global(.is-pinned) {
+  max-height: 720px;
+}
+
+:global(.plan-line-commented):hover + .slot .thread,
+.slot:hover .thread,
+.slot:global(.is-pinned) .thread {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}

@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Opens a second Cursor window running LUNO from this folder rather than
+      // from ~/.cursor/extensions — which is what makes `bun run watch` +
+      // luno.devAutoRestart able to pick up src/ edits without a repackage.
+      "name": "Run Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "preLaunchTask": "bun: build"
+    }
+  ]
+}

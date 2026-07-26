@@ -1,0 +1,1272 @@
+import { spawn, ChildProcess } from "node:child_process";
+import * as readline from "node:readline";
+import { ChatProvider, ProviderRequest } from "./base.js";
+import {
+  ContentBlock,
+  Message,
+  PermissionBehavior,
+  PermissionMode,
+  PermissionRequestPayload,
+  PermissionSuggestion,
+  StreamDelta,
+  TaskType
+} from "../core/types.js";
+import { getModePrompt, getTaskTypePrompt } from "../services/prompt-loader.js";
+import { ConventionsFile } from "../services/conventions.js";
+
+const HARD_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** Latency-bounded tools that should return a result in seconds, not minutes.
+ *  If the CLI wedges inside one of these and never emits a `tool_result`
+ *  (e.g. WebFetch hanging on a slow/streaming endpoint), the per-tool stall
+ *  watchdog ends the turn cleanly rather than letting the UI spinner run until
+ *  the 10-minute HARD_TIMEOUT_MS SIGKILL. Bash and other potentially
+ *  long-running tools are deliberately NOT watched here. */
+const STALL_WATCHDOG_TOOLS: ReadonlySet<string> = new Set(["WebFetch", "WebSearch"]);
+
+/** Default budget for a watched tool to produce its result before it's treated
+ *  as stalled. Generous enough for a slow-but-real fetch; far short of the
+ *  10-minute hard kill. Override per-session via ClaudeCliOpts.toolStallMs. */
+const WEB_TOOL_STALL_MS = 60 * 1000;
+
+/** Tools that are surfaced through their own dedicated UI by the orchestrator's
+ *  PlanInterceptor (plan cards, question cards). When the CLI routes a
+ *  permission prompt for one of these to us, auto-allow it so we don't also pop
+ *  a generic file-permission card on top of the purpose-built surface. */
+const PERMISSION_AUTO_ALLOW = new Set([
+  "ExitPlanMode",
+  "TodoWrite",
+  "AskUserQuestion"
+]);
+
+/** Reversible file-mutation tools. "Allow edits for this turn" auto-approves
+ *  ONLY these — never Bash, deletes, or network — so the destructive/network
+ *  gate stays fully intact even after the user opts into auto-accepting edits. */
+const SAFE_EDIT_TOOLS = new Set([
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit"
+]);
+
+/** Read-only inspection tools. These never mutate the workspace, never reach
+ *  the network, and never destroy data — they only observe. We always
+ *  auto-allow them so the agent can freely explore the codebase without
+ *  interrupting the user for an approval on every file read or search. The
+ *  destructive/network gate below still runs first, so the (defensive) case of
+ *  a same-named tool that somehow looks destructive/network still prompts. */
+const READ_ONLY_TOOLS = new Set([
+  "Read",
+  "Glob",
+  "Grep",
+  "LS",
+  "NotebookRead"
+]);
+
+/** Bash prefixes routed to OUR classifier (decidePermission) instead of being
+ *  auto-run by a project/user allowlist. Injected as `permissions.ask` rules
+ *  through the highest-priority `--settings` layer; Claude Code resolves
+ *  permissions as deny → ask → allow, so an `ask` rule wins over any matching
+ *  `allow` rule and hands the call to our approval logic.
+ *
+ *  We route ALL `git` here (rather than enumerating add/checkout/commit/…) so
+ *  the read-vs-mutate decision is made automatically: read-only git
+ *  (status/log/diff/…) auto-allows silently, while anything that touches the
+ *  index, working tree, refs, or history surfaces an approval card. New or rare
+ *  mutating subcommands are gated by default without us ever listing them.
+ *  Patterns use the CLI's `Bash(<prefix>:*)` prefix-match syntax. */
+const ROUTE_TO_CLASSIFIER_BASH: ReadonlyArray<string> = ["git:*"];
+
+/** git subcommands that only READ repository state — they never modify the
+ *  index, working tree, refs, config, or history. Anything not in this set is
+ *  treated as mutating-by-default and surfaces an approval card. (Network git —
+ *  push/pull/fetch/clone/remote/ls-remote — is caught earlier by the network
+ *  gate, so it still prompts even though some are read-ish.) */
+const GIT_READONLY_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "status",
+  "log",
+  "diff",
+  "show",
+  "blame",
+  "reflog",
+  "shortlog",
+  "describe",
+  "rev-parse",
+  "rev-list",
+  "ls-files",
+  "ls-tree",
+  "cat-file",
+  "name-rev",
+  "merge-base",
+  "whatchanged",
+  "grep",
+  "show-ref",
+  "for-each-ref",
+  "verify-commit",
+  "count-objects",
+  "version"
+]);
+
+/** True for tool names that run a shell command (`Bash`, and defensively any
+ *  shell/exec/run/terminal-flavored tool an MCP server might expose). */
+function isBashLike(toolName: string): boolean {
+  return /(bash|shell|exec|run|terminal)/i.test(toolName);
+}
+
+/** Extract the git subcommand from a shell command, skipping the leading `git`
+ *  (or an absolute path to it) and any global flags before it — `-C <dir>`,
+ *  `-c <k=v>`, `--no-pager`, `--git-dir=…`, etc. Returns null when the command
+ *  isn't a git invocation. Heuristic (whitespace tokenizer), but robust for the
+ *  shapes the agent actually emits. */
+export function gitSubcommand(command: string): string | null {
+  const tokens = command.trim().split(/\s+/);
+  const gi = tokens.findIndex((t) => t === "git" || t.endsWith("/git"));
+  if (gi === -1) return null;
+  // Global flags that consume the following token as their value.
+  const valued = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
+  let i = gi + 1;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (valued.has(t)) {
+      i += 2;
+      continue;
+    }
+    if (t.startsWith("-")) {
+      i += 1; // flag with no separate arg (e.g. --no-pager, --paginate)
+      continue;
+    }
+    return t;
+  }
+  return null;
+}
+
+/** True when a shell command is a read-only git invocation (`git status`,
+ *  `git log`, …). Used to keep repo inspection silent even after all git is
+ *  routed to our classifier. */
+export function isReadOnlyGitCommand(command: string): boolean {
+  const sub = gitSubcommand(command);
+  return sub !== null && GIT_READONLY_SUBCOMMANDS.has(sub);
+}
+
+/** True for MCP tools that only read/observe (no writes, no network mutations).
+ *  MCP tool names are `mcp__<server>__<tool>`; we key off the trailing tool
+ *  segment matching read-ish verbs (get/list/read/search/fetch-but-local…).
+ *  Conservative: anything that isn't an obvious read still prompts. */
+function isReadOnlyMcpTool(toolName: string): boolean {
+  if (!toolName.startsWith("mcp__")) return false;
+  const leaf = toolName.split("__").pop() ?? "";
+  return /(^|[_-])(get|list|read|search|find|query|describe|show|view|fetch|lookup|inspect)(?:$|[_-]|[A-Z0-9])/i.test(
+    leaf
+  );
+}
+
+/** The CLI only services interactive per-tool approval over the stream-json
+ *  control channel; that's `default` and `auto`. `plan` stays read-only and
+ *  keeps the simpler text-input invocation (the plan flow handles its own
+ *  approval via ExitPlanMode). */
+function usesPermissionProtocol(mode: PermissionMode): boolean {
+  return mode === "default" || mode === "auto";
+}
+
+export interface ClaudeCliOpts {
+  binary: string;
+  cwd: string;
+  permissionMode?: PermissionMode;
+  allowedBashPatterns?: string[];
+  /** Skill ids the user toggled OFF in the picker. Enforced via
+   *  --disallowedTools "Skill(<id>)" plus a system-prompt append. */
+  disabledSkills?: string[];
+  /** Heuristic task classification — drives task-type playbook injection
+   *  in plan mode only. */
+  taskType?: TaskType;
+  /** Project conventions file (CLAUDE.md / AGENTS.md / etc.). Injected via
+   *  --append-system-prompt unless `alreadyLoadedByCli` is true. */
+  conventions?: ConventionsFile | null;
+  getResumeSessionId?: () => string | undefined;
+  setResumeSessionId?: (id: string) => void;
+  /** Anthropic auth token (OAuth `sk-ant-oat...` or API `sk-ant-api...`)
+   *  injected as `ANTHROPIC_API_KEY` when spawning the CLI. Optional —
+   *  if absent the CLI falls back to its own `~/.claude/` credentials. */
+  token?: string;
+  /** Path to a temporary JSON file describing connected MCP servers, in
+   *  the CLI's `--mcp-config` format. Caller is responsible for deleting
+   *  the file after the turn completes. */
+  mcpConfigPath?: string;
+  /** Names of the MCP servers in `mcpConfigPath`. Used to pre-allow their
+   *  tools in auto mode so the agent can call them without per-tool
+   *  approval prompts. */
+  mcpServerNames?: string[];
+  /** Reasoning effort for the session. Maps directly to the CLI's
+   *  `--effort <level>` flag (low | medium | high | xhigh | max). */
+  effort?: EffortLevel;
+  /** Extended-thinking toggle. When defined, passed through as
+   *  `--settings '{"alwaysThinkingEnabled": <bool>}'` so the session
+   *  setting is authoritative regardless of the user's settings.json. */
+  thinking?: boolean;
+  /** Stall budget (ms) for latency-bounded tools (WebFetch/WebSearch). If one
+   *  doesn't return a result within this window the turn is stopped cleanly.
+   *  Defaults to WEB_TOOL_STALL_MS. */
+  toolStallMs?: number;
+}
+
+/** Effort levels accepted by `claude --effort`. */
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+
+const EFFORT_LEVELS: ReadonlyArray<EffortLevel> = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max"
+];
+
+export class ClaudeCliProvider implements ChatProvider {
+  readonly id = "claude-cli";
+  private child: ChildProcess | null = null;
+  /** In-flight `can_use_tool` prompts keyed by control-request id. Holds the
+   *  proposed input + suggestions so respondToPermission() can echo the input
+   *  back on "allow" and honor the CLI's "accept this session" suggestion. */
+  private pendingPermissions = new Map<string, PermissionRequestPayload>();
+  /** Set while a turn is streaming: ends the stream immediately (so cancel
+   *  doesn't have to wait for the child's exit event, which can lag when the
+   *  turn is paused on a permission prompt or the CLI has MCP subprocesses). */
+  private abortCurrent: (() => void) | null = null;
+  /** Set true when the user picks "Allow this turn" on an edit. We then
+   *  auto-approve reversible edit tools for the rest of THIS turn ourselves —
+   *  WITHOUT switching the CLI to acceptEdits, which would also auto-run every
+   *  Bash command (incl. `rm`) and silently disable the destructive gate. */
+  private autoAllowEdits = false;
+
+  constructor(private opts: ClaudeCliOpts) {}
+
+  cancel() {
+    // End the async stream *now* — don't wait for the SIGTERM→exit round-trip.
+    // While a turn is paused on a permission prompt no deltas are flowing, so
+    // the consumer's cancel check only re-runs once we push something.
+    this.abortCurrent?.();
+    if (this.child && !this.child.killed) {
+      this.child.kill("SIGTERM");
+      setTimeout(() => this.child?.kill("SIGKILL"), 2000);
+    }
+  }
+
+  /**
+   * Answer a pending permission prompt. Writes the matching `control_response`
+   * back to the CLI over stdin so the blocked tool call can proceed (allow) or
+   * be rejected (deny). No-op if the turn already ended.
+   */
+  respondToPermission(
+    requestId: string,
+    behavior: PermissionBehavior,
+    opts?: { restOfTurn?: boolean }
+  ): void {
+    const pending = this.pendingPermissions.get(requestId);
+    // No matching pending prompt → this is a duplicate or stale answer (the
+    // turn moved on, or the user double-clicked). Ignore it: responding again
+    // is at best a no-op and at worst sends an empty `updatedInput`, which
+    // would make an "allow" silently run the tool with no arguments.
+    if (!pending) {
+      console.log(`[luno] permission response for unknown id ${requestId} — ignored`);
+      return;
+    }
+    this.pendingPermissions.delete(requestId);
+    console.log(`[luno] permission ${behavior} for ${pending.toolName} (${requestId})`);
+    if (behavior === "allow") {
+      this.writeControl({
+        type: "control_response",
+        response: {
+          subtype: "success",
+          request_id: requestId,
+          // The CLI requires the (possibly edited) input echoed back; we pass
+          // the original proposal through unchanged.
+          response: { behavior: "allow", updatedInput: pending?.input ?? {} }
+        }
+      });
+      // "Allow for the rest of this turn" — auto-approve further EDITS ourselves
+      // (see handleControlRequest). We deliberately do NOT send the CLI's
+      // suggested `set_permission_mode acceptEdits`: that mode also auto-runs
+      // every Bash command (including `rm`/`curl`) with no prompt, which would
+      // silently disable the destructive/network gate for the rest of the turn.
+      if (opts?.restOfTurn) {
+        this.autoAllowEdits = true;
+      }
+    } else {
+      this.writeControl({
+        type: "control_response",
+        response: {
+          subtype: "success",
+          request_id: requestId,
+          response: {
+            behavior: "deny",
+            // Tell the model to stop rather than retry the same call — without
+            // this it often re-proposes the action and the user gets prompted
+            // again and again.
+            message:
+              "The user denied permission for this action and does not want it performed. Do not retry it or attempt an alternative way to achieve the same thing. Stop and briefly explain, or ask the user how they would like to proceed."
+          }
+        }
+      });
+    }
+  }
+
+  private writeControl(obj: unknown): void {
+    try {
+      this.child?.stdin?.write(JSON.stringify(obj) + "\n");
+    } catch {
+      /* stdin already closed — the child has exited; nothing to do. */
+    }
+  }
+
+  /** Route a CLI control request. `can_use_tool` becomes a permission prompt;
+   *  anything else is acknowledged so the CLI never blocks on us. */
+  private handleControlRequest(
+    ev: CliEvent,
+    push: (d: StreamDelta) => void
+  ): void {
+    const requestId = ev.request_id;
+    const req = ev.request;
+    if (!requestId || !req || req.subtype !== "can_use_tool") {
+      if (requestId) {
+        this.writeControl({
+          type: "control_response",
+          response: { subtype: "success", request_id: requestId, response: {} }
+        });
+      }
+      return;
+    }
+    const toolName = req.tool_name ?? "tool";
+    const { action, destructive, network } = decidePermission(toolName, req.input, {
+      autoAllowEdits: this.autoAllowEdits
+    });
+    if (action === "allow") {
+      this.writeControl({
+        type: "control_response",
+        response: {
+          subtype: "success",
+          request_id: requestId,
+          response: { behavior: "allow", updatedInput: req.input ?? {} }
+        }
+      });
+      return;
+    }
+    const payload: PermissionRequestPayload = {
+      requestId,
+      toolName,
+      toolUseId: req.tool_use_id,
+      input: req.input ?? {},
+      description: req.description,
+      destructive,
+      network,
+      suggestions: (req.permission_suggestions ?? []) as PermissionSuggestion[]
+    };
+    this.pendingPermissions.set(requestId, payload);
+    console.log(
+      `[luno] permission needed: ${toolName}${destructive ? " (destructive)" : network ? " (network)" : ""} — awaiting user`
+    );
+    push({ type: "permission_request", permission: payload });
+  }
+
+  async *stream(req: ProviderRequest): AsyncIterable<StreamDelta> {
+    const userText = lastUserText(req.messages);
+    if (!userText) {
+      yield { type: "error", error: "No user message to send." };
+      return;
+    }
+
+    const mode = this.opts.permissionMode ?? "default";
+    const permissionProtocol = usesPermissionProtocol(mode);
+    // Fresh per turn: a prior "allow edits this turn" must not leak into the next.
+    this.autoAllowEdits = false;
+    const args = buildArgs(userText, req.model, this.opts);
+
+    // Inject the user's token as ANTHROPIC_API_KEY when present. The CLI
+    // prefers env-supplied keys over its own on-disk credentials, so this
+    // is the cleanest way to make Luno's stored token authoritative
+    // without touching ~/.claude/ files.
+    const childEnv = this.opts.token
+      ? { ...process.env, ANTHROPIC_API_KEY: this.opts.token }
+      : process.env;
+    const child = spawn(this.opts.binary, args, {
+      cwd: this.opts.cwd,
+      env: childEnv,
+      // The permission path needs stdin open both to deliver the prompt
+      // (stream-json input) and to write control_responses; the plan path
+      // passes the prompt as a positional arg and never writes back.
+      stdio: [permissionProtocol ? "pipe" : "ignore", "pipe", "pipe"]
+    });
+    this.child = child;
+
+    // Deliver the user turn as a stream-json message so the CLI accepts
+    // realtime control responses on the same channel. stdin is intentionally
+    // left OPEN — it's closed when the turn's `result` event lands below.
+    if (permissionProtocol && child.stdin) {
+      const userMsg = JSON.stringify({
+        type: "user",
+        message: { role: "user", content: userText }
+      });
+      try {
+        child.stdin.write(userMsg + "\n");
+      } catch {
+        /* spawn race — the exit/error handlers below surface it. */
+      }
+    }
+
+    const timeout = setTimeout(() => child.kill("SIGKILL"), HARD_TIMEOUT_MS);
+    const rl = readline.createInterface({ input: child.stdout!, crlfDelay: Infinity });
+    let stderrBuf = "";
+    child.stderr!.on("data", (b: Buffer) => (stderrBuf += b.toString("utf8")));
+
+    const queue: StreamDelta[] = [];
+    let resolver: (() => void) | null = null;
+    let done = false;
+    // Declared before push so push can route deltas through it; assigned just
+    // below (its onStall handler calls push, so the two reference each other).
+    let stallWatch: ToolStallWatchdog | null = null;
+    const push = (d: StreamDelta) => {
+      stallWatch?.observe(d);
+      queue.push(d);
+      resolver?.();
+      resolver = null;
+    };
+
+    // Per-tool stall watchdog: if a latency-bounded tool (WebFetch/WebSearch)
+    // never returns a result, surface a timeout result so the UI spinner clears
+    // and stop the wedged CLI — instead of spinning until HARD_TIMEOUT_MS. The
+    // CLI can't be told to abandon a single hung tool, so killing it (ending
+    // the turn) is the only recovery.
+    stallWatch = createToolStallWatchdog({
+      timeoutMs: this.opts.toolStallMs ?? WEB_TOOL_STALL_MS,
+      onStall: (toolId, toolName, ms) => {
+        const secs = Math.round(ms / 1000);
+        push({
+          type: "tool_result",
+          toolUseId: toolId,
+          resultContent: `${toolName} did not respond within ${secs}s and was stopped. Try again, or use a more specific URL.`,
+          resultIsError: true
+        });
+        if (this.child && !this.child.killed) {
+          this.child.kill("SIGTERM");
+          const c = this.child;
+          setTimeout(() => {
+            if (c && !c.killed) c.kill("SIGKILL");
+          }, 2000);
+        }
+        push({ type: "done" });
+      }
+    });
+
+    // Cancellation hook (see cancel()). Deny any outstanding prompt so the CLI
+    // unblocks gracefully, then push `done` so the generator returns on its
+    // next tick regardless of when the child actually exits.
+    this.abortCurrent = () => {
+      for (const id of this.pendingPermissions.keys()) {
+        this.writeControl({
+          type: "control_response",
+          response: {
+            subtype: "success",
+            request_id: id,
+            response: { behavior: "deny", message: "Cancelled by the user." }
+          }
+        });
+      }
+      this.pendingPermissions.clear();
+      stallWatch?.clearAll();
+      try {
+        child.stdin?.end();
+      } catch {
+        /* already closed */
+      }
+      push({ type: "done" });
+    };
+
+    const processor = makeProcessor(this.opts.setResumeSessionId);
+
+    rl.on("line", (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      let ev: CliEvent | null = null;
+      try {
+        ev = JSON.parse(trimmed) as CliEvent;
+      } catch {
+        return;
+      }
+      // Bidirectional control protocol (only live with --permission-prompt-tool
+      // stdio). Handled here rather than in the pure event processor because
+      // answering a request means writing back to the child's stdin.
+      if (ev.type === "control_request") {
+        this.handleControlRequest(ev, push);
+        return;
+      }
+      // Acks to control requests *we* sent (e.g. set_permission_mode) — ignore.
+      if (ev.type === "control_response") return;
+      for (const d of processor(ev)) push(d);
+      // Under stream-json input the CLI keeps the session open for more input
+      // after the turn. Close stdin on the end-of-turn `result` so it exits,
+      // and end the stream here (text-input runs exit on their own).
+      if (permissionProtocol && ev.type === "result") {
+        try {
+          child.stdin?.end();
+        } catch {
+          /* already closed */
+        }
+        push({ type: "done" });
+      }
+    });
+
+    const onExit = () => {
+      clearTimeout(timeout);
+      stallWatch?.clearAll();
+      if (child.exitCode !== 0 && child.signalCode !== "SIGTERM") {
+        const msg = stderrBuf.trim() || `claude exited with code ${child.exitCode ?? "?"}`;
+        push({ type: "error", error: msg });
+      }
+      push({ type: "done" });
+      done = true;
+      resolver?.();
+      resolver = null;
+    };
+    child.once("exit", onExit);
+    child.once("error", (err) => {
+      push({ type: "error", error: err.message });
+    });
+
+    try {
+      while (true) {
+        while (queue.length > 0) {
+          const d = queue.shift()!;
+          yield d;
+          if (d.type === "done") return;
+        }
+        if (done) return;
+        await new Promise<void>((res) => {
+          resolver = res;
+        });
+      }
+    } finally {
+      clearTimeout(timeout);
+      stallWatch?.clearAll();
+      this.abortCurrent = null;
+      this.pendingPermissions.clear();
+      // Wait for the process to fully exit before the turn ends — otherwise the
+      // next turn's `--resume` races a still-alive CLI for the same session.
+      await terminateChild(child);
+      this.child = null;
+    }
+  }
+}
+
+/** Resolve once the child has exited; SIGTERM, then SIGKILL after a grace period. */
+function terminateChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    let kill: ReturnType<typeof setTimeout> | null = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (kill) clearTimeout(kill);
+      resolve();
+    };
+    child.once("exit", finish);
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      finish();
+      return;
+    }
+    kill = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* already gone */
+      }
+      setTimeout(finish, 200);
+    }, 2000);
+  });
+}
+
+export function buildArgs(
+  userText: string,
+  model: string | undefined,
+  opts: ClaudeCliOpts
+): string[] {
+  const mode = opts.permissionMode ?? "default";
+  const permissionProtocol = usesPermissionProtocol(mode);
+
+  const args = ["-p"];
+  // In the permission-protocol path the prompt is delivered as a stream-json
+  // message on stdin (see stream()); only the legacy text path passes it as a
+  // positional argument.
+  if (!permissionProtocol) args.push(userText);
+  args.push(
+    "--output-format",
+    "stream-json",
+    "--include-partial-messages",
+    "--verbose"
+  );
+  if (permissionProtocol) {
+    // Accept the prompt + control responses on stdin, and route per-tool
+    // approval back to us over the control channel instead of the CLI's own
+    // interactive prompt (which a headless `-p` run can't service).
+    args.push("--input-format", "stream-json");
+    args.push("--permission-prompt-tool", "stdio");
+  }
+  if (model) args.push("--model", model);
+
+  // Reasoning effort — the CLI validates the level itself, but we guard
+  // against a stale/unknown config value reaching argv.
+  if (opts.effort && EFFORT_LEVELS.includes(opts.effort)) {
+    args.push("--effort", opts.effort);
+  }
+
+  // `--settings` layers a JSON blob on top of the resolved settings sources
+  // (user/project/local) for this run only, so anything we set here leaves
+  // every other setting intact.
+  //   • alwaysThinkingEnabled — extended-thinking toggle (when defined).
+  //   • permissions.ask — route git to our classifier even when a project
+  //     allowlist pre-approves it. `ask` outranks `allow` in the CLI's
+  //     deny → ask → allow resolution, so it can't be silently overridden.
+  const settings: Record<string, unknown> = {};
+  if (typeof opts.thinking === "boolean") {
+    settings.alwaysThinkingEnabled = opts.thinking;
+  }
+  // Only inject the `ask` routing in modes that actually service the approval
+  // channel (default/auto, where `--permission-prompt-tool stdio` is wired up).
+  // Plan mode has no prompt tool, so an `ask` rule there would have nothing to
+  // answer it and could block even read-only git — so we leave it untouched.
+  if (permissionProtocol) {
+    settings.permissions = {
+      ask: ROUTE_TO_CLASSIFIER_BASH.map((p) => `Bash(${p})`)
+    };
+  }
+  if (Object.keys(settings).length > 0) {
+    args.push("--settings", JSON.stringify(settings));
+  }
+
+  const cliMode = mapPermissionMode(opts.permissionMode ?? "default");
+  args.push("--permission-mode", cliMode);
+
+  if (opts.permissionMode === "auto") {
+    // Auto mode = auto-accept the SAFE, reversible tools, then route
+    // everything else (destructive shell, deletes, unknown tools) through the
+    // approval card. We pre-allow them explicitly here rather than via the
+    // CLI's `acceptEdits` mode, because acceptEdits *also* auto-runs `rm` and
+    // other destructive Bash with no prompt. Edits stay reversible via the
+    // checkpoint system, so auto-applying them is safe. Bash is deliberately
+    // NOT pre-allowed except for the user's own allow-listed patterns.
+    const tools = [
+      "Read",
+      "Glob",
+      "Grep",
+      "Edit",
+      "Write",
+      "MultiEdit",
+      "NotebookEdit",
+      ...(opts.allowedBashPatterns ?? []).flatMap((p) =>
+        regexToCliPatterns(p)
+          // Never pre-allow a destructive or network/external command, even if
+          // the user allow-listed it — those must always surface the approval
+          // card. Dropping them here means the CLI re-asks (routing them to us)
+          // instead of auto-running.
+          .filter((cli) => !isDestructiveBash(cli) && !isNetworkBash(cli))
+          .map((cli) => `Bash(${cli})`)
+      ),
+      // Pre-allow every tool from each connected MCP server. Pattern is
+      // `mcp__<server>` per Claude Code's MCP tool naming convention.
+      ...(opts.mcpServerNames ?? []).map((n) => `mcp__${n}`)
+    ];
+    args.push("--allowedTools", ...tools);
+  } else if (
+    opts.permissionMode === "default" &&
+    opts.mcpServerNames?.length
+  ) {
+    // Default mode otherwise gates every tool call behind an interactive
+    // prompt the `-p` flow can't service — the agent ends up verbalizing
+    // "I need permission" instead of actually invoking the tool. Connecting
+    // an MCP server via the Connectors page is an explicit consent grant
+    // (OAuth + click-through), so pre-allow that server's tools here.
+    // Plan mode is intentionally not covered — it's read-only by design.
+    args.push(
+      "--allowedTools",
+      ...opts.mcpServerNames.map((n) => `mcp__${n}`)
+    );
+  }
+
+  // Skills the user has toggled off in the picker need to be *actually*
+  // blocked. Belt-and-suspenders:
+  //   1. --disallowedTools "Skill(<name>)" — if Claude Code's permission
+  //      system honors per-skill patterns, this is hard enforcement.
+  //   2. --append-system-prompt — even if the flag pattern is ignored, the
+  //      agent reads the appended instruction and refuses. Together they
+  //      cover both the gate path and the model-decides path.
+  const disabled = (opts.disabledSkills ?? []).filter((s) => s.length > 0);
+  if (disabled.length > 0) {
+    args.push(
+      "--disallowedTools",
+      ...disabled.map((id) => `Skill(${id})`)
+    );
+    const list = disabled.map((id) => `\`${id}\``).join(", ");
+    args.push(
+      "--append-system-prompt",
+      `The user has disabled the following Claude Code skills via Luno's Skills picker: ${list}. Do not invoke any of them, even if a task would benefit. If you would normally use a disabled skill, tell the user which skill is disabled and ask them to re-enable it from the Skills picker before retrying. All other skills remain available.`
+    );
+  }
+
+  // Per-mode prompt: bundled MD that tunes the model's stance for plan/default/auto.
+  const modeAppend = getModePrompt(mode);
+  if (modeAppend) args.push("--append-system-prompt", modeAppend);
+
+  // Plan-mode only: the matching task-type playbook (backend / frontend / etc.).
+  // Skipped for default/auto to keep their token budgets lean.
+  if (mode === "plan" && opts.taskType) {
+    const taskAppend = getTaskTypePrompt(opts.taskType);
+    if (taskAppend) args.push("--append-system-prompt", taskAppend);
+  }
+
+  // Project conventions. CLAUDE.md at root is auto-loaded by the CLI itself —
+  // re-injecting would double the token cost — so skip in that case.
+  if (opts.conventions && !opts.conventions.alreadyLoadedByCli) {
+    args.push(
+      "--append-system-prompt",
+      `Project conventions from \`${opts.conventions.workspaceRelativePath}\`:\n\n${opts.conventions.content}`
+    );
+  }
+
+  // Hand the CLI a list of remote MCP servers it should connect to for
+  // this turn. The file is generated per-turn from Luno's connector
+  // state, and the bearer tokens it contains live in OS temp with
+  // mode 0600 — see writeCliMcpConfig() in services/mcp/index.ts.
+  if (opts.mcpConfigPath) {
+    args.push("--mcp-config", opts.mcpConfigPath);
+  }
+
+  const resumeId = opts.getResumeSessionId?.();
+  if (resumeId) args.push("--resume", resumeId);
+
+  return args;
+}
+
+function mapPermissionMode(m: PermissionMode): string {
+  switch (m) {
+    case "plan":
+      return "plan";
+    // `auto` deliberately runs in the CLI's `default` mode rather than
+    // `acceptEdits`. acceptEdits silently auto-runs *every* tool — including
+    // destructive `Bash` like `rm` — without ever consulting our permission
+    // tool, so a delete could happen with no prompt. Instead we pre-allow the
+    // safe, reversible tools (Read/Edit/Write + allow-listed Bash) via
+    // --allowedTools so edits still apply automatically, and let everything
+    // else (deletes, arbitrary shell, unknown tools) route through the
+    // approval card.
+    case "auto":
+      return "default";
+    default:
+      return "default";
+  }
+}
+
+// ── Destructive-operation detection ──────────────────────────
+//
+// These never auto-run, even in `auto` mode — they always surface an approval
+// card flagged as destructive. Mirrors the "always-gate" command list from the
+// permissions reference (rm/sudo/dd/fork-bomb/force-push/etc.).
+
+/** Piping a downloaded script straight into a shell — arbitrary remote code
+ *  execution. Treated as destructive (red, always prompt, never auto-allow). */
+const REMOTE_PIPE_TO_SHELL =
+  /\b(curl|wget|fetch)\b[\s\S]*\|\s*(sudo\s+)?(sh|bash|zsh|dash|fish|ksh)\b/i;
+
+const DESTRUCTIVE_BASH: ReadonlyArray<RegExp> = [
+  /\brm\b/,
+  /\brmdir\b/,
+  /\bunlink\b/,
+  /\bshred\b/,
+  /\btrash\b/,
+  /\bgit\s+(rm|clean)\b/,
+  /\bgit\s+reset\s+--hard\b/,
+  /\bgit\s+checkout\s+--\s/,
+  /\bgit\s+push\b[^\n]*(--force|\s-f\b)/,
+  /\bfind\b[^\n]*-delete\b/,
+  /\bfind\b[^\n]*-exec\s+rm\b/,
+  /\b(dd|mkfs|fdisk)\b/,
+  /\bsudo\b/,
+  /\bchmod\s+-R\b/,
+  /\bchown\s+-R\b/,
+  /:\s*\(\s*\)\s*\{/, // fork bomb :(){ ... }
+  /\bkill\s+-9\b/,
+  />\s*\/dev\/(sd|nvme|disk|null\/)/,
+  REMOTE_PIPE_TO_SHELL
+];
+
+/** Commands that reach the network or outside the workspace. Always prompt and
+ *  never auto-allowed (even if the user allow-listed them), but not flagged as
+ *  irreversibly destructive. */
+const NETWORK_BASH: ReadonlyArray<RegExp> = [
+  /\bcurl\b/,
+  /\bwget\b/,
+  /\bssh\b/,
+  /\bscp\b/,
+  /\bsftp\b/,
+  /\brsync\b/,
+  /\b(nc|ncat|netcat)\b/,
+  /\btelnet\b/,
+  /\bftp\b/,
+  /\bgit\s+(push|pull|fetch|clone|remote)\b/
+];
+
+export function isDestructiveBash(command: string): boolean {
+  return DESTRUCTIVE_BASH.some((re) => re.test(command));
+}
+
+export function isNetworkBash(command: string): boolean {
+  return NETWORK_BASH.some((re) => re.test(command));
+}
+
+/** True when a tool call would irreversibly destroy data (delete files, wipe
+ *  disks, force-push, pipe a remote script to a shell, …). Forces a red,
+ *  default-to-Deny approval prompt. */
+export function isDestructiveRequest(
+  toolName: string,
+  input: Record<string, unknown> | undefined
+): boolean {
+  const cmd = typeof input?.command === "string" ? input.command : "";
+  if (/(bash|shell|exec|run|terminal)/i.test(toolName) && cmd) {
+    return isDestructiveBash(cmd);
+  }
+  // Defensive: any tool whose name reads like a deletion (no such built-in
+  // today, but MCP servers and future tools may add one).
+  return /(^|[_-])(delete|remove|unlink|trash|destroy|rm)(?:$|[_-]|[A-Z])/i.test(
+    toolName
+  );
+}
+
+/** True when a tool call reaches the network or outside the workspace (curl,
+ *  ssh, git push, web fetch, …). Forces an approval prompt flagged as network
+ *  access; never auto-allowed. */
+export function isNetworkRequest(
+  toolName: string,
+  input: Record<string, unknown> | undefined
+): boolean {
+  const cmd = typeof input?.command === "string" ? input.command : "";
+  if (/(bash|shell|exec|run|terminal)/i.test(toolName) && cmd) {
+    return isNetworkBash(cmd);
+  }
+  // Built-in / MCP tools that fetch over the network.
+  return /(^|[_-])(web|fetch|http|download|url|browse)/i.test(toolName);
+}
+
+export type PermissionAction = "allow" | "prompt";
+
+export interface PermissionDecision {
+  action: PermissionAction;
+  destructive: boolean;
+  network: boolean;
+}
+
+/**
+ * Decide what to do with a `can_use_tool` request. Pure (no I/O) so the policy
+ * is unit-testable in isolation.
+ *
+ *  - Plan/answer helper tools auto-allow (they have their own UI) — unless
+ *    somehow destructive/network.
+ *  - Read-only inspection tools (Read/Glob/Grep/LS/NotebookRead and read-only
+ *    MCP queries) always auto-allow — they only observe, never mutate.
+ *  - Read-only git commands (status/log/diff/…) auto-allow; mutating git
+ *    (add/checkout/commit/…) falls through to a prompt. All git is routed here
+ *    via an `ask` rule so a project allowlist can't silently auto-run it.
+ *  - When the user has opted into "allow edits this turn", reversible edit
+ *    tools auto-allow — but Bash, deletes, and network calls STILL prompt, so
+ *    that opt-in can never silently disable the destructive/network gate.
+ *  - Everything else prompts, carrying the destructive/network flags.
+ */
+export function decidePermission(
+  toolName: string,
+  input: Record<string, unknown> | undefined,
+  ctx: { autoAllowEdits: boolean }
+): PermissionDecision {
+  const destructive = isDestructiveRequest(toolName, input);
+  const network = isNetworkRequest(toolName, input);
+  if (!destructive && !network) {
+    if (PERMISSION_AUTO_ALLOW.has(toolName)) return { action: "allow", destructive, network };
+    // Read-only inspection (file reads, globs, greps, read-only MCP queries)
+    // never mutates state — always auto-allow so exploration never prompts.
+    if (READ_ONLY_TOOLS.has(toolName) || isReadOnlyMcpTool(toolName)) {
+      return { action: "allow", destructive, network };
+    }
+    // Read-only git (status/log/diff/…) routed to us via the git `ask` rule:
+    // auto-allow so inspecting the repo stays silent. Mutating git (add,
+    // checkout, commit, merge, reset, stash, restore, switch, …) is NOT in the
+    // read-only set, so it falls through to the approval card below — no need
+    // to enumerate every mutating subcommand.
+    if (
+      isBashLike(toolName) &&
+      typeof input?.command === "string" &&
+      isReadOnlyGitCommand(input.command)
+    ) {
+      return { action: "allow", destructive, network };
+    }
+    if (ctx.autoAllowEdits && SAFE_EDIT_TOOLS.has(toolName)) {
+      return { action: "allow", destructive, network };
+    }
+  }
+  return { action: "prompt", destructive, network };
+}
+
+/**
+ * Translate a user `allowedBashPatterns` regex into one or more literal CLI
+ * `--allowedTools` Bash patterns. The CLI matches `Bash(<literal>)` against the
+ * command text (prefix/glob), NOT as a regex — so alternation like
+ * `^npm (test|run test)$` must be EXPANDED into separate literals
+ * (`npm test`, `npm run test`) or it never matches. (The old single-string
+ * translation left the alternation intact and silently matched nothing.)
+ */
+export function regexToCliPatterns(p: string): string[] {
+  const body = p
+    .replace(/^\^/, "")
+    .replace(/\$$/, "")
+    .replace(/\\s\+?/g, " ")
+    .replace(/\\\./g, ".")
+    .replace(/\.\*/g, "*");
+
+  // Expand `(a|b|c)` groups into the cartesian product of literal variants.
+  let variants = [body];
+  let guard = 0;
+  while (
+    variants.some((v) => /\([^()]*\|[^()]*\)/.test(v)) &&
+    guard++ < 24
+  ) {
+    variants = variants.flatMap((v) => {
+      const m = v.match(/\(([^()]*\|[^()]*)\)/);
+      if (!m || m.index === undefined) return [v];
+      return m[1]
+        .split("|")
+        .map((opt) => v.slice(0, m.index) + opt + v.slice(m.index! + m[0].length));
+    });
+  }
+  return Array.from(new Set(variants.map((v) => v.trim()).filter(Boolean)));
+}
+
+interface CliUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
+export interface CliEvent {
+  type: string;
+  subtype?: string;
+  session_id?: string;
+  /** Resolved model id on the `system`/`init` event (alias → concrete id). */
+  model?: string;
+  message?: {
+    /** Resolved model id on each `assistant` message — the model that
+     *  actually produced this turn's output. */
+    model?: string;
+    content?: Array<
+      | { type: "text"; text: string }
+      | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+      | { type: "tool_result"; tool_use_id: string; content: unknown; is_error?: boolean }
+    >;
+    usage?: CliUsage;
+  };
+  event?: {
+    type: string;
+    content_block?: {
+      type: string;
+      id?: string;
+      name?: string;
+      text?: string;
+    };
+    delta?: {
+      type: string;
+      text?: string;
+      partial_json?: string;
+      /** Some CLI versions attach final usage on the message_delta event. */
+      usage?: CliUsage;
+    };
+    index?: number;
+  };
+  /** End-of-turn result event — has the canonical post-turn usage + cost. */
+  usage?: CliUsage;
+  total_cost_usd?: number;
+  error?: string;
+  result?: string;
+  /** Control-protocol fields — present on `control_request` events the CLI
+   *  emits when `--permission-prompt-tool stdio` is active. */
+  request_id?: string;
+  request?: {
+    subtype?: string;
+    tool_name?: string;
+    display_name?: string;
+    tool_use_id?: string;
+    description?: string;
+    input?: Record<string, unknown>;
+    permission_suggestions?: Array<Record<string, unknown>>;
+  };
+}
+
+type Processor = (ev: CliEvent) => StreamDelta[];
+
+export function makeProcessor(setResume?: (id: string) => void): Processor {
+  let sawPartialText = false;
+  const startedToolIds = new Set<string>();
+  let currentBlockType: "text" | "tool_use" | "other" | null = null;
+  // The CLI reports the *resolved* model (aliases like `opus` expand to a
+  // concrete id). Emit it once per change so the UI can show what's actually
+  // running rather than the alias the user picked.
+  let reportedModel: string | null = null;
+  const emitModel = (model: string | undefined, out: StreamDelta[]) => {
+    if (model && model !== reportedModel) {
+      reportedModel = model;
+      out.push({ type: "model", model });
+    }
+  };
+
+  return (ev) => {
+    const out: StreamDelta[] = [];
+
+    if (ev.type === "system" && ev.subtype === "init") {
+      if (ev.session_id) setResume?.(ev.session_id);
+      emitModel(ev.model, out);
+      return out;
+    }
+
+    if (ev.type === "stream_event" && ev.event) {
+      const inner = ev.event;
+      if (inner.type === "content_block_start" && inner.content_block) {
+        if (inner.content_block.type === "text") {
+          currentBlockType = "text";
+        } else if (inner.content_block.type === "tool_use") {
+          currentBlockType = "tool_use";
+          const id = inner.content_block.id ?? "";
+          const name = inner.content_block.name ?? "tool";
+          if (id) startedToolIds.add(id);
+          out.push({ type: "tool_use_start", tool: { id, name } });
+        } else {
+          currentBlockType = "other";
+        }
+        return out;
+      }
+      if (inner.type === "content_block_delta" && inner.delta) {
+        if (
+          currentBlockType === "text" &&
+          inner.delta.type === "text_delta" &&
+          typeof inner.delta.text === "string"
+        ) {
+          sawPartialText = true;
+          out.push({ type: "text", text: inner.delta.text });
+        } else if (
+          currentBlockType === "tool_use" &&
+          inner.delta.type === "input_json_delta" &&
+          typeof inner.delta.partial_json === "string"
+        ) {
+          out.push({ type: "tool_use_input", partialInput: inner.delta.partial_json });
+        }
+        return out;
+      }
+      if (inner.type === "content_block_stop") {
+        if (currentBlockType === "tool_use") {
+          out.push({ type: "tool_use_end" });
+        }
+        currentBlockType = null;
+        return out;
+      }
+      return out;
+    }
+
+    if (ev.type === "assistant" && ev.message?.content) {
+      emitModel(ev.message.model, out);
+      for (const block of ev.message.content) {
+        if (block.type === "text") {
+          if (!sawPartialText) out.push({ type: "text", text: block.text });
+        } else if (block.type === "tool_use") {
+          if (!startedToolIds.has(block.id)) {
+            startedToolIds.add(block.id);
+            out.push({
+              type: "tool_use_start",
+              tool: { id: block.id, name: block.name }
+            });
+            out.push({
+              type: "tool_use_input",
+              partialInput: JSON.stringify(block.input ?? {})
+            });
+            out.push({ type: "tool_use_end" });
+          }
+        }
+      }
+      sawPartialText = false;
+      // Some CLI versions ship per-assistant-message usage. Forward it so the
+      // meter shows live counts as the turn streams (the final result event
+      // sends a corrected total later).
+      const u = ev.message.usage;
+      if (u) out.push(makeUsageDelta(u, ev.session_id));
+      return out;
+    }
+
+    if (ev.type === "user" && ev.message?.content) {
+      for (const block of ev.message.content) {
+        if (block.type === "tool_result") {
+          const content =
+            typeof block.content === "string"
+              ? block.content
+              : Array.isArray(block.content)
+              ? block.content
+                  .map((c: unknown) => {
+                    const cc = c as { type?: string; text?: string };
+                    return cc.type === "text" && cc.text ? cc.text : "";
+                  })
+                  .join("\n")
+              : JSON.stringify(block.content);
+          out.push({
+            type: "tool_result",
+            toolUseId: block.tool_use_id,
+            resultContent: content,
+            resultIsError: !!block.is_error
+          });
+        }
+      }
+      return out;
+    }
+
+    if (ev.type === "result") {
+      // The end-of-turn `result` event carries the canonical totals — emit a
+      // usage delta with cost if reported so the meter can switch from
+      // estimate to authoritative.
+      if (ev.usage) {
+        const u = makeUsageDelta(ev.usage, ev.session_id);
+        if (u.usage && typeof ev.total_cost_usd === "number") {
+          u.usage.costUsd = ev.total_cost_usd;
+        }
+        out.push(u);
+      }
+      if (ev.subtype === "error" || ev.subtype === "error_max_turns") {
+        out.push({
+          type: "error",
+          error:
+            ev.result ||
+            (ev.subtype === "error_max_turns"
+              ? "Claude CLI hit max turns. Try a simpler prompt or increase turns."
+              : ev.subtype)
+        });
+      }
+      return out;
+    }
+
+    if (ev.type === "error") {
+      out.push({ type: "error", error: ev.error || "Claude CLI reported an error." });
+    }
+
+    return out;
+  };
+}
+
+export function mapEvent(
+  ev: CliEvent,
+  setResume?: (id: string) => void
+): StreamDelta[] {
+  return makeProcessor(setResume)(ev);
+}
+
+export interface ToolStallWatchdog {
+  /** Feed every outbound delta through this; arms a timer when a watched tool
+   *  starts executing and clears it when the tool's result lands. */
+  observe(delta: StreamDelta): void;
+  /** Cancel all pending timers (call when the turn ends for any reason). */
+  clearAll(): void;
+}
+
+/**
+ * Watches latency-bounded tools (WebFetch/WebSearch) for a missing result.
+ *
+ * The CLI emits `tool_use_start` → `tool_use_end` when it dispatches a tool,
+ * then a `tool_result` when it returns. If the tool wedges (no result), no
+ * further deltas flow and the only backstop is the 10-minute process kill —
+ * leaving the UI spinning the whole time. This arms a per-tool timer on
+ * `tool_use_end` and fires `onStall` if the matching `tool_result` hasn't
+ * arrived in `timeoutMs`. The pure logic lives here so it's unit-testable
+ * without spawning the CLI.
+ */
+export function createToolStallWatchdog(opts: {
+  timeoutMs: number;
+  onStall: (toolId: string, toolName: string, timeoutMs: number) => void;
+  tools?: ReadonlySet<string>;
+}): ToolStallWatchdog {
+  const watched = opts.tools ?? STALL_WATCHDOG_TOOLS;
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const names = new Map<string, string>();
+  // tool_use_end carries no id, so correlate it with the most recent start —
+  // the CLI streams tool-use content blocks sequentially (start → … → stop).
+  let lastStartedId: string | null = null;
+
+  const clear = (id: string) => {
+    const t = timers.get(id);
+    if (t) {
+      clearTimeout(t);
+      timers.delete(id);
+    }
+  };
+
+  return {
+    observe(d) {
+      if (d.type === "tool_use_start" && d.tool) {
+        lastStartedId = d.tool.id;
+        names.set(d.tool.id, d.tool.name);
+      } else if (d.type === "tool_use_end" && lastStartedId) {
+        const id = lastStartedId;
+        const name = names.get(id) ?? "";
+        if (watched.has(name)) {
+          clear(id);
+          timers.set(
+            id,
+            setTimeout(() => {
+              timers.delete(id);
+              opts.onStall(id, name, opts.timeoutMs);
+            }, opts.timeoutMs)
+          );
+        }
+      } else if (d.type === "tool_result" && d.toolUseId) {
+        clear(d.toolUseId);
+      }
+    },
+    clearAll() {
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
+    }
+  };
+}
+
+function makeUsageDelta(u: CliUsage, sessionId?: string): StreamDelta {
+  return {
+    type: "usage",
+    usage: {
+      inputTokens: u.input_tokens ?? 0,
+      outputTokens: u.output_tokens ?? 0,
+      cacheReadTokens:
+        u.cache_read_input_tokens !== undefined
+          ? u.cache_read_input_tokens
+          : undefined,
+      cacheCreatedTokens:
+        u.cache_creation_input_tokens !== undefined
+          ? u.cache_creation_input_tokens
+          : undefined,
+      sessionId
+    }
+  };
+}
+
+function lastUserText(messages: Message[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    if (typeof m.content === "string") return m.content;
+    const text = (m.content as ContentBlock[])
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("\n")
+      .trim();
+    if (text) return text;
+  }
+  return "";
+}

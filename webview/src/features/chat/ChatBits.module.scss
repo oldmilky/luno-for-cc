@@ -1,0 +1,427 @@
+// ─────────────────────────────────────────────────────────────
+// Small chat-log pieces that are too thin to each own a file:
+// the error banner, the editor-context strip, pinned files, the
+// thinking indicator, and the accent banner shared by the
+// conventions prompt and the skill suggestion.
+// Converted from Tailwind + theme.css in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+// ── Error banner ─────────────────────────────────────────────
+
+.error {
+  margin-left: 36px;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, var(--err) 35%, transparent);
+  border-radius: var(--round);
+  background: var(--err-soft);
+}
+
+.errorHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.errorGlyph {
+  font-size: 13px;
+}
+
+.errorTitle {
+  flex: 1;
+  color: var(--err);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+}
+
+.errorClose {
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--t3);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--t1);
+  }
+}
+
+.errorBody {
+  color: var(--t2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.errorHint {
+  margin-top: 8px;
+  color: var(--t3);
+  font-size: 11.5px;
+  line-height: 1.5;
+
+  code {
+    color: var(--t1);
+    font-family: var(--font-mono);
+  }
+}
+
+// ── Editor context strip ─────────────────────────────────────
+
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 2px;
+}
+
+.stripFile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round-sm);
+  background: var(--s2);
+  color: var(--t1);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+    border-color: var(--b2);
+  }
+}
+
+.stripIcon {
+  color: var(--accent-glow);
+}
+
+.stripName {
+  color: var(--t1);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.stripLang {
+  margin-left: 2px;
+  padding-left: 6px;
+  border-left: 1px solid var(--b1);
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.stripSelection {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--accent-mid);
+  border-radius: var(--round-sm);
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+// ── Pinned files ─────────────────────────────────────────────
+
+.pins {
+  overflow: hidden;
+}
+
+.pinsRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 4px;
+}
+
+.pinsLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+  color: var(--accent-glow);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--accent-mid);
+  border-radius: var(--round-sm);
+  background: var(--accent-soft);
+  color: var(--t1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.pinOpen {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--t1);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    color: var(--accent-glow);
+  }
+}
+
+.pinIcon {
+  color: var(--accent-glow);
+}
+
+.pinName {
+  font-weight: 600;
+}
+
+.pinRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--t4);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--err-soft);
+    color: var(--err);
+  }
+}
+
+// "Clear all" next to the pin list.
+.pinsClear {
+  margin-left: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--t4);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    color: var(--t2);
+  }
+}
+
+// ── Thinking indicator ───────────────────────────────────────
+// The two loops below keep their own timing on purpose: the `--motion-*`
+// scale names one-shot transitions and stops at 220ms, which is not a
+// meaningful length for something that never ends. Both would read as a
+// strobe on a role token.
+
+.thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 4px 24px;
+}
+
+.thinkingIcon {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+// Text with a highlight travelling through it.
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--t3) 0%,
+    var(--t1) 50%,
+    var(--t3) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  animation: shimmer-sweep var(--motion-ambient) linear infinite;
+}
+
+@keyframes shimmer-sweep {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+
+.dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+
+  span {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: dot-bounce 1.2s infinite ease-in-out both;
+
+    &:nth-child(1) {
+      animation-delay: -0.24s;
+    }
+
+    &:nth-child(2) {
+      animation-delay: -0.12s;
+    }
+  }
+}
+
+@keyframes dot-bounce {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+// ── Accent banner (conventions prompt · skill suggestion) ────
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent-mid);
+  border-radius: var(--round);
+  background: var(--accent-soft);
+  color: var(--t1);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bannerBody {
+  flex: 1;
+}
+
+.bannerTag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--b2);
+  border-radius: 4px;
+  background: var(--s2);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.bannerActions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+%banner-button {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+}
+
+.bannerPrimary {
+  @extend %banner-button;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+
+  &:hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}
+
+.bannerGhost {
+  @extend %banner-button;
+  border: 1px solid var(--b2);
+  background: transparent;
+  color: var(--t2);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+// ── Conventions status pill ──────────────────────────────────
+
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--b2);
+  border-radius: 6px;
+  background: var(--s2);
+  color: var(--t2);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s1);
+    color: var(--t1);
+  }
+}

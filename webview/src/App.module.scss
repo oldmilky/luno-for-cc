@@ -1,0 +1,24 @@
+// ─────────────────────────────────────────────────────────────
+// App shell — the full-height page box every auth state renders
+// into. The ambient aurora layers keep their global class names:
+// theme.css owns the unlayered `.app > *` rule that lifts the
+// chrome above them while letting fixed overlays opt out, and it
+// has to name `.app-ambient` / `.app-ambient-top` to do so.
+// Converted from Tailwind + theme.css in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  height: 100vh;
+  background: var(--s0);
+}
+
+// Centring slot for the pre-auth spinner.
+.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}

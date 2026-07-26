@@ -1,0 +1,288 @@
+// ─────────────────────────────────────────────────────────────
+// Rewind confirmation — the modal that asks before jumping the
+// conversation back to an earlier user message.
+// Converted from Tailwind in Ф2а. Reads design tokens only.
+//
+// The `.modal-*` block in theme.css belongs to the older confirm
+// dialogs (connectors, skills) — this component never used it, so
+// nothing here was ported from it.
+// ─────────────────────────────────────────────────────────────
+
+@use "../../themes/motion" as motion;
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  // No scrim on purpose: the chat behind stays fully readable so the user
+  // can see the point being rewound to while deciding.
+  background: transparent;
+}
+
+.panel {
+  position: relative;
+  overflow: hidden;
+  width: 440px;
+  max-width: 92vw;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-lg);
+  background: linear-gradient(to bottom, var(--s2), var(--s1));
+  // Cast shadow · inner lift line · accent bloom, in that order.
+  box-shadow:
+    0 28px 70px color-mix(in srgb, var(--shadow-color) 60%, transparent),
+    0 0 0 1px var(--tint) inset,
+    0 0 40px -16px var(--accent-shadow);
+}
+
+// Accent hairline riding the top edge, fading out at both corners.
+.hairline {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 1px;
+  opacity: 0.6;
+  background: linear-gradient(to right, transparent, var(--accent), transparent);
+}
+
+// ── Head ─────────────────────────────────────────────────────
+
+.head {
+  padding: 20px 20px 16px;
+}
+
+.headRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.iconWrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+// Decorative, so it takes the mixin's default `--motion-halo` — the same beat
+// as the header brand mark. Not the assistant avatar's: that one pulses only
+// while the model is streaming, which is an activity signal and runs faster.
+.halo {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle, var(--accent-shadow), transparent 70%);
+  filter: blur(5px);
+  @include motion.halo-breathe;
+}
+
+.iconTile {
+  // Above `.halo`, which is absolutely positioned over the same box.
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--round-lg);
+  background: linear-gradient(
+    to bottom right,
+    var(--accent-glow),
+    var(--accent),
+    var(--accent-deep)
+  );
+  color: var(--on-accent);
+  box-shadow:
+    0 4px 16px var(--accent-shadow),
+    0 0 0 1px var(--sheen) inset;
+}
+
+.headText {
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.title {
+  margin: 0 0 4px;
+  color: var(--t1);
+  font-size: 15.5px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.sub {
+  margin: 0;
+  color: var(--t3);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+// ── "What will happen" rows ──────────────────────────────────
+
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+}
+
+.detail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round-sm);
+  background: color-mix(in srgb, var(--s1) 60%, transparent);
+}
+
+.detailIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: var(--round);
+}
+
+.toneWarn {
+  border-color: color-mix(in srgb, var(--warn) 25%, transparent);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.toneAccent {
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+}
+
+.detailText {
+  color: var(--t2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.strong {
+  color: var(--t1);
+  font-weight: 600;
+}
+
+// ── Footer ───────────────────────────────────────────────────
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--b1);
+  background: color-mix(in srgb, var(--s2) 40%, transparent);
+}
+
+// First thing dropped when the panel is squeezed — the buttons matter more.
+.escHint {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--t4);
+  font-size: 10.5px;
+
+  @media (min-width: 640px) {
+    display: flex;
+  }
+}
+
+.kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--b2);
+  border-radius: 4px;
+  background: var(--s3);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.cancel {
+  padding: 6px 14px;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-sm);
+  background: var(--s3);
+  color: var(--t2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b3);
+    background: color-mix(in srgb, var(--s3) 70%, transparent);
+    color: var(--t1);
+  }
+}
+
+.confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: var(--round-sm);
+  background: linear-gradient(
+    to bottom right,
+    var(--accent-glow),
+    var(--accent),
+    var(--accent-deep)
+  );
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow:
+    0 2px 12px var(--accent-shadow),
+    0 0 0 1px var(--sheen) inset;
+  transition:
+    transform var(--motion-hover) var(--ease-out),
+    box-shadow var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    transform: translateY(-1px);
+  }
+
+  // Transform serves two roles on this button. The hover lift is a hover; the
+  // press has to feel immediate, so going down it takes the tap role — the
+  // release falls back to the rule above and eases out.
+  &:active {
+    transform: translateY(0) scale(0.97);
+    transition: transform var(--motion-tap) var(--ease-out);
+  }
+}
+
+// The ↵ chip sits on the accent fill, so it darkens rather than tints —
+// hence --shadow-color, which stays black on every palette, and not --s0.
+.confirmKbd {
+  margin-left: 2px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--shadow-color) 20%, transparent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}

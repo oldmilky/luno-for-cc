@@ -1,0 +1,167 @@
+// ─────────────────────────────────────────────────────────────
+// Question card — one AskUserQuestion tool_use: the prompt, its
+// radio options, a free-text "Other" row, and the read-only
+// summary the card collapses to once answered.
+// Converted from theme.css `.plan-question*` in Ф2а.
+// ─────────────────────────────────────────────────────────────
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid var(--accent-mid);
+  border-radius: 7px;
+  background: var(--s1);
+  // Answering restyles this card in place rather than replacing it, so the
+  // two looks below have to be reachable from each other — without this the
+  // accent outline just cuts to the sunk state on submit.
+  transition:
+    border-color var(--motion-enter) var(--ease-out),
+    background-color var(--motion-enter) var(--ease-out);
+}
+
+// Answered: the card stops asking for attention — accent outline off,
+// sunk back to the page surface.
+.answered {
+  border-color: var(--b2);
+  background: var(--s0);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-glow);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  // Rides the same restyle as the card outline — "Needs your input" going
+  // grey has to happen on the same beat as the border losing its accent.
+  transition: color var(--motion-enter) var(--ease-out);
+
+  .answered & {
+    color: var(--t3);
+  }
+}
+
+// Carries no look of its own — it inherits the head's — but stays a
+// named hook so the label is addressable.
+.title {
+  color: inherit;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prompt {
+  color: var(--t1);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--b1);
+  border-radius: 5px;
+  background: var(--s0);
+  cursor: pointer;
+  transition: border-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b3);
+  }
+
+  // Compounded, and declared after `:hover`, so the chosen option keeps its
+  // accent outline while the pointer is still on it.
+  &.optionSelected {
+    border-color: var(--accent-mid);
+    background: var(--accent-soft);
+  }
+
+  input[type="radio"] {
+    margin-top: 2px;
+    accent-color: var(--accent);
+  }
+}
+
+.optionBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.optionLabel {
+  color: var(--t1);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.optionDesc {
+  color: var(--t3);
+  font-size: 11px;
+}
+
+.other {
+  margin-top: 4px;
+  padding: 4px 8px;
+  border: 1px solid var(--b1);
+  border-radius: 4px;
+  background: var(--s1);
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 11.5px;
+
+  &:focus {
+    border-color: var(--accent-mid);
+    outline: none;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+
+// These two trade places in the same slot on submit, on EXPAND — one
+// collapses to nothing before the other opens, so both need somewhere for
+// their content to hide while the height is short.
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  // The clip is for EXPAND; the padding stops it eating the keyboard focus
+  // outline on the buttons inside, which is painted outside their border box.
+  padding: 2px;
+  margin: 0 -2px;
+  overflow: hidden;
+}
+
+.summary {
+  overflow: hidden;
+  color: var(--t3);
+  font-size: 11px;
+  font-style: italic;
+}

@@ -1,0 +1,739 @@
+// ─────────────────────────────────────────────────────────────
+// Connectors modal — header, search + tab bar, the card grid, the
+// "add custom" / API-token sub-dialogs and the result toast.
+//
+// Ported from the global .modal + .market-* block in theme.css.
+// SkillsMarketplace ported the same block into its own module, so the
+// overlap between the two is a deliberate copy, not a missing shared
+// primitive: the modals only ever looked alike by history and are free
+// to diverge. No .tsx reads the theme.css globals any more.
+//
+// The scrims, the danger tints and the toast palette were hard-coded
+// rgba(); they are now mixed from --s0 / --err / --ok and follow the
+// active theme.
+// ─────────────────────────────────────────────────────────────
+
+@use "../../themes/motion" as motion;
+
+// The CSS twin of the OVERLAY_PANEL framer preset — same travel, same scale,
+// same curve. CSS Modules scope @keyframes names, so this is a byte-identical
+// copy of the marketplace modal's, not a shared rule.
+
+// ── Shell ────────────────────────────────────────────────────
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: color-mix(in srgb, var(--s0) 72%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+// The add / token dialogs stack on top of the connectors modal, so their
+// scrim is thinner — the modal underneath has to stay readable.
+.backdropNested {
+  background: color-mix(in srgb, var(--s0) 50%, transparent);
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 560px;
+  max-height: calc(100vh - 48px);
+  // Inherited from theme.css's first `.modal` block (the rewind dialog),
+  // which the market modal never reset — keeping it preserves the shipping
+  // layout. Drop this line to get the flush, edge-to-edge head/foot the
+  // border-radius + overflow:hidden below were designed for.
+  padding: 22px 22px 18px;
+  overflow: hidden;
+  border: 1px solid var(--b2);
+  // Off the --round* scale (8/10/14) on purpose: snapping to --round-lg would
+  // shave 2px off every modal corner. Same for the 6/7/9/12px radii below.
+  border-radius: 16px;
+  background: var(--s1);
+  box-shadow:
+    0 30px 80px color-mix(in srgb, var(--shadow-color) 70%, transparent),
+    0 0 0 1px var(--tint-weak) inset;
+}
+
+// The catalog itself — wide, fixed height, and the positioning context for
+// the toast.
+.market {
+  position: relative;
+  width: 100%;
+  max-width: 920px;
+  height: min(720px, calc(100vh - 48px));
+}
+
+.formModal {
+  max-width: 460px;
+}
+
+.promptModal {
+  max-width: 440px;
+}
+
+// ── Header ───────────────────────────────────────────────────
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--b1);
+}
+
+.headTitles {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  color: var(--t1);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.sub {
+  margin: 2px 0 0;
+  color: var(--t3);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--t3);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+// ── Toolbar ──────────────────────────────────────────────────
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--b1);
+
+  // Search takes the slack; the tabs keep their intrinsic width until wrap.
+  .search {
+    flex: 1 1 280px;
+    min-width: 220px;
+  }
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-sm);
+  background: var(--s2);
+  transition:
+    border-color var(--motion-hover) var(--ease-out),
+    box-shadow var(--motion-hover) var(--ease-out);
+
+  &:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  svg {
+    flex-shrink: 0;
+    color: var(--t3);
+  }
+
+  input {
+    flex: 1;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--t1);
+    font-family: inherit;
+    font-size: 13px;
+
+    &::placeholder {
+      color: var(--t4);
+    }
+  }
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tab {
+  padding: 5px 11px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--t3);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+// Selected beats :hover — the pill must not fall back to the neutral hover
+// look while the pointer sits on it.
+.tabActive {
+  &,
+  &:hover {
+    border-color: var(--accent-mid);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+}
+
+.tabCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: var(--round-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.tabActive .tabCount {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+// ── Grid ─────────────────────────────────────────────────────
+
+.grid {
+  flex: 1;
+  min-height: 320px;
+  padding: 10px 16px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+  align-content: start;
+  scroll-behavior: smooth;
+  transition: opacity var(--motion-hover) var(--ease-out);
+}
+
+.empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 16px;
+  color: var(--t3);
+  font-size: 13px;
+  text-align: center;
+
+  svg {
+    color: var(--t4);
+  }
+}
+
+// ── Card ─────────────────────────────────────────────────────
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid var(--b1);
+  border-radius: 9px;
+  background: var(--s2);
+  transition:
+    border-color var(--motion-hover) var(--ease-out),
+    background-color var(--motion-hover) var(--ease-out),
+    transform var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b3);
+    transform: translateY(-1px);
+  }
+}
+
+// A connected server keeps its accent frame on hover; only the lift is shared.
+.cardInstalled {
+  &,
+  &:hover {
+    border-color: var(--accent-mid);
+    background: var(--accent-soft);
+  }
+
+  .cardIcon {
+    background: var(--accent);
+    color: var(--on-accent);
+    box-shadow: 0 2px 10px var(--accent-shadow);
+  }
+}
+
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.cardIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--s3);
+  color: var(--accent);
+}
+
+.cardTitles {
+  min-width: 0;
+}
+
+.cardName {
+  display: block;
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.cardPub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  color: var(--t3);
+  font-size: 10.5px;
+}
+
+.cardCat {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
+.cardDot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--t4);
+}
+
+// Byline tags: "Claude Code · scope", "custom", "local".
+.cardTag {
+  color: var(--accent);
+}
+
+// Tool count — green because a live tool list means the server answered.
+.cardTools {
+  color: var(--ok);
+}
+
+.cardDesc {
+  flex: 1;
+  margin: 0;
+  color: var(--t2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+// The three below layer on .cardDesc and must stay after it: they override
+// its font-size at equal specificity.
+
+// The endpoint line: a URL for remote servers, the command for stdio ones.
+.cardTarget {
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.cardError {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--err-soft);
+  color: var(--err);
+  font-size: 11px;
+}
+
+.cardNote {
+  padding: 6px 8px;
+  border: 1px solid var(--b2);
+  border-radius: 6px;
+  background: var(--s2);
+  color: var(--t3);
+  font-size: 11px;
+}
+
+.cardActions {
+  display: flex;
+  gap: 6px;
+}
+
+// ── Card buttons ─────────────────────────────────────────────
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    box-shadow var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out),
+    transform var(--motion-hover) var(--ease-out);
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+  }
+}
+
+.ghost {
+  border: 1px solid var(--b2);
+  background: transparent;
+  color: var(--t3);
+
+  &:hover {
+    border-color: var(--b3);
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+.primary {
+  margin-left: auto;
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 1px 6px var(--accent-shadow);
+
+  &:hover {
+    background: var(--accent-deep);
+    box-shadow: 0 3px 14px var(--accent-shadow);
+    transform: translateY(-1px);
+  }
+}
+
+.danger {
+  border: 1px solid var(--b2);
+  background: transparent;
+  color: var(--err);
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--err) 40%, transparent);
+    background: color-mix(in srgb, var(--err) 8%, transparent);
+  }
+}
+
+// Toolbar's "Add custom" — the primary button with a roomier hit area.
+.addBtn {
+  padding: 6px 12px;
+}
+
+.pushRight {
+  margin-left: auto;
+}
+
+// Status chips reuse the button shell but are plain spans, not controls.
+.btnStatic {
+  margin-left: auto;
+  cursor: default;
+}
+
+// "Connected via Claude Code" is read-only, so the ghost hover must not
+// repaint it — it used to be an inline style, which always won.
+.btnOk {
+  &,
+  &:hover {
+    color: var(--ok);
+  }
+}
+
+.managed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--t4);
+  font-size: 11px;
+}
+
+// Ring spinner. Deliberately not ToolCard's .spinner: that one is a 10px
+// currentColor arc, so reusing it would visibly change the size and color.
+// The look stays local — a 12px --b3 track with an accent head — but the
+// rotation comes from the shared mixin, so this ring turns at --motion-spin
+// instead of the 700ms it had drifted to. The header's streaming chip is the
+// one ring the mixin cannot reach, because framer drives its rotation; it
+// reads SPIN in Header.tsx, which mirrors this token.
+.spinner {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--b3);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  @include motion.spin;
+}
+
+// ── Toast ────────────────────────────────────────────────────
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 64px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--round-sm);
+  font-size: 12px;
+  font-weight: 600;
+  transform: translateX(-50%);
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--shadow-color) 35%, transparent);
+  animation: connectors-toast-in var(--motion-enter) var(--ease-out);
+}
+
+.toastOk {
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.toastErr {
+  border: 1px solid color-mix(in srgb, var(--err) 40%, transparent);
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+  color: var(--err);
+}
+
+// The -50% centering is carried through both frames so the toast rises
+// straight up instead of drifting sideways. The rise matches the ENTER
+// preset, which is what everything else that appears uses.
+@keyframes connectors-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, var(--travel-sm));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+// ── Footer ───────────────────────────────────────────────────
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 16px;
+  border-top: 1px solid var(--b1);
+  background: var(--tint-weak);
+  color: var(--t3);
+  font-size: 11px;
+}
+
+// ── Sub-dialogs: add custom · API token ──────────────────────
+
+.formBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+// Transport toggle — remote (URL) vs local (stdio command).
+.kindToggle {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-sm);
+  background: var(--s2);
+}
+
+.kindBtn {
+  flex: 1;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.kindBtnActive {
+  background: var(--b2);
+  color: var(--t1);
+}
+
+.kindIcon {
+  margin-right: 5px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.fieldLabel {
+  color: var(--t2);
+  font-weight: 600;
+}
+
+.fieldHint {
+  color: var(--t4);
+  font-size: 10.5px;
+}
+
+.input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--b2);
+  border-radius: 7px;
+  background: var(--s2);
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+// Layered on .input, so it has to stay after it.
+.textarea {
+  resize: vertical;
+  font-family: var(--font-mono);
+}
+
+.advancedToggle {
+  padding: 5px 11px;
+  border: 1px solid var(--accent-mid);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-glow);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--t1);
+  }
+}
+
+.advancedChevron {
+  margin-left: 4px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+// ── Narrow viewports ─────────────────────────────────────────
+
+@media (max-width: 640px) {
+  .backdrop {
+    padding: 12px 8px;
+  }
+
+  .market {
+    max-width: 100%;
+    height: calc(100vh - 24px);
+    border-radius: 12px;
+  }
+}
+
+@media (max-width: 520px) {
+  .toolbar {
+    padding: 10px 14px;
+
+    .tabs {
+      width: 100%;
+    }
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+    padding: 12px 14px;
+  }
+
+  // Stack the row instead of squashing the buttons.
+  .cardActions {
+    flex-wrap: wrap;
+  }
+}
