@@ -158,6 +158,13 @@ export class SessionStore {
     this.session.onEvent((e) => {
       this.post({ type: "timeline", event: e });
 
+      // **The event arrives after the CLI already ran the tool**, not before.
+      // That matters: reading the file from disk at this point yields the
+      // *post-edit* content, so a snapshot taken that way would restore the
+      // damage instead of undoing it. `addFileToLatest` therefore pulls
+      // pre-edit state from git HEAD, and `test/unit/checkpoint.test.ts` guards
+      // it with a named regression test. "Simplifying" that back to a disk read
+      // breaks rewind for every tracked file.
       const touched = fileTouchedByTool(e);
       if (touched) void this.checkpointService?.addFileToLatest(touched);
 

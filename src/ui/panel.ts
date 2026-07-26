@@ -7,8 +7,7 @@ import { Orchestrator } from "../core/orchestrator.js";
 import {
   PermissionMode,
   PermissionBehavior,
-  StreamDelta,
-  PlanRevisionMeta
+  StreamDelta
 } from "../core/types.js";
 import type { ChatProvider } from "../providers/base.js";
 import { buildSystemPrompt } from "./system-prompt.js";
@@ -18,7 +17,7 @@ import { CheckpointService } from "../services/checkpoint.js";
 import { HistoryService } from "../services/history.js";
 import { PlanDecorationService } from "../services/plan-decorations.js";
 import { PlanArtifactManager } from "./plan-artifact-panel.js";
-import { buildWebviewHtml, makeNonce } from "./webview-html.js";
+import { buildWebviewHtml } from "./webview-html.js";
 import {
   arr,
   bool,
@@ -34,16 +33,8 @@ import {
 import { broadcastUsage } from "./domains/usage.js";
 import { SessionStore } from "./domains/session-store.js";
 import { AuthManager } from "./domains/auth.js";
+import { PlanHandlers } from "./domains/plan-handlers.js";
 import { runInSetupTerminal } from "./domains/terminal.js";
-import {
-  findCommentEvent,
-  findRevisionEvent,
-  incompletePlanSections,
-  isCommentRevisionProceeded,
-  isRevisionProceeded,
-  setTaskStatus,
-  type TaskStatus
-} from "./domains/plan-state.js";
 import {
   broadcastEditorContext,
   openFile,
@@ -109,6 +100,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   /** Owns which credential we have and the flows that get one. Two fields, a
    *  storage key and seven methods used to live on this class. */
   private readonly auth: AuthManager;
+  /** The fourteen plan-review actions. They could not move until the session
+   *  store existed — see the note at the bottom of `plan-state.ts`. */
+  private readonly plan: PlanHandlers;
   private history: HistoryService;
   private decorations: PlanDecorationService;
   private artifacts: PlanArtifactManager;
@@ -155,6 +149,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this.resumeId = undefined;
       }
     });
+    this.plan = new PlanHandlers({
+      post: this.post,
+      sessions: this.sessions,
+      artifacts: this.artifacts,
+      // Several plan actions continue the conversation rather than only
+      // editing state — accepting a step prompts the agent to do it.
+      startPrompt: (text) => this.handlePrompt(text),
+      refreshAuth: () => this.auth.broadcast()
+    });
     // Artifact panels share the chat panel's RPC handler so any user action
     // (comment, accept, reply, …) reaches the same session no matter which
     // surface fired it.
@@ -180,20 +183,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     });
     this.sessions.reset();
   }
-
-  /**
-   * When the agent calls a write/edit tool, add the file it names to the latest
-   * checkpoint so rewind can restore it.
-   *
-   * **The event arrives after the CLI already ran the tool**, not before. The
-   * comment here used to claim the opposite, which matters: reading the file
-   * from disk at this point yields the *post-edit* content, so a snapshot taken
-   * that way restores the damage instead of undoing it. `addFileToLatest`
-   * therefore pulls pre-edit state from git HEAD, and
-   * `test/unit/checkpoint.test.ts` guards that with a named regression test.
-   * Anyone "simplifying" it back to a disk read would break rewind for every
-   * tracked file.
-   */
 
   resolveWebviewView(view: vscode.WebviewView) {
     this.view = view;
@@ -277,14 +266,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     broadcast();
   }
 
-  /**
-   * Compute the authoritative auth status by inspecting SecretStorage.
-   * `authed` is true when a token is present AND the user hasn't actively
-   * signed out this session. We broadcast both the auth status and the
-   * model / permission-mode so the webview can hydrate ChatScreen state.
-   */
   /** Kept as a method because a dozen call sites re-publish auth after a
-   *  settings change; the state itself lives in `auth`. */
+   *  settings change; the state itself lives in `auth`, which owns the
+   *  definition of "authed". */
   async broadcastAuthState() {
     await this.auth.broadcast();
   }
@@ -353,7 +337,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       })
       .then((body) => {
         if (!body || !body.trim()) return;
-        this.handlePlanComment(revisionId, "__inline__", body, quote);
+        this.plan.handlePlanComment(revisionId, "__inline__", body, quote);
         this.reveal();
       });
   }
@@ -600,35 +584,35 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const taskId = str(m, "taskId");
       const body = str(m, "body");
       if (revisionId && taskId && body !== undefined) {
-        this.handlePlanComment(revisionId, taskId, body, str(m, "quote"));
+        this.plan.handlePlanComment(revisionId, taskId, body, str(m, "quote"));
       }
     },
     planEditComment: (m) => {
       const commentId = str(m, "commentId");
       const body = str(m, "body");
       if (commentId && body !== undefined) {
-        this.handlePlanEditComment(commentId, body);
+        this.plan.handlePlanEditComment(commentId, body);
       }
     },
     planDeleteComment: (m) => {
       const commentId = str(m, "commentId");
-      if (commentId) this.handlePlanDeleteComment(commentId);
+      if (commentId) this.plan.handlePlanDeleteComment(commentId);
     },
     planReplyComment: (m) => {
       const revisionId = str(m, "revisionId");
       const parentCommentId = str(m, "parentCommentId");
       const body = str(m, "body");
       if (revisionId && parentCommentId && body !== undefined) {
-        this.handlePlanReplyComment(revisionId, parentCommentId, body);
+        this.plan.handlePlanReplyComment(revisionId, parentCommentId, body);
       }
     },
     planResolveComment: (m) => {
       const commentId = str(m, "commentId");
-      if (commentId) this.handlePlanResolveComment(commentId, true);
+      if (commentId) this.plan.handlePlanResolveComment(commentId, true);
     },
     planReopenComment: (m) => {
       const commentId = str(m, "commentId");
-      if (commentId) this.handlePlanResolveComment(commentId, false);
+      if (commentId) this.plan.handlePlanResolveComment(commentId, false);
     },
     planOpenFileRef: async (m) => {
       const path = str(m, "path");
@@ -642,7 +626,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const revisionId = str(m, "revisionId");
       const taskId = str(m, "taskId");
       if (revisionId && taskId) {
-        await this.handlePlanAcceptStep(revisionId, taskId);
+        await this.plan.handlePlanAcceptStep(revisionId, taskId);
       }
     },
     planModifyStep: async (m) => {
@@ -650,28 +634,29 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const taskId = str(m, "taskId");
       const instruction = str(m, "instruction");
       if (revisionId && taskId && instruction !== undefined) {
-        await this.handlePlanModifyStep(revisionId, taskId, instruction);
+        await this.plan.handlePlanModifyStep(revisionId, taskId, instruction);
       }
     },
     planSkipStep: (m) => {
       const revisionId = str(m, "revisionId");
       const taskId = str(m, "taskId");
-      if (revisionId && taskId) this.handlePlanSkipStep(revisionId, taskId);
+      if (revisionId && taskId)
+        this.plan.handlePlanSkipStep(revisionId, taskId);
     },
     planOpenInEditor: (m) => {
       const revisionId = str(m, "revisionId");
-      if (revisionId) this.handlePlanOpenInEditor(revisionId);
+      if (revisionId) this.plan.handlePlanOpenInEditor(revisionId);
     },
     planResubmit: async (m) => {
       const revisionId = str(m, "revisionId");
-      if (revisionId) await this.handlePlanResubmit(revisionId);
+      if (revisionId) await this.plan.handlePlanResubmit(revisionId);
     },
     planAnswer: async (m) => {
       const questionId = str(m, "questionId");
       const toolUseId = str(m, "toolUseId");
       const answers = arr(m, "answers");
       if (questionId && toolUseId && answers) {
-        await this.handlePlanAnswer(
+        await this.plan.handlePlanAnswer(
           questionId,
           toolUseId,
           answers as Array<{ choice: string; note?: string }>
@@ -684,7 +669,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     },
     planProceedRequest: async (m) => {
       const revisionId = str(m, "revisionId");
-      if (revisionId) await this.handlePlanProceed(revisionId);
+      if (revisionId) await this.plan.handlePlanProceed(revisionId);
     },
     requestArtifactState: (m) => {
       // Webview-side handshake: the artifact panel mounts, asks for current
@@ -809,401 +794,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (next >= 3) {
       this.post({ type: "conventionsBanner" });
     }
-  }
-
-  /** Append a plan_comment event tied to a (revisionId, taskId). No round-trip yet. */
-  private handlePlanComment(
-    revisionId: string,
-    taskId: string,
-    body: string,
-    quote?: string
-  ) {
-    const trimmed = body.trim();
-    if (!trimmed) return;
-    if (isRevisionProceeded(this.session.timeline, revisionId)) {
-      this.postLockedError();
-      return;
-    }
-    this.session.emitPlanComment({
-      commentId: makeNonce().slice(0, 8),
-      revisionId,
-      taskId,
-      body: trimmed,
-      quote: quote && quote.trim() ? quote.trim() : undefined
-    });
-  }
-
-  /**
-   * Edit an existing comment in place. We mutate the timeline event's meta
-   * rather than emitting a superseding event so the rewind/truncate logic
-   * stays simple — the comment remains anchored at its original position
-   * for restore purposes.
-   */
-  private handlePlanEditComment(commentId: string, body: string) {
-    const trimmed = body.trim();
-    if (!trimmed) return;
-    if (isCommentRevisionProceeded(this.session.timeline, commentId)) {
-      this.postLockedError();
-      return;
-    }
-    const ev = findCommentEvent(this.session.timeline, commentId);
-    if (!ev) return;
-    const meta = ev.meta as Record<string, unknown>;
-    meta.body = trimmed;
-    meta.editedAt = Date.now();
-    ev.body = trimmed;
-    this.post({ type: "timeline", event: ev });
-    this.scheduleSave();
-  }
-
-  /**
-   * Soft-delete: flag the comment as deleted but leave the event in the
-   * timeline so any rewind to a checkpoint older than this delete restores
-   * the comment intact. The webview filters deleted comments out at fold
-   * time.
-   */
-  private handlePlanDeleteComment(commentId: string) {
-    if (isCommentRevisionProceeded(this.session.timeline, commentId)) {
-      this.postLockedError();
-      return;
-    }
-    const ev = findCommentEvent(this.session.timeline, commentId);
-    if (!ev) return;
-    const meta = ev.meta as Record<string, unknown>;
-    meta.deleted = true;
-    this.post({ type: "timeline", event: ev });
-    this.scheduleSave();
-  }
-
-  private postLockedError(): void {
-    this.post({
-      type: "error",
-      message: "Plan is locked. Rewind to this revision's checkpoint to edit."
-    });
-  }
-
-  /** Append a reply: a new plan_comment whose `parentCommentId` points at `parent`. */
-  private handlePlanReplyComment(
-    revisionId: string,
-    parentCommentId: string,
-    body: string
-  ) {
-    const trimmed = body.trim();
-    if (!trimmed) return;
-    if (isRevisionProceeded(this.session.timeline, revisionId)) {
-      this.postLockedError();
-      return;
-    }
-    const parent = findCommentEvent(this.session.timeline, parentCommentId);
-    const parentMeta = parent?.meta as
-      { taskId?: string; quote?: string } | undefined;
-    this.session.emitPlanComment({
-      commentId: makeNonce().slice(0, 8),
-      revisionId,
-      taskId: parentMeta?.taskId ?? "__general__",
-      body: trimmed,
-      // Inherit the parent's quote so the reply still renders in the
-      // sidebar with a "jump to passage" affordance.
-      quote: parentMeta?.quote,
-      parentCommentId
-    });
-  }
-
-  /** Toggle a comment's manual resolved state. */
-  private handlePlanResolveComment(commentId: string, resolve: boolean) {
-    if (isCommentRevisionProceeded(this.session.timeline, commentId)) {
-      this.postLockedError();
-      return;
-    }
-    const ev = findCommentEvent(this.session.timeline, commentId);
-    if (!ev) return;
-    const meta = ev.meta as Record<string, unknown>;
-    if (resolve) meta.resolvedAt = Date.now();
-    else delete meta.resolvedAt;
-    this.post({ type: "timeline", event: ev });
-    this.scheduleSave();
-  }
-
-  /**
-   * Mutate a single task's status on its plan_revision and re-post the event.
-   * Returns the updated revision event (or null if it doesn't exist) so callers
-   * can chain a follow-up agent prompt.
-   */
-  private mutateTaskStatus(
-    revisionId: string,
-    taskId: string,
-    nextStatus: TaskStatus
-  ) {
-    const result = setTaskStatus(
-      this.session.timeline,
-      revisionId,
-      taskId,
-      nextStatus
-    );
-    if (!result) return null;
-    this.post({ type: "timeline", event: result.ev });
-    this.scheduleSave();
-    return result;
-  }
-
-  /**
-   * Plan "Proceed" pressed. Show a permission popup, switch out of plan mode
-   * if needed, then send the continuation prompt — all in one step so the
-   * agent can start writing without the user having to manually flip mode.
-   */
-  private async handlePlanProceed(revisionId: string): Promise<void> {
-    if (isRevisionProceeded(this.session.timeline, revisionId)) {
-      this.postLockedError();
-      return;
-    }
-
-    const cfg = vscode.workspace.getConfiguration("luno");
-    const currentMode = cfg.get<PermissionMode>("permissionMode", "default");
-
-    // Fetched up front so we can warn on an incomplete plan before the user
-    // authorizes edits. Reused below for locking the revision.
-    const ev = findRevisionEvent(this.session.timeline, revisionId);
-    const planMeta = ev?.meta as unknown as PlanRevisionMeta | undefined;
-
-    const baseDetail =
-      currentMode === "plan"
-        ? "Plan mode blocks edits. Approving switches into Agent mode so the agent can carry out the plan autonomously."
-        : "The agent will continue with file edits and any necessary commands.";
-    const missing = incompletePlanSections(planMeta);
-    const detail =
-      missing.length > 0
-        ? `⚠ This plan is missing or has empty sections: ${missing.join(", ")}. ` +
-          "Skipping these is the most common cause of broken work. Consider " +
-          "cancelling and asking Luno to complete the plan first.\n\n" +
-          baseDetail
-        : baseDetail;
-
-    const choice = await vscode.window.showInformationMessage(
-      "Luno has a plan ready. Allow it to start implementing?",
-      { modal: true, detail },
-      "Allow & continue"
-    );
-
-    if (!choice) return; // user cancelled / closed modal
-
-    // Out of plan, go straight into Agent mode (auto). Anywhere else, leave
-    // the user's chosen mode alone.
-    const targetMode: PermissionMode =
-      currentMode === "plan" ? "auto" : currentMode;
-
-    if (targetMode !== currentMode) {
-      await cfg.update(
-        "permissionMode",
-        targetMode,
-        vscode.ConfigurationTarget.Global
-      );
-      // Mirror the change back to the webview so the mode pill updates
-      // before the next turn begins.
-      await this.broadcastAuthState();
-      // Drop the prior CLI resume id. Without this, the next claude-cli
-      // invocation passes --resume <plan-mode-session> and the resumed
-      // session's stored permission posture (plan = no edits) sticks even
-      // though we passed a new --permission-mode flag, so writes keep
-      // getting denied with "It seems write permissions need to be
-      // granted." A fresh session honors the new mode cleanly. We hand
-      // the plan file path back to the agent in the continuation prompt
-      // below so the lost conversation context is recovered.
-      this.resumeId = undefined;
-    }
-
-    // Lock the revision: no more comments / step mutations / re-Proceed
-    // until the user rewinds to this revision's checkpoint. Capture the
-    // pre-Proceed mode so rewind can restore it. (`ev` was fetched above.)
-    const planFilePath =
-      ev &&
-      ((ev.meta as { planFilePath?: string } | undefined)?.planFilePath ??
-        undefined);
-    if (ev) {
-      const meta = ev.meta as Record<string, unknown>;
-      meta.proceeded = true;
-      meta.prePermissionMode = currentMode;
-      this.post({ type: "timeline", event: ev });
-      this.scheduleSave();
-    }
-
-    // Continue the conversation. If we cleared resumeId above, the agent
-    // is in a fresh session with no planning context — so we hand it the
-    // plan file path to re-read. The "permission mode has changed" line
-    // is load-bearing: without it the model occasionally remembers being
-    // told (in the prior plan-mode prompt) to refuse edits and gets stuck
-    // even though the gate is open.
-    const continuation = [
-      "Plan approved. The permission mode has been switched out of plan mode — you now have permission to make file edits and run the commands the plan requires.",
-      planFilePath
-        ? `Re-read the plan at \`${planFilePath}\` and carry out each step in order.`
-        : "Carry out each step of the plan in order.",
-      "The plan was written in a separate read-only session, so before you rely on any file:line reference in it, re-open that location and confirm it still matches — fix the step rather than trusting a stale or mistaken citation.",
-      "Stop only if you hit a blocker that requires user input."
-    ].join("\n\n");
-    void this.handlePrompt(continuation);
-  }
-
-  private async handlePlanAcceptStep(revisionId: string, taskId: string) {
-    if (isRevisionProceeded(this.session.timeline, revisionId)) {
-      this.postLockedError();
-      return;
-    }
-    const result = this.mutateTaskStatus(revisionId, taskId, "accepted");
-    if (!result) return;
-    const taskMeta = result.task as { content?: string };
-    const content = taskMeta.content ?? "this step";
-    await this.handlePrompt(
-      `Step approved — proceed with: "${content}".\n\n` +
-        "Execute only this step, then stop and wait for the next instruction. " +
-        "When done, emit a TodoWrite that marks this step's status as " +
-        '"completed" and leaves later steps untouched.'
-    );
-  }
-
-  private async handlePlanModifyStep(
-    revisionId: string,
-    taskId: string,
-    instruction: string
-  ) {
-    const trimmed = instruction.trim();
-    if (!trimmed) return;
-    if (isRevisionProceeded(this.session.timeline, revisionId)) {
-      this.postLockedError();
-      return;
-    }
-    const ev = findRevisionEvent(this.session.timeline, revisionId);
-    if (!ev) return;
-    const meta = ev.meta as {
-      tasks?: Array<{ id: string; content?: string; status: string }>;
-    };
-    const task = meta.tasks?.find((t) => t.id === taskId);
-    const content = task?.content ?? "the step";
-    await this.handlePrompt(
-      `Modify the plan step: "${content}".\n\n` +
-        `Change requested: ${trimmed}\n\n` +
-        "Preserve every step that is already marked accepted or completed. " +
-        "Regenerate downstream steps as needed and emit a fresh ExitPlanMode " +
-        "(plus TodoWrite) reflecting the updated plan."
-    );
-  }
-
-  private handlePlanSkipStep(revisionId: string, taskId: string) {
-    if (isRevisionProceeded(this.session.timeline, revisionId)) {
-      this.postLockedError();
-      return;
-    }
-    this.mutateTaskStatus(revisionId, taskId, "skipped");
-  }
-
-  /**
-   * Reveal the plan as a real editor tab. The artifact webview shares the
-   * same compiled bundle as the chat panel; it loads `ArtifactApp` instead
-   * of the chat shell because the host injects window globals that the
-   * webview entry reads at boot.
-   */
-  private handlePlanOpenInEditor(revisionId: string) {
-    const ev = findRevisionEvent(this.session.timeline, revisionId);
-    if (!ev) {
-      this.post({
-        type: "error",
-        message: "That plan revision is no longer available."
-      });
-      return;
-    }
-    const meta = ev.meta as unknown as PlanRevisionMeta;
-    this.artifacts.open(meta);
-  }
-
-  /**
-   * Bundle all unresolved plan_comment events for `revisionId` into a single
-   * structured user turn and feed it back through the regular handlePrompt
-   * pipeline. The orchestrator's PlanInterceptor will turn the response into
-   * a fresh plan_revision with parentRevisionId pointing at the old one.
-   */
-  private async handlePlanResubmit(revisionId: string) {
-    if (isRevisionProceeded(this.session.timeline, revisionId)) {
-      this.postLockedError();
-      return;
-    }
-    const comments = this.session.timeline.filter(
-      (e) =>
-        e.kind === "plan_comment" &&
-        (e.meta as { revisionId?: string } | undefined)?.revisionId ===
-          revisionId &&
-        !(e.meta as { resolvedInRevisionId?: string } | undefined)
-          ?.resolvedInRevisionId
-    );
-    if (comments.length === 0) return;
-
-    const tasksById = new Map<string, string>();
-    const revEvent = this.session.timeline.find(
-      (e) =>
-        e.kind === "plan_revision" &&
-        (e.meta as { revisionId?: string })?.revisionId === revisionId
-    );
-    const tasks =
-      (
-        revEvent?.meta as
-          { tasks?: Array<{ id: string; content: string }> } | undefined
-      )?.tasks ?? [];
-    for (const t of tasks) tasksById.set(t.id, t.content);
-
-    interface CommentEntry {
-      body: string;
-      quote?: string;
-    }
-    const grouped = new Map<string, CommentEntry[]>();
-    for (const c of comments) {
-      const meta = c.meta as { taskId: string; body: string; quote?: string };
-      const list = grouped.get(meta.taskId) ?? [];
-      list.push({ body: meta.body, quote: meta.quote });
-      grouped.set(meta.taskId, list);
-    }
-
-    const lines = ["The plan needs revision based on this feedback:", ""];
-    for (const [taskId, entries] of grouped) {
-      const label =
-        taskId === "__general__"
-          ? "Whole-plan feedback"
-          : taskId === "__inline__"
-            ? "Inline feedback"
-            : (tasksById.get(taskId) ?? `(task ${taskId})`);
-      lines.push(`**${label}**`);
-      for (const e of entries) {
-        if (e.quote) {
-          // Truncate long quotes — the agent doesn't need the whole passage,
-          // just enough to relocate what the user was reacting to.
-          const snippet =
-            e.quote.length > 240 ? `${e.quote.slice(0, 237)}…` : e.quote;
-          lines.push(
-            `- (re: "${snippet.replace(/\s+/g, " ").trim()}") ${e.body}`
-          );
-        } else {
-          lines.push(`- ${e.body}`);
-        }
-      }
-      lines.push("");
-    }
-    lines.push(
-      "Produce an updated plan via ExitPlanMode that addresses each comment."
-    );
-    await this.handlePrompt(lines.join("\n"));
-  }
-
-  /**
-   * Record the user's question-card answers in the timeline, then forward
-   * them as a synthetic user turn so the model knows how to proceed.
-   */
-  private async handlePlanAnswer(
-    questionId: string,
-    _toolUseId: string,
-    answers: Array<{ choice: string; note?: string }>
-  ) {
-    this.session.emitPlanAnswer({ questionId, answers });
-    const summary = answers
-      .map((a, i) => `Q${i + 1}: ${a.choice}${a.note ? ` (${a.note})` : ""}`)
-      .join("; ");
-    await this.handlePrompt(`Answer to your question — ${summary}`);
   }
 
   private async loadHistorySession(id: string) {
