@@ -34,6 +34,10 @@ import {
 } from "./messages.js";
 import { broadcastUsage } from "./domains/usage.js";
 import {
+  fileTouchedByTool,
+  type ToolCallEvent
+} from "./domains/checkpoint-triggers.js";
+import {
   findCommentEvent,
   findRevisionEvent,
   incompletePlanSections,
@@ -209,35 +213,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * When the agent (or the Claude CLI agent) calls a write/edit tool, snapshot
-   * the file's *current* content into the latest checkpoint so rewind can
-   * restore it. This fires synchronously before the tool actually runs (we
-   * see the tool_call event right before fs.writeFile / CLI Write executes).
+   * When the agent calls a write/edit tool, add the file it names to the latest
+   * checkpoint so rewind can restore it.
+   *
+   * **The event arrives after the CLI already ran the tool**, not before. The
+   * comment here used to claim the opposite, which matters: reading the file
+   * from disk at this point yields the *post-edit* content, so a snapshot taken
+   * that way restores the damage instead of undoing it. `addFileToLatest`
+   * therefore pulls pre-edit state from git HEAD, and
+   * `test/unit/checkpoint.test.ts` guards that with a named regression test.
+   * Anyone "simplifying" it back to a disk read would break rewind for every
+   * tracked file.
    */
-  private trackFileForCheckpoint(e: {
-    kind: string;
-    body?: string;
-    meta?: Record<string, unknown>;
-  }) {
+  private trackFileForCheckpoint(e: ToolCallEvent) {
     if (!this.checkpoints) return;
-    if (e.kind !== "tool_call") return;
-    let input: Record<string, unknown>;
-    try {
-      input = JSON.parse(e.body ?? "{}");
-    } catch {
-      return;
-    }
-    const rel = String(input.path ?? input.file_path ?? input.filePath ?? "");
-    if (!rel) return;
-    const name = String(e.meta?.name ?? "").toLowerCase();
-    // Claude CLI's Write / Edit / MultiEdit / NotebookEdit / Update tools.
-    if (
-      /^(write|edit|multiedit|notebookedit|update|create|str_replace_editor)/.test(
-        name
-      )
-    ) {
-      void this.checkpoints.addFileToLatest(rel);
-    }
+    const rel = fileTouchedByTool(e);
+    if (rel) void this.checkpoints.addFileToLatest(rel);
   }
 
   private ensureCheckpoints(workspaceRoot: string) {
