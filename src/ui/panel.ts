@@ -2,8 +2,6 @@ import * as vscode from "vscode";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
-import { spawn, ChildProcess } from "node:child_process";
-import * as readline from "node:readline";
 import { Session } from "../core/session.js";
 import { Orchestrator } from "../core/orchestrator.js";
 import {
@@ -33,8 +31,12 @@ import {
   str,
   type HandlerTable,
   type InboundType,
+  type Post,
   type RawMessage
 } from "./messages.js";
+import { broadcastUsage } from "./domains/usage.js";
+import { broadcastHistory } from "./domains/history.js";
+import { ModelResolver } from "./domains/models.js";
 import { discoverClaudeSkills } from "../services/claude-skills.js";
 import {
   loadConventions,
@@ -51,7 +53,6 @@ import {
   InstallScope,
   InstallTarget
 } from "../services/marketplace.js";
-import { aggregateClaudeCodeUsage } from "../services/claude-code-usage.js";
 import {
   listConnectors as mcpListConnectors,
   connect as mcpConnect,
@@ -81,16 +82,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private activeTurn?: Promise<void>;
   private resumeId?: string;
   /** Short-lived CLI process used to resolve an alias → concrete model id
-   *  without running a turn. Killed at the `init` event (before any API
-   *  call), so it's free. Tracked so we can cancel a stale probe. */
-  private modelProbe?: ChildProcess;
-  /** alias → resolved-id map for every model in the picker. Cached for the
-   *  panel's lifetime; re-posted instantly on webview reload so each row can
-   *  always show its concrete version. */
-  private resolvedModels = new Map<string, string>();
-  /** Guard so overlapping `broadcastModels` calls don't fan out duplicate
-   *  probe processes. */
-  private resolvingModels = false;
+  /** Owns the model list, the alias → concrete-id cache, and the probe that
+   *  fills it. Three fields and three methods used to live on this class. */
+  private readonly models: ModelResolver;
   private checkpoints?: CheckpointService;
   private history: HistoryService;
   private decorations: PlanDecorationService;
@@ -117,6 +111,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private static readonly CLAUDE_CREDS_READY_KEY = "luno.claudeCredsReady.v1";
 
   constructor(private readonly ctx: vscode.ExtensionContext) {
+    this.models = new ModelResolver(this.post, ctx);
     this.history = new HistoryService(ctx);
     this.decorations = new PlanDecorationService(
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
@@ -130,8 +125,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // aliases resolve to, so drop the cached versions and re-probe.
     const cfgWatcher = vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("luno.claudeBinaryPath")) {
-        this.resolvedModels.clear();
-        void this.broadcastModels();
+        this.models.clear();
+        void this.models.broadcast();
       }
     });
     ctx.subscriptions.push({
@@ -139,7 +134,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this.decorations.dispose();
         this.artifacts.closeAll();
         disposeConventionsWatchers();
-        this.modelProbe?.kill("SIGKILL");
+        this.models.dispose();
         cfgWatcher.dispose();
       }
     });
@@ -261,39 +256,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // session that the constructor created.
     void this.restoreLatestSession().then(() => {
       this.replayTimeline();
-      void this.broadcastClaudeCodeUsage();
+      void broadcastUsage(this.post);
     });
     this.wireEditorContext();
     // Refresh aggregated Claude Code usage every 60s while the panel is
     // open. Cheap on disk (a few JSONL files per workspace) and keeps the
     // meter honest if the user runs `claude` from a terminal.
     const timer = setInterval(() => {
-      void this.broadcastClaudeCodeUsage();
+      void broadcastUsage(this.post);
     }, 60_000);
     this.ctx.subscriptions.push({ dispose: () => clearInterval(timer) });
   }
 
   /** Aggregate authoritative usage from Claude Code's per-workspace JSONL
    *  files and push it to the webview. No-op if no workspace is open. */
-  private async broadcastClaudeCodeUsage(): Promise<void> {
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!root) return;
-    try {
-      const agg = await aggregateClaudeCodeUsage(root);
-      this.post({
-        type: "claudeCodeUsage",
-        session: agg.session,
-        today: agg.today,
-        week: agg.week,
-        weekSonnet: agg.weekSonnet,
-        total: agg.total,
-        generatedAt: agg.generatedAt,
-        available: agg.available
-      });
-    } catch {
-      // best-effort; the chip falls back to its estimate
-    }
-  }
 
   /**
    * On startup, list saved sessions and adopt the most recently updated one
@@ -394,7 +370,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       thinking
     });
     if (authed) {
-      await this.broadcastModels();
+      await this.models.broadcast();
       await this.broadcastSkills();
     }
   }
@@ -823,7 +799,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     refreshEditorContext: () => this.broadcastEditorContext(),
 
     // ── Models ─────────────────────────────────────────────────
-    requestModels: () => this.broadcastModels(),
+    requestModels: () => this.models.broadcast(),
 
     // ── Skills + marketplace ───────────────────────────────────
     requestSkills: () => this.broadcastSkills(),
@@ -875,7 +851,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     },
 
     // ── History ────────────────────────────────────────────────
-    requestHistory: () => this.broadcastHistory(),
+    requestHistory: () => broadcastHistory(this.post, this.history),
     loadSession: async (m) => {
       const id = str(m, "id");
       if (id) await this.loadHistorySession(id);
@@ -884,11 +860,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const id = str(m, "id");
       if (!id) return;
       await this.history.delete(id);
-      await this.broadcastHistory();
+      await broadcastHistory(this.post, this.history);
     },
 
     // ── Usage ──────────────────────────────────────────────────
-    refreshUsage: () => this.broadcastClaudeCodeUsage(),
+    refreshUsage: () => broadcastUsage(this.post),
 
     // ── Conventions ────────────────────────────────────────────
     dismissConventionsBanner: async () => {
@@ -1952,11 +1928,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     await this.handlePrompt(`Answer to your question — ${summary}`);
   }
 
-  private async broadcastHistory() {
-    const sessions = await this.history.list();
-    this.post({ type: "historyList", sessions });
-  }
-
   private async loadHistorySession(id: string) {
     const stored = await this.history.load(id);
     if (!stored) {
@@ -1995,135 +1966,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   // ── Models / skills / search ─────────────────────────────────
-
-  private async broadcastModels() {
-    this.post({ type: "models", models: availableModels() });
-    void this.resolveModelVersions();
-  }
-
-  /**
-   * Resolve every alias in the picker (default/opus/sonnet/haiku) to the
-   * concrete model id the CLI would use (e.g. `claude-opus-4-7[1m]`), so each
-   * row shows its real version the moment the picker opens — not just after a
-   * turn.
-   *
-   * Each probe spawns the bundled CLI and reads the `system`/`init` event,
-   * which carries the resolved `model` and fires during session setup —
-   * *before* any prompt is sent to the API — then kills the process. No
-   * prompt reaches the model, so this costs no subscription tokens. Results
-   * are cached for the panel's lifetime and re-posted on webview reload.
-   */
-  private async resolveModelVersions(): Promise<void> {
-    const aliases = availableModels().map((m) => m.value);
-
-    // Re-post everything we already know immediately (covers reloads).
-    for (const alias of aliases) {
-      const resolved = this.resolvedModels.get(alias);
-      if (resolved) this.post({ type: "activeModel", model: resolved, alias });
-    }
-
-    if (this.resolvingModels) return;
-    const missing = aliases.filter((a) => !this.resolvedModels.has(a));
-    if (missing.length === 0) return;
-
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!workspaceRoot) return;
-    // Resolve against the *same* binary turns will use, so the version shown
-    // matches what actually runs (honours luno.claudeBinaryPath).
-    const binary = resolveClaudeBinary();
-    if (!fs.existsSync(binary)) return;
-    const token = await getToken(this.ctx);
-
-    this.resolvingModels = true;
-    try {
-      // Sequential so we never hold more than one CLI process in memory.
-      for (const alias of missing) {
-        const resolved = await this.probeModel(
-          alias,
-          binary,
-          workspaceRoot,
-          token
-        );
-        if (resolved) {
-          this.resolvedModels.set(alias, resolved);
-          this.post({ type: "activeModel", model: resolved, alias });
-        }
-      }
-    } finally {
-      this.resolvingModels = false;
-    }
-  }
-
-  /**
-   * Spawn the CLI for a single alias, resolve to the concrete model id from
-   * its `init` event, then kill the process. Resolves to null on any
-   * error/timeout so the caller can move on to the next alias.
-   */
-  private probeModel(
-    alias: string,
-    binary: string,
-    cwd: string,
-    token: string | undefined
-  ): Promise<string | null> {
-    return new Promise((resolve) => {
-      const env = token
-        ? { ...process.env, ANTHROPIC_API_KEY: token }
-        : process.env;
-      // A throwaway prompt the model never sees — we kill at the init event.
-      // `--no-session-persistence` avoids leaving a stray empty session.
-      const child = spawn(
-        binary,
-        [
-          "-p",
-          "--model",
-          alias,
-          "--output-format",
-          "stream-json",
-          "--verbose",
-          "--no-session-persistence",
-          "."
-        ],
-        { cwd, env, stdio: ["ignore", "pipe", "ignore"] }
-      );
-      this.modelProbe = child;
-
-      let settled = false;
-      const finish = (result: string | null) => {
-        if (settled) return;
-        settled = true;
-        if (this.modelProbe === child) this.modelProbe = undefined;
-        if (!child.killed) child.kill("SIGKILL");
-        resolve(result);
-      };
-
-      const rl = readline.createInterface({
-        input: child.stdout!,
-        crlfDelay: Infinity
-      });
-      rl.on("line", (line) => {
-        if (settled) return;
-        const trimmed = line.trim();
-        if (!trimmed) return;
-        let ev: { type?: string; subtype?: string; model?: string };
-        try {
-          ev = JSON.parse(trimmed);
-        } catch {
-          return;
-        }
-        if (
-          ev.type === "system" &&
-          ev.subtype === "init" &&
-          typeof ev.model === "string"
-        ) {
-          finish(ev.model);
-        }
-      });
-      child.once("error", () => finish(null));
-      child.once("exit", () => finish(null));
-      // Safety net: never let a wedged probe linger.
-      setTimeout(() => finish(null), 10_000);
-    });
-  }
 
   private static readonly DISABLED_SKILLS_KEY = "luno.disabledSkills.v1";
 
@@ -2589,8 +2431,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // it as a typed event so the model picker can show what's actually
         // running, not just the alias the user selected.
         if (d.type === "model" && d.model) {
-          this.resolvedModels.set(model, d.model);
-          this.post({ type: "activeModel", model: d.model, alias: model });
+          this.models.record(model, d.model);
         }
         // Usage deltas are the authoritative token counts reported by the
         // CLI. Re-publish them as a typed `tokenUsage` event so the
@@ -2622,7 +2463,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // Refresh authoritative usage after every turn — Claude Code writes
         // its session JSONL synchronously, so by this point the new tokens
         // are on disk and the aggregator will pick them up.
-        void this.broadcastClaudeCodeUsage();
+        void broadcastUsage(this.post);
         // Drop the per-turn MCP config so the bearer tokens it held don't
         // sit on disk between turns.
         void mcpConfig?.cleanup();
@@ -2636,13 +2477,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private post(msg: unknown) {
+  /**
+   * An arrow property, not a method: extracted domains take `post` as a value,
+   * and a plain method passed by reference arrives with `this` unbound.
+   */
+  private readonly post: Post = (msg: unknown) => {
     this.view?.webview.postMessage(msg);
     // Mirror to any open artifact editor tabs so they stay in sync with the
     // chat — comment edits, step accepts, plan revisions, etc. all need to
     // appear on both surfaces.
     this.artifacts.broadcast(msg);
-  }
+  };
 
   private html(webview: vscode.Webview): string {
     return buildWebviewHtml({
@@ -2670,62 +2515,6 @@ function escapeGlob(s: string): string {
 }
 
 // ── Models / skills catalogs ─────────────────────────────────
-
-export type ModelGroup = "alias" | "version";
-
-export interface ModelInfo {
-  value: string;
-  label: string;
-  note: string;
-  supportsTools: boolean;
-  group: ModelGroup;
-}
-
-/**
- * Models surfaced in the picker.
- *
- * Luno runs exclusively on the Claude Code subscription via the bundled
- * `claude` CLI, so we surface the CLI's *aliases* rather than pinned version
- * IDs. Per `claude --help`, `--model` takes "an alias for the latest model
- * (e.g. 'sonnet' or 'opus')" — each alias always resolves to the newest
- * release for that tier on the user's plan. That means no hardcoded version
- * numbers to go stale: the picker tracks whatever Claude Code ships as latest.
- *
- * Reference: https://code.claude.com/docs/en/model-config
- */
-function availableModels(): ModelInfo[] {
-  // Claude Code CLI aliases — each tracks the latest model for its tier.
-  return [
-    {
-      value: "default",
-      label: "Default",
-      note: "Most capable for complex work",
-      supportsTools: true,
-      group: "alias"
-    },
-    {
-      value: "opus",
-      label: "Opus",
-      note: "Deepest reasoning, hardest problems",
-      supportsTools: true,
-      group: "alias"
-    },
-    {
-      value: "sonnet",
-      label: "Sonnet",
-      note: "Best for everyday tasks",
-      supportsTools: true,
-      group: "alias"
-    },
-    {
-      value: "haiku",
-      label: "Haiku",
-      note: "Fastest for quick answers",
-      supportsTools: true,
-      group: "alias"
-    }
-  ];
-}
 
 export interface SkillInfo {
   id: string;

@@ -103,6 +103,16 @@ export interface RawMessage {
 export type Handler = (msg: RawMessage) => void | Promise<void>;
 
 /**
+ * The other direction: host → webview.
+ *
+ * Extracted domains take this rather than the provider, which is what keeps
+ * them from reaching back into panel state. The provider's own `post` also
+ * mirrors to any open plan-artifact tab, so a domain publishes to every
+ * surface without knowing that more than one exists.
+ */
+export type Post = (msg: unknown) => void;
+
+/**
  * One entry per accepted message. Keyed by `InboundType`, which is what makes
  * a missing handler a compile error rather than a message that quietly does
  * nothing.
