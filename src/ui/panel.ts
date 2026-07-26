@@ -37,22 +37,24 @@ import {
 import { broadcastUsage } from "./domains/usage.js";
 import { broadcastHistory } from "./domains/history.js";
 import { ModelResolver } from "./domains/models.js";
-import { discoverClaudeSkills } from "../services/claude-skills.js";
+import {
+  broadcastSkills,
+  disabledSkillIds,
+  dismissSuggestion,
+  installMarketplaceSkill,
+  requestMarketplace,
+  requestSkillDetail,
+  setSkillEnabled,
+  suggestSkill,
+  uninstallMarketplaceSkill
+} from "./domains/skills.js";
 import {
   loadConventions,
   disposeConventionsWatchers,
   ConventionsFile
 } from "../services/conventions.js";
 import { classifyTask } from "../core/task-classifier.js";
-import { getSkillSuggestion } from "../services/skill-suggestions.js";
-import {
-  fetchMarketplace,
-  fetchSkillDetail,
-  installSkill as installMarketplaceSkill,
-  uninstallSkill as uninstallMarketplaceSkill,
-  InstallScope,
-  InstallTarget
-} from "../services/marketplace.js";
+import type { InstallTarget } from "../services/marketplace.js";
 import {
   listConnectors as mcpListConnectors,
   connect as mcpConnect,
@@ -371,7 +373,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     });
     if (authed) {
       await this.models.broadcast();
-      await this.broadcastSkills();
+      await broadcastSkills(this.post, this.ctx);
     }
   }
 
@@ -802,14 +804,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     requestModels: () => this.models.broadcast(),
 
     // ── Skills + marketplace ───────────────────────────────────
-    requestSkills: () => this.broadcastSkills(),
+    requestSkills: () => broadcastSkills(this.post, this.ctx),
     setSkillEnabled: async (m) => {
       const id = str(m, "id");
       const enabled = bool(m, "enabled");
-      if (id && enabled !== undefined) await this.setSkillEnabled(id, enabled);
+      if (id && enabled !== undefined)
+        await setSkillEnabled(this.post, this.ctx, id, enabled);
     },
     requestMarketplace: async (m) => {
-      await this.handleRequestMarketplace(
+      await requestMarketplace(
+        this.post,
         num(m, "offset") ?? 0,
         num(m, "limit") ?? 24,
         str(m, "query")
@@ -817,13 +821,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     },
     requestSkillDetail: async (m) => {
       const name = str(m, "name");
-      if (name) await this.handleRequestSkillDetail(name);
+      if (name) await requestSkillDetail(this.post, name);
     },
     installMarketplaceSkill: async (m) => {
       const target = obj(m, "target");
       const scope = oneOf(m, "scope", ["user", "project"] as const);
       if (target && scope) {
-        await this.handleInstallMarketplaceSkill(
+        await installMarketplaceSkill(
+          this.post,
+          this.ctx,
           target as unknown as InstallTarget,
           scope
         );
@@ -833,21 +839,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const name = str(m, "name");
       const scope = oneOf(m, "scope", ["user", "project"] as const);
       if (name && scope)
-        await this.handleUninstallMarketplaceSkill(name, scope);
+        await uninstallMarketplaceSkill(this.post, this.ctx, name, scope);
     },
     dismissSkillSuggestion: async (m) => {
       const skillId = str(m, "skillId");
-      if (!skillId) return;
-      const list = this.ctx.workspaceState.get<string[]>(
-        "luno.skillSuggestionDismissed.v1",
-        []
-      );
-      if (!list.includes(skillId)) {
-        await this.ctx.workspaceState.update(
-          "luno.skillSuggestionDismissed.v1",
-          [...list, skillId]
-        );
-      }
+      if (skillId) await dismissSuggestion(this.ctx, skillId);
     },
 
     // ── History ────────────────────────────────────────────────
@@ -1265,25 +1261,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    *  marketplace skill recommendation and that skill isn't installed, post a
    *  one-line suggestion to the webview. Reuses the existing
    *  `installMarketplaceSkill` flow when the user clicks Install. */
-  private async maybeSuggestSkill(
-    taskType: import("../core/types.js").TaskType,
-    workspaceRoot: string
-  ): Promise<void> {
-    const dismissed = this.ctx.workspaceState.get<string[]>(
-      "luno.skillSuggestionDismissed.v1",
-      []
-    );
-    const suggestion = await getSkillSuggestion(taskType, workspaceRoot);
-    if (!suggestion) return;
-    if (dismissed.includes(suggestion.skillId)) return;
-    this.post({
-      type: "skillSuggestion",
-      skillId: suggestion.skillId,
-      skillName: suggestion.skillName,
-      reason: suggestion.reason,
-      taskType: suggestion.taskType
-    });
-  }
 
   /** After 3+ turns in a workspace with no conventions file, show a one-time
    *  banner suggesting the user generate one. Dismissal is workspace-scoped. */
@@ -1967,141 +1944,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   // ── Models / skills / search ─────────────────────────────────
 
-  private static readonly DISABLED_SKILLS_KEY = "luno.disabledSkills.v1";
-
-  private async broadcastSkills() {
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const disabled = new Set(
-      this.ctx.globalState.get<string[]>(
-        ChatPanelProvider.DISABLED_SKILLS_KEY,
-        []
-      )
-    );
-    const skills = await availableSkills(workspaceRoot, disabled);
-    this.post({ type: "skills", skills });
-  }
-
-  private async setSkillEnabled(id: string, enabled: boolean): Promise<void> {
-    const list = this.ctx.globalState.get<string[]>(
-      ChatPanelProvider.DISABLED_SKILLS_KEY,
-      []
-    );
-    const set = new Set(list);
-    if (enabled) set.delete(id);
-    else set.add(id);
-    await this.ctx.globalState.update(
-      ChatPanelProvider.DISABLED_SKILLS_KEY,
-      Array.from(set)
-    );
-    await this.broadcastSkills();
-  }
-
   // ── Marketplace handlers ────────────────────────────────────
-
-  private async handleRequestMarketplace(
-    offset: number,
-    limit: number,
-    query: string | undefined
-  ): Promise<void> {
-    try {
-      const result = await fetchMarketplace({ offset, limit, query });
-      this.post({
-        type: "marketplaceList",
-        skills: result.skills.map((s) => ({
-          id: s.id,
-          name: s.name,
-          namespace: s.namespace,
-          description: s.description,
-          author: s.author,
-          stars: s.stars,
-          installs: s.installs,
-          sourceUrl: s.sourceUrl,
-          repoOwner: s.repoOwner,
-          repoName: s.repoName,
-          directoryPath: s.directoryPath
-        })),
-        total: result.total,
-        offset: result.offset,
-        limit: result.limit
-      });
-    } catch (err) {
-      this.post({
-        type: "marketplaceError",
-        message: err instanceof Error ? err.message : String(err)
-      });
-    }
-  }
-
-  private async handleRequestSkillDetail(name: string): Promise<void> {
-    try {
-      const { skill, content } = await fetchSkillDetail(name);
-      this.post({
-        type: "skillDetail",
-        name,
-        skill: {
-          id: skill.id,
-          name: skill.name,
-          namespace: skill.namespace,
-          description: skill.description,
-          author: skill.author,
-          stars: skill.stars,
-          installs: skill.installs,
-          sourceUrl: skill.sourceUrl,
-          repoOwner: skill.repoOwner,
-          repoName: skill.repoName,
-          directoryPath: skill.directoryPath
-        },
-        content
-      });
-    } catch (err) {
-      this.post({
-        type: "skillDetail",
-        name,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
-  }
-
-  private async handleInstallMarketplaceSkill(
-    target: InstallTarget,
-    scope: InstallScope
-  ): Promise<void> {
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const result = await installMarketplaceSkill(target, scope, cwd);
-    this.post({
-      type: "marketplaceInstallResult",
-      action: "install",
-      name: target.name,
-      ok: result.ok,
-      scope: result.scope,
-      installPath: result.installPath,
-      filesWritten: result.filesWritten,
-      error: result.error
-    });
-    // Re-broadcast so the picker picks up the new skill in its on-disk source.
-    if (result.ok) {
-      await this.broadcastSkills();
-    }
-  }
-
-  private async handleUninstallMarketplaceSkill(
-    name: string,
-    scope: InstallScope
-  ): Promise<void> {
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const result = await uninstallMarketplaceSkill(name, scope, cwd);
-    this.post({
-      type: "marketplaceInstallResult",
-      action: "uninstall",
-      name,
-      ok: result.ok,
-      scope: result.scope,
-      error: result.error
-    });
-    if (result.ok) {
-      await this.broadcastSkills();
-    }
-  }
 
   private async handleFileSearch(query: string, id: string) {
     const root = vscode.workspace.workspaceFolders?.[0];
@@ -2314,10 +2157,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const bashAllowlist = cfg.get<string[]>("allowedBashPatterns", []);
     // Skills the user toggled off in the picker. Passed through to the CLI
     // so it actually skips them at invocation time, not just visually.
-    const disabledSkills = this.ctx.globalState.get<string[]>(
-      ChatPanelProvider.DISABLED_SKILLS_KEY,
-      []
-    );
+    const disabledSkills = disabledSkillIds(this.ctx);
 
     // Refuse to start a turn when the user is signed out or has neither a
     // pasted token nor Claude Code's own stored credentials. `credsReady`
@@ -2408,7 +2248,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
     this.maybeShowConventionsBanner(conventions);
     if (permMode === "plan") {
-      void this.maybeSuggestSkill(taskType, workspaceRoot);
+      void suggestSkill(this.post, this.ctx, taskType, workspaceRoot);
     }
 
     this.activeProvider = providerInstance;
@@ -2515,144 +2355,6 @@ function escapeGlob(s: string): string {
 }
 
 // ── Models / skills catalogs ─────────────────────────────────
-
-export interface SkillInfo {
-  id: string;
-  name: string;
-  category: "tool" | "skill" | "integration";
-  description: string;
-  enabled: boolean;
-  toggleable: boolean;
-  external?: boolean;
-  /** "user" / "project" for filesystem-discovered skills; undefined otherwise. */
-  source?: "user" | "project";
-}
-
-/**
- * Skills surfaced in the chat composer. Mirrors Claude Code's tool taxonomy
- * plus user-installed skills discovered on disk under ~/.claude/skills/ and
- * <workspace>/.claude/skills/.
- *
- * `disabled` carries the set of skill ids the user has toggled off in the
- * picker — used to flip `enabled: false` so the UI reflects state, even
- * though the toggle is a preference (Claude Code auto-loads skills based
- * on the prompt; we can't actually filter them at the CLI layer).
- */
-async function availableSkills(
-  workspaceRoot: string | undefined,
-  disabled: Set<string>
-): Promise<SkillInfo[]> {
-  // Capabilities surfaced by Claude Code (CLI). Marked `external` because
-  // they execute inside the CLI agent — Luno doesn't own them.
-  const claudeCode: SkillInfo[] = [
-    {
-      id: "Read",
-      name: "Read",
-      category: "tool",
-      description: "Read files in the workspace",
-      enabled: true,
-      toggleable: false,
-      external: true
-    },
-    {
-      id: "Write",
-      name: "Write",
-      category: "tool",
-      description: "Create and edit files",
-      enabled: true,
-      toggleable: false,
-      external: true
-    },
-    {
-      id: "Bash",
-      name: "Bash",
-      category: "tool",
-      description: "Run shell commands",
-      enabled: true,
-      toggleable: false,
-      external: true
-    },
-    {
-      id: "Glob",
-      name: "Glob",
-      category: "skill",
-      description: "Find files by glob pattern",
-      enabled: true,
-      toggleable: false,
-      external: true
-    },
-    {
-      id: "Grep",
-      name: "Grep",
-      category: "skill",
-      description: "Search file contents",
-      enabled: true,
-      toggleable: false,
-      external: true
-    },
-    {
-      id: "Edit",
-      name: "Edit",
-      category: "skill",
-      description: "Targeted in-file edits",
-      enabled: true,
-      toggleable: false,
-      external: true
-    },
-    {
-      id: "WebFetch",
-      name: "WebFetch",
-      category: "skill",
-      description: "Fetch and read URLs",
-      enabled: true,
-      toggleable: false,
-      external: true
-    },
-    {
-      id: "Task",
-      name: "Sub-agents",
-      category: "skill",
-      description: "Spawn parallel sub-agents",
-      enabled: true,
-      toggleable: false,
-      external: true
-    }
-  ];
-
-  // User-installed skills from disk. Both `~/.claude/skills/<name>/SKILL.md`
-  // and `<ws>/.claude/skills/<name>/SKILL.md` are scanned; failures are
-  // swallowed (missing dir, unreadable files, etc.).
-  let custom: SkillInfo[];
-  try {
-    const found = await discoverClaudeSkills(workspaceRoot);
-    custom = found.map((s) => ({
-      id: s.id,
-      name: s.name,
-      category: "skill",
-      description: s.description,
-      enabled: !disabled.has(s.id),
-      toggleable: true,
-      external: true,
-      source: s.source
-    }));
-  } catch {
-    custom = [];
-  }
-
-  // Optional integrations (placeholder — not yet wired).
-  const integrations: SkillInfo[] = [
-    {
-      id: "mcp",
-      name: "MCP Servers",
-      category: "integration",
-      description: "Model Context Protocol servers (configure to enable)",
-      enabled: false,
-      toggleable: false
-    }
-  ];
-
-  return [...claudeCode, ...custom, ...integrations];
-}
 
 /**
  * Strip inline `![name](data:image/...;base64,...)` blobs out of a prompt by
