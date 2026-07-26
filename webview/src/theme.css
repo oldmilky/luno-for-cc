@@ -19,11 +19,15 @@
  *
  * Geist Mono for code — companion face with the same design DNA, cleaner
  * than JetBrains Mono for terminal-style content + good ligatures. */
-@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600;700&display=swap");
+@import "https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600;700&display=swap";
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
   margin: 0;
   padding: 0;
@@ -38,14 +42,28 @@ html, body, #root {
    *   (helps with code-adjacent prose like `=>` and `!=`), ss01 enables
    *   the slashed-zero stylistic set, tnum keeps numerals tabular so
    *   inline counters / file:line refs align cleanly. */
-  font-feature-settings: "ss01" 1, "calt" 1, "liga" 1, "tnum" 1;
+  font-feature-settings:
+    "ss01" 1,
+    "calt" 1,
+    "liga" 1,
+    "tnum" 1;
   font-variant-numeric: tabular-nums;
 }
 
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
 
 /* ═══════════════════════════════════════════════════════════════
    Animations
@@ -55,15 +73,33 @@ html, body, #root {
    Slow-drifting copper aurora layers that sit behind the whole app.
    Two blobs breathe + drift in counterpoint so the dark surface
    never reads as flat. Pure decoration — pointer-events: none. */
-@keyframes auroraDriftA {
-  0%   { transform: translate3d(-6%, -4%, 0) scale(1);    opacity: 0.55; }
-  50%  { transform: translate3d(6%, 5%, 0)  scale(1.18);  opacity: 0.8; }
-  100% { transform: translate3d(-6%, -4%, 0) scale(1);    opacity: 0.55; }
+@keyframes aurora-drift-a {
+  0% {
+    transform: translate3d(-6%, -4%, 0) scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translate3d(6%, 5%, 0) scale(1.18);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate3d(-6%, -4%, 0) scale(1);
+    opacity: 0.55;
+  }
 }
-@keyframes auroraDriftB {
-  0%   { transform: translate3d(5%, 6%, 0)  scale(1.1);   opacity: 0.4; }
-  50%  { transform: translate3d(-7%, -5%, 0) scale(1);    opacity: 0.62; }
-  100% { transform: translate3d(5%, 6%, 0)  scale(1.1);   opacity: 0.4; }
+@keyframes aurora-drift-b {
+  0% {
+    transform: translate3d(5%, 6%, 0) scale(1.1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translate3d(-7%, -5%, 0) scale(1);
+    opacity: 0.62;
+  }
+  100% {
+    transform: translate3d(5%, 6%, 0) scale(1.1);
+    opacity: 0.4;
+  }
 }
 /* Soft breathing halo — used behind avatars / brand mark. */
 /* Travelling sheen for the streaming assistant prose + skeleton bars. */
@@ -87,25 +123,35 @@ html, body, #root {
   will-change: transform, opacity;
 }
 .app-ambient::before {
-  width: 70vw; height: 70vw;
-  top: -28vw; left: -14vw;
+  width: 70vw;
+  height: 70vw;
+  top: -28vw;
+  left: -14vw;
   background: radial-gradient(circle, var(--aurora-1), transparent 62%);
-  animation: auroraDriftA 22s ease-in-out infinite;
+  animation: aurora-drift-a 22s ease-in-out infinite;
 }
 .app-ambient::after {
-  width: 56vw; height: 56vw;
-  bottom: -24vw; right: -12vw;
+  width: 56vw;
+  height: 56vw;
+  bottom: -24vw;
+  right: -12vw;
   background: radial-gradient(circle, var(--aurora-2), transparent 64%);
-  animation: auroraDriftB 28s ease-in-out infinite;
+  animation: aurora-drift-b 28s ease-in-out infinite;
 }
 /* A faint top-edge glow that hugs the header for extra depth. */
 .app-ambient-top {
   position: fixed;
-  top: 0; left: 0; right: 0;
+  top: 0;
+  left: 0;
+  right: 0;
   height: 180px;
   pointer-events: none;
   z-index: 0;
-  background: radial-gradient(120% 100% at 50% 0%, var(--aurora-top), transparent 70%);
+  background: radial-gradient(
+    120% 100% at 50% 0%,
+    var(--aurora-top),
+    transparent 70%
+  );
 }
 /* Layering: ambient aurora at the bottom, chrome above it, overlays on top.
 
@@ -133,12 +179,16 @@ html, body, #root {
 
 @media (prefers-reduced-motion: reduce) {
   .app-ambient::before,
-  .app-ambient::after { animation: none !important; }
+  .app-ambient::after {
+    animation: none !important;
+  }
 }
 
 /* Reduced motion — opt out of all decorative animation. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
@@ -170,16 +220,25 @@ html, body, #root {
   font-size: 13.5px;
   line-height: 1.7;
   letter-spacing: -0.003em;
-  font-feature-settings: "ss01" 1, "calt" 1, "liga" 1, "tnum" 1;
+  font-feature-settings:
+    "ss01" 1,
+    "calt" 1,
+    "liga" 1,
+    "tnum" 1;
 }
-.md p, .md-p {
+.md p,
+.md-p {
   margin: 0 0 0.85em;
   color: var(--t2);
   /* Better word-breaking in long technical strings (URLs, paths). */
   overflow-wrap: anywhere;
 }
-.md > :first-child { margin-top: 0; }
-.md > :last-child { margin-bottom: 0; }
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
 
 /* Nested lists swap marker style (disc → circle → square) and tighten. */
 
@@ -197,7 +256,9 @@ html, body, #root {
   font-size: 12.5px;
   line-height: 1.65;
   color: var(--t1);
-  font-feature-settings: "calt" 1, "ss01" 1;
+  font-feature-settings:
+    "calt" 1,
+    "ss01" 1;
 }
 .md-code code {
   background: transparent;
@@ -208,24 +269,41 @@ html, body, #root {
 
 /* Links — accent color with a hairline underline that thickens on
    hover. Matches Linear / Cursor link presentation. */
-.md a, .md-p a, .msg-body a {
+.md a,
+.md-p a,
+.msg-body a {
   color: var(--accent-glow);
   text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--accent-glow) 40%, transparent);
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--accent-glow) 40%,
+    transparent
+  );
   text-underline-offset: 2.5px;
   text-decoration-thickness: 1px;
-  transition: text-decoration-color 120ms ease, text-decoration-thickness 120ms ease;
+  transition:
+    text-decoration-color 120ms ease,
+    text-decoration-thickness 120ms ease;
 }
-.md a:hover, .md-p a:hover {
+.md a:hover,
+.md-p a:hover {
   text-decoration-color: var(--accent-glow);
   text-decoration-thickness: 1.5px;
 }
 
-.md strong { font-weight: 700; color: var(--t1); letter-spacing: -0.005em; }
-.md em { font-style: italic; color: var(--t2); }
+.md strong {
+  font-weight: 700;
+  color: var(--t1);
+  letter-spacing: -0.005em;
+}
+.md em {
+  font-style: italic;
+  color: var(--t2);
+}
 
 /* Strikethrough — for "removed/deprecated" callouts in agent prose. */
-.md del, .md s {
+.md del,
+.md s {
   color: var(--t4);
   text-decoration-color: var(--t4);
 }
@@ -238,7 +316,9 @@ html, body, #root {
   color: var(--t3);
   font-style: italic;
 }
-.md blockquote p:last-child { margin-bottom: 0; }
+.md blockquote p:last-child {
+  margin-bottom: 0;
+}
 
 /* Horizontal rule — barely-there divider matching --b1. */
 .md hr {
@@ -295,8 +375,15 @@ html, body, #root {
   font-size: inherit;
   transition: all 120ms ease;
 }
-.md-code-copy:hover { color: var(--accent); background: var(--accent-soft); }
-.md-code-wrap .md-code { margin: 0; border: none; border-radius: 0; }
+.md-code-copy:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.md-code-wrap .md-code {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}
 
 /* ── Markdown tables ───────────────────────────────────── */
 
@@ -306,7 +393,10 @@ html, body, #root {
    tuned to sit on the --s1 code surface without fighting the accent.
    Base .hljs stays transparent so the .md-code surface shows through. */
 .md-code.hljs,
-.md-code .hljs { color: var(--t1); background: transparent; }
+.md-code .hljs {
+  color: var(--t1);
+  background: transparent;
+}
 
 /* highlight.js applies these classes at runtime, which is why they live in the
    global layer and why a static "is this class referenced?" sweep will always
@@ -314,36 +404,63 @@ html, body, #root {
    restored. Colors come from --syn-* (see themes/_base.scss) so the palette
    follows the active theme instead of being frozen to the original copper set. */
 .hljs-comment,
-.hljs-quote { color: var(--syn-comment); font-style: italic; }
+.hljs-quote {
+  color: var(--syn-comment);
+  font-style: italic;
+}
 .hljs-keyword,
 .hljs-selector-tag,
 .hljs-built_in,
 .hljs-name,
-.hljs-tag { color: var(--syn-keyword); }
+.hljs-tag {
+  color: var(--syn-keyword);
+}
 .hljs-string,
 .hljs-attr,
 .hljs-symbol,
 .hljs-bullet,
-.hljs-addition { color: var(--syn-string); }
+.hljs-addition {
+  color: var(--syn-string);
+}
 .hljs-number,
-.hljs-literal { color: var(--syn-number); }
+.hljs-literal {
+  color: var(--syn-number);
+}
 .hljs-title,
 .hljs-section,
-.hljs-title.function_ { color: var(--syn-title); }
+.hljs-title.function_ {
+  color: var(--syn-title);
+}
 .hljs-type,
 .hljs-title.class_,
-.hljs-params { color: var(--syn-type); }
+.hljs-params {
+  color: var(--syn-type);
+}
 .hljs-attribute,
 .hljs-variable,
-.hljs-template-variable { color: var(--syn-variable); }
+.hljs-template-variable {
+  color: var(--syn-variable);
+}
 .hljs-regexp,
-.hljs-link { color: var(--syn-regexp); }
-.hljs-meta { color: var(--syn-meta); }
-.hljs-deletion { color: var(--syn-deletion); }
+.hljs-link {
+  color: var(--syn-regexp);
+}
+.hljs-meta {
+  color: var(--syn-meta);
+}
+.hljs-deletion {
+  color: var(--syn-deletion);
+}
 .hljs-doctag,
-.hljs-formula { color: var(--syn-doctag); }
-.hljs-emphasis { font-style: italic; }
-.hljs-strong { font-weight: 700; }
+.hljs-formula {
+  color: var(--syn-doctag);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 700;
+}
 
 /* File-extension chip: small colored mono label like "TS", "MD", "PY". */
 
@@ -373,23 +490,48 @@ html, body, #root {
 /* ── Processing / thinking indicator ──────────────────────────── */
 
 @keyframes thinking-shimmer {
-  0% { background-position: 150% 0; }
-  100% { background-position: -150% 0; }
+  0% {
+    background-position: 150% 0;
+  }
+  100% {
+    background-position: -150% 0;
+  }
 }
 @keyframes thinking-bounce {
-  0%, 80%, 100% { transform: scale(0.5); opacity: 0.35; }
-  40% { transform: scale(1); opacity: 1; }
+  0%,
+  80%,
+  100% {
+    transform: scale(0.5);
+    opacity: 0.35;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  .thinking-shimmer { animation: none; }
-  .thinking-dots span { animation: none; opacity: 0.7; }
+  .thinking-shimmer {
+    animation: none;
+  }
+  .thinking-dots span {
+    animation: none;
+    opacity: 0.7;
+  }
 }
 
 /* Tighten card actions on narrower modals — stack instead of squashing. */
 @media (max-width: 520px) {
-  .market-card-actions { flex-wrap: wrap; }
-  .market-card-install-split { width: 100%; margin-left: 0; }
-  .market-card-install-split .split-main { flex: 1; justify-content: center; }
+  .market-card-actions {
+    flex-wrap: wrap;
+  }
+  .market-card-install-split {
+    width: 100%;
+    margin-left: 0;
+  }
+  .market-card-install-split .split-main {
+    flex: 1;
+    justify-content: center;
+  }
 }
 
 /* ── Plan-card buttons (shared with modal) ─────────────────── */
@@ -427,7 +569,6 @@ html, body, #root {
 /* ── Highlight click popover (read-only comment view) ─── */
 
 /* ── Editable highlight comment popover ──────────────────── */
-
 
 /* ── Sidebar comments list (whole-plan + inline) ─────────── */
 
@@ -476,8 +617,14 @@ html, body, #root {
 
 /* Hover preview tooltip on the highlight (driven by data-preview). */
 @keyframes plan-tooltip-in {
-  from { opacity: 0; transform: translateY(2px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* When a margin card is hovered/open, mirror that on its highlight. */
@@ -502,10 +649,18 @@ html, body, #root {
   line-height: 1.7;
   max-width: 760px;
 }
-.artifact-shell .plan-inline-md h1 { font-size: 22px; }
-.artifact-shell .plan-inline-md h2 { font-size: 17px; }
-.artifact-shell .plan-inline-md h3 { font-size: 15px; }
-.artifact-shell .plan-inline-doc { padding: 32px 36px; }
+.artifact-shell .plan-inline-md h1 {
+  font-size: 22px;
+}
+.artifact-shell .plan-inline-md h2 {
+  font-size: 17px;
+}
+.artifact-shell .plan-inline-md h3 {
+  font-size: 15px;
+}
+.artifact-shell .plan-inline-doc {
+  padding: 32px 36px;
+}
 
 /* ── Inline comment threads (hydrated into the doc body) ──── */
 
@@ -521,7 +676,7 @@ html, body, #root {
    and appends a numbered pin badge at the end of the line.
    The line gets a subtle accent rule, brightens on hover, and
    pulses when the user pins the thread open.
-   ──────────────────────────────────────────────────────────*/
+   ────────────────────────────────────────────────────────── */
 
 /* Commented-line highlights ride the "resolved/ok" green rather than the brand
    accent, so a comment marker never reads as a selection. Derived from --ok so
@@ -556,14 +711,20 @@ html, body, #root {
 }
 .plan-line-commented.plan-line-resolved {
   border-left-color: var(--t4);
-  background: rgba(125, 125, 140, 0.05);
+  background: rgb(125, 125, 140, 0.05);
 }
 
 /* Pulse when jumping from the sidebar list — pulls the eye to the line. */
 @keyframes plan-line-flash-kf {
-  0%   { background: var(--plan-accent-active); }
-  60%  { background: var(--plan-accent-hover); }
-  100% { background: var(--plan-accent-soft); }
+  0% {
+    background: var(--plan-accent-active);
+  }
+  60% {
+    background: var(--plan-accent-hover);
+  }
+  100% {
+    background: var(--plan-accent-soft);
+  }
 }
 .plan-line-commented.plan-line-flash {
   animation: plan-line-flash-kf var(--motion-flash) var(--ease-out);
@@ -575,7 +736,9 @@ html, body, #root {
 }
 .plan-line-commented.is-pinned .plan-line-pin {
   transform: scale(1.18);
-  box-shadow: 0 0 0 2px var(--s0), 0 0 0 4px var(--accent-mid);
+  box-shadow:
+    0 0 0 2px var(--s0),
+    0 0 0 4px var(--accent-mid);
 }
 
 /* Hover preview tooltip — small floating chip above the line. */
@@ -595,10 +758,10 @@ html, body, #root {
   font-weight: 400;
   line-height: 1.45;
   white-space: pre-wrap;
-  word-wrap: break-word;
+  overflow-wrap: break-word;
   z-index: 100;
   pointer-events: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 24px rgb(0, 0, 0, 0.5);
   animation: plan-tooltip-in var(--motion-enter) var(--ease-out);
 }
 /* Suppress the tooltip when the thread is already pinned open. */

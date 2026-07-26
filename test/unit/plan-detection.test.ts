@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   PlanInterceptor,
   looksLikePlanFile,
@@ -116,7 +116,9 @@ EOF`;
     const session = new Session();
     const p = new PlanInterceptor(session);
     expect(p.consume("Bash", "tu_bash_2", { command: "ls -la" })).toBe(false);
-    expect(session.timeline.filter((e) => e.kind === "plan_revision")).toHaveLength(0);
+    expect(
+      session.timeline.filter((e) => e.kind === "plan_revision")
+    ).toHaveLength(0);
   });
 });
 

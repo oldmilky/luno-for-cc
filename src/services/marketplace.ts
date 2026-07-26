@@ -139,7 +139,9 @@ export async function fetchSkillDetail(name: string): Promise<SkillDetail> {
   let content = "";
   if (skill.rawFileUrl) {
     try {
-      content = stripFrontmatter((await getRaw(skill.rawFileUrl)).toString("utf-8"));
+      content = stripFrontmatter(
+        (await getRaw(skill.rawFileUrl)).toString("utf-8")
+      );
     } catch {
       // Network/404 — fall through with empty content; caller shows description.
       content = "";
@@ -150,7 +152,9 @@ export async function fetchSkillDetail(name: string): Promise<SkillDetail> {
 
 /** Remove a leading YAML frontmatter block (`---\n…\n---`) for cleaner preview. */
 function stripFrontmatter(md: string): string {
-  const m = /^﻿?---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(md);
+  // \uFEFF is an optional leading BOM — written escaped because a literal
+  // one is invisible in an editor and reads as a stray character in a regex.
+  const m = /^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(md);
   return m ? md.slice(m[0].length).trimStart() : md;
 }
 
@@ -193,7 +197,8 @@ export async function installSkill(
       scope,
       installPath: "",
       filesWritten: 0,
-      error: "No workspace open — open a folder before installing for project scope."
+      error:
+        "No workspace open — open a folder before installing for project scope."
     };
   }
   if (!target.repoOwner || !target.repoName || !target.directoryPath) {
@@ -324,7 +329,12 @@ function getJson<T>(url: string): Promise<T> {
     const fetchOnce = (u: string, redirectsLeft: number) => {
       const req = https.get(u, { headers: COMMON_HEADERS }, (res) => {
         const status = res.statusCode ?? 0;
-        if (status >= 300 && status < 400 && res.headers.location && redirectsLeft > 0) {
+        if (
+          status >= 300 &&
+          status < 400 &&
+          res.headers.location &&
+          redirectsLeft > 0
+        ) {
           fetchOnce(res.headers.location, redirectsLeft - 1);
           res.resume();
           return;
@@ -360,7 +370,12 @@ function getRaw(url: string): Promise<Buffer> {
         { headers: { "User-Agent": "Luno-VSCode" } },
         (res) => {
           const status = res.statusCode ?? 0;
-          if (status >= 300 && status < 400 && res.headers.location && redirectsLeft > 0) {
+          if (
+            status >= 300 &&
+            status < 400 &&
+            res.headers.location &&
+            redirectsLeft > 0
+          ) {
             fetchOnce(res.headers.location, redirectsLeft - 1);
             res.resume();
             return;

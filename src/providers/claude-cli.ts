@@ -22,7 +22,10 @@ const HARD_TIMEOUT_MS = 10 * 60 * 1000;
  *  watchdog ends the turn cleanly rather than letting the UI spinner run until
  *  the 10-minute HARD_TIMEOUT_MS SIGKILL. Bash and other potentially
  *  long-running tools are deliberately NOT watched here. */
-const STALL_WATCHDOG_TOOLS: ReadonlySet<string> = new Set(["WebFetch", "WebSearch"]);
+const STALL_WATCHDOG_TOOLS: ReadonlySet<string> = new Set([
+  "WebFetch",
+  "WebSearch"
+]);
 
 /** Default budget for a watched tool to produce its result before it's treated
  *  as stalled. Generous enough for a slow-but-real fetch; far short of the
@@ -42,12 +45,7 @@ const PERMISSION_AUTO_ALLOW = new Set([
 /** Reversible file-mutation tools. "Allow edits for this turn" auto-approves
  *  ONLY these — never Bash, deletes, or network — so the destructive/network
  *  gate stays fully intact even after the user opts into auto-accepting edits. */
-const SAFE_EDIT_TOOLS = new Set([
-  "Edit",
-  "Write",
-  "MultiEdit",
-  "NotebookEdit"
-]);
+const SAFE_EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
 /** Read-only inspection tools. These never mutate the workspace, never reach
  *  the network, and never destroy data — they only observe. We always
@@ -55,13 +53,7 @@ const SAFE_EDIT_TOOLS = new Set([
  *  interrupting the user for an approval on every file read or search. The
  *  destructive/network gate below still runs first, so the (defensive) case of
  *  a same-named tool that somehow looks destructive/network still prompts. */
-const READ_ONLY_TOOLS = new Set([
-  "Read",
-  "Glob",
-  "Grep",
-  "LS",
-  "NotebookRead"
-]);
+const READ_ONLY_TOOLS = new Set(["Read", "Glob", "Grep", "LS", "NotebookRead"]);
 
 /** Bash prefixes routed to OUR classifier (decidePermission) instead of being
  *  auto-run by a project/user allowlist. Injected as `permissions.ask` rules
@@ -123,7 +115,13 @@ export function gitSubcommand(command: string): string | null {
   const gi = tokens.findIndex((t) => t === "git" || t.endsWith("/git"));
   if (gi === -1) return null;
   // Global flags that consume the following token as their value.
-  const valued = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
+  const valued = new Set([
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace"
+  ]);
   let i = gi + 1;
   while (i < tokens.length) {
     const t = tokens[i];
@@ -266,11 +264,15 @@ export class ClaudeCliProvider implements ChatProvider {
     // is at best a no-op and at worst sends an empty `updatedInput`, which
     // would make an "allow" silently run the tool with no arguments.
     if (!pending) {
-      console.log(`[luno] permission response for unknown id ${requestId} — ignored`);
+      console.log(
+        `[luno] permission response for unknown id ${requestId} — ignored`
+      );
       return;
     }
     this.pendingPermissions.delete(requestId);
-    console.log(`[luno] permission ${behavior} for ${pending.toolName} (${requestId})`);
+    console.log(
+      `[luno] permission ${behavior} for ${pending.toolName} (${requestId})`
+    );
     if (behavior === "allow") {
       this.writeControl({
         type: "control_response",
@@ -335,9 +337,13 @@ export class ClaudeCliProvider implements ChatProvider {
       return;
     }
     const toolName = req.tool_name ?? "tool";
-    const { action, destructive, network } = decidePermission(toolName, req.input, {
-      autoAllowEdits: this.autoAllowEdits
-    });
+    const { action, destructive, network } = decidePermission(
+      toolName,
+      req.input,
+      {
+        autoAllowEdits: this.autoAllowEdits
+      }
+    );
     if (action === "allow") {
       this.writeControl({
         type: "control_response",
@@ -412,7 +418,10 @@ export class ClaudeCliProvider implements ChatProvider {
     }
 
     const timeout = setTimeout(() => child.kill("SIGKILL"), HARD_TIMEOUT_MS);
-    const rl = readline.createInterface({ input: child.stdout!, crlfDelay: Infinity });
+    const rl = readline.createInterface({
+      input: child.stdout!,
+      crlfDelay: Infinity
+    });
     let stderrBuf = "";
     child.stderr!.on("data", (b: Buffer) => (stderrBuf += b.toString("utf8")));
 
@@ -484,7 +493,7 @@ export class ClaudeCliProvider implements ChatProvider {
     rl.on("line", (line) => {
       const trimmed = line.trim();
       if (!trimmed) return;
-      let ev: CliEvent | null = null;
+      let ev: CliEvent;
       try {
         ev = JSON.parse(trimmed) as CliEvent;
       } catch {
@@ -517,7 +526,9 @@ export class ClaudeCliProvider implements ChatProvider {
       clearTimeout(timeout);
       stallWatch?.clearAll();
       if (child.exitCode !== 0 && child.signalCode !== "SIGTERM") {
-        const msg = stderrBuf.trim() || `claude exited with code ${child.exitCode ?? "?"}`;
+        const msg =
+          stderrBuf.trim() ||
+          `claude exited with code ${child.exitCode ?? "?"}`;
         push({ type: "error", error: msg });
       }
       push({ type: "done" });
@@ -678,20 +689,14 @@ export function buildArgs(
       ...(opts.mcpServerNames ?? []).map((n) => `mcp__${n}`)
     ];
     args.push("--allowedTools", ...tools);
-  } else if (
-    opts.permissionMode === "default" &&
-    opts.mcpServerNames?.length
-  ) {
+  } else if (opts.permissionMode === "default" && opts.mcpServerNames?.length) {
     // Default mode otherwise gates every tool call behind an interactive
     // prompt the `-p` flow can't service — the agent ends up verbalizing
     // "I need permission" instead of actually invoking the tool. Connecting
     // an MCP server via the Connectors page is an explicit consent grant
     // (OAuth + click-through), so pre-allow that server's tools here.
     // Plan mode is intentionally not covered — it's read-only by design.
-    args.push(
-      "--allowedTools",
-      ...opts.mcpServerNames.map((n) => `mcp__${n}`)
-    );
+    args.push("--allowedTools", ...opts.mcpServerNames.map((n) => `mcp__${n}`));
   }
 
   // Skills the user has toggled off in the picker need to be *actually*
@@ -703,10 +708,7 @@ export function buildArgs(
   //      cover both the gate path and the model-decides path.
   const disabled = (opts.disabledSkills ?? []).filter((s) => s.length > 0);
   if (disabled.length > 0) {
-    args.push(
-      "--disallowedTools",
-      ...disabled.map((id) => `Skill(${id})`)
-    );
+    args.push("--disallowedTools", ...disabled.map((id) => `Skill(${id})`));
     const list = disabled.map((id) => `\`${id}\``).join(", ");
     args.push(
       "--append-system-prompt",
@@ -889,7 +891,8 @@ export function decidePermission(
   const destructive = isDestructiveRequest(toolName, input);
   const network = isNetworkRequest(toolName, input);
   if (!destructive && !network) {
-    if (PERMISSION_AUTO_ALLOW.has(toolName)) return { action: "allow", destructive, network };
+    if (PERMISSION_AUTO_ALLOW.has(toolName))
+      return { action: "allow", destructive, network };
     // Read-only inspection (file reads, globs, greps, read-only MCP queries)
     // never mutates state — always auto-allow so exploration never prompts.
     if (READ_ONLY_TOOLS.has(toolName) || isReadOnlyMcpTool(toolName)) {
@@ -933,16 +936,15 @@ export function regexToCliPatterns(p: string): string[] {
   // Expand `(a|b|c)` groups into the cartesian product of literal variants.
   let variants = [body];
   let guard = 0;
-  while (
-    variants.some((v) => /\([^()]*\|[^()]*\)/.test(v)) &&
-    guard++ < 24
-  ) {
+  while (variants.some((v) => /\([^()]*\|[^()]*\)/.test(v)) && guard++ < 24) {
     variants = variants.flatMap((v) => {
       const m = v.match(/\(([^()]*\|[^()]*)\)/);
       if (!m || m.index === undefined) return [v];
       return m[1]
         .split("|")
-        .map((opt) => v.slice(0, m.index) + opt + v.slice(m.index! + m[0].length));
+        .map(
+          (opt) => v.slice(0, m.index) + opt + v.slice(m.index! + m[0].length)
+        );
     });
   }
   return Array.from(new Set(variants.map((v) => v.trim()).filter(Boolean)));
@@ -967,8 +969,18 @@ export interface CliEvent {
     model?: string;
     content?: Array<
       | { type: "text"; text: string }
-      | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
-      | { type: "tool_result"; tool_use_id: string; content: unknown; is_error?: boolean }
+      | {
+          type: "tool_use";
+          id: string;
+          name: string;
+          input: Record<string, unknown>;
+        }
+      | {
+          type: "tool_result";
+          tool_use_id: string;
+          content: unknown;
+          is_error?: boolean;
+        }
     >;
     usage?: CliUsage;
   };
@@ -1063,7 +1075,10 @@ export function makeProcessor(setResume?: (id: string) => void): Processor {
           inner.delta.type === "input_json_delta" &&
           typeof inner.delta.partial_json === "string"
         ) {
-          out.push({ type: "tool_use_input", partialInput: inner.delta.partial_json });
+          out.push({
+            type: "tool_use_input",
+            partialInput: inner.delta.partial_json
+          });
         }
         return out;
       }
@@ -1113,13 +1128,13 @@ export function makeProcessor(setResume?: (id: string) => void): Processor {
             typeof block.content === "string"
               ? block.content
               : Array.isArray(block.content)
-              ? block.content
-                  .map((c: unknown) => {
-                    const cc = c as { type?: string; text?: string };
-                    return cc.type === "text" && cc.text ? cc.text : "";
-                  })
-                  .join("\n")
-              : JSON.stringify(block.content);
+                ? block.content
+                    .map((c: unknown) => {
+                      const cc = c as { type?: string; text?: string };
+                      return cc.type === "text" && cc.text ? cc.text : "";
+                    })
+                    .join("\n")
+                : JSON.stringify(block.content);
           out.push({
             type: "tool_result",
             toolUseId: block.tool_use_id,
@@ -1156,7 +1171,10 @@ export function makeProcessor(setResume?: (id: string) => void): Processor {
     }
 
     if (ev.type === "error") {
-      out.push({ type: "error", error: ev.error || "Claude CLI reported an error." });
+      out.push({
+        type: "error",
+        error: ev.error || "Claude CLI reported an error."
+      });
     }
 
     return out;

@@ -150,7 +150,7 @@ ol .slot {
   font-size: 11px;
   font-style: italic;
   line-height: 1.5;
-  word-wrap: break-word;
+  overflow-wrap: break-word;
 
   &::before {
     content: "“";
@@ -180,7 +180,7 @@ ol .slot {
   font-size: 12.5px;
   line-height: 1.55;
   white-space: pre-wrap;
-  word-wrap: break-word;
+  overflow-wrap: break-word;
   // EXPAND animates height; without this the text spills out of the
   // collapsing box instead of being wiped by it.
   overflow: hidden;
@@ -253,7 +253,7 @@ ol .slot {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 4px 0 0 0;
+  padding: 4px 0 0;
   border-top: 1px dashed var(--b1);
   // The list expands the first time a reply lands; clip it while it does.
   overflow: hidden;
@@ -295,7 +295,7 @@ ol .slot {
   font-size: 11.5px;
   line-height: 1.45;
   white-space: pre-wrap;
-  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 // ── Footer chip row ──────────────────────────────────────────

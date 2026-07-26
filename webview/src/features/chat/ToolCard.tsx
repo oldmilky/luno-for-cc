@@ -20,10 +20,22 @@ export interface ToolCardProps {
 
 type Status = "pending" | "ok" | "error";
 
-export function ToolCard({ name, input, result, isError, pending }: ToolCardProps) {
+export function ToolCard({
+  name,
+  input,
+  result,
+  isError,
+  pending
+}: ToolCardProps) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const status: Status = pending ? "pending" : isError ? "error" : result !== undefined ? "ok" : "pending";
+  const status: Status = pending
+    ? "pending"
+    : isError
+      ? "error"
+      : result !== undefined
+        ? "ok"
+        : "pending";
   const exitCode = extractExitCode(result);
   const isBash = /bash|run|shell|exec/i.test(name);
 
@@ -56,8 +68,16 @@ export function ToolCard({ name, input, result, isError, pending }: ToolCardProp
   const head = describe(name, input, result);
 
   return (
-    <div className={[s.tool, status === "error" ? s.error : ""].filter(Boolean).join(" ")}>
-      <button type="button" className={s.head} onClick={() => setOpen((o) => !o)}>
+    <div
+      className={[s.tool, status === "error" ? s.error : ""]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <button
+        type="button"
+        className={s.head}
+        onClick={() => setOpen((o) => !o)}
+      >
         <span className={s.verb}>{head.verb}</span>
         {head.badge ? (
           <span
@@ -81,7 +101,9 @@ export function ToolCard({ name, input, result, isError, pending }: ToolCardProp
           <span className={s.pill}>{head.count} results</span>
         )}
         {exitCode !== null && (
-          <span className={`${s.exit} ${exitCode === 0 ? s.exitOk : s.exitBad}`}>
+          <span
+            className={`${s.exit} ${exitCode === 0 ? s.exitOk : s.exitBad}`}
+          >
             exit {exitCode}
           </span>
         )}
@@ -112,14 +134,29 @@ export function ToolCard({ name, input, result, isError, pending }: ToolCardProp
             )}
             {result !== undefined &&
               (isBash ? (
-                <BashOutput result={result} isError={isError} onCopy={copyResult} copied={copied} />
+                <BashOutput
+                  result={result}
+                  isError={isError}
+                  onCopy={copyResult}
+                  copied={copied}
+                />
               ) : (
                 <Section
                   label={isError ? "Error" : "Output"}
                   error={isError}
                   action={
-                    <button type="button" className={s.copy} onClick={copyResult}>
-                      {copied ? <><Icon name="check" size={10} /> copied</> : "copy"}
+                    <button
+                      type="button"
+                      className={s.copy}
+                      onClick={copyResult}
+                    >
+                      {copied ? (
+                        <>
+                          <Icon name="check" size={10} /> copied
+                        </>
+                      ) : (
+                        "copy"
+                      )}
                     </button>
                   }
                 >
@@ -135,7 +172,16 @@ export function ToolCard({ name, input, result, isError, pending }: ToolCardProp
 
 function StatusGlyph({ status }: { status: Status }) {
   return (
-    <span className={[s.status, status === "pending" ? s.statusPending : status === "ok" ? s.statusOk : s.statusError].join(" ")}>
+    <span
+      className={[
+        s.status,
+        status === "pending"
+          ? s.statusPending
+          : status === "ok"
+            ? s.statusOk
+            : s.statusError
+      ].join(" ")}
+    >
       {status === "pending" && <span className={s.spinner} />}
       {status === "ok" && <Icon name="check" size={11} />}
       {status === "error" && <Icon name="x" size={11} />}
@@ -157,7 +203,13 @@ function Section({
   return (
     <div className={s.section}>
       <div className={s.sectionHead}>
-        <span className={[s.label, error ? s.labelErr : ""].filter(Boolean).join(" ")}>{label}</span>
+        <span
+          className={[s.label, error ? s.labelErr : ""]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          {label}
+        </span>
         {action}
       </div>
       {children}
@@ -181,7 +233,9 @@ function BashCommand({ input }: { input: string }) {
     <Section
       label="Command"
       action={
-        description ? <span className={s.bashDesc}>{description}</span> : undefined
+        description ? (
+          <span className={s.bashDesc}>{description}</span>
+        ) : undefined
       }
     >
       <pre className={`${s.pre} ${s.bashCmd}`}>{command}</pre>
@@ -205,7 +259,10 @@ function parseBashInput(raw: string): { command: string; description: string } {
     try {
       cmd = JSON.parse('"' + cmd + '"');
     } catch {
-      cmd = cmd.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+      cmd = cmd
+        .replace(/\\n/g, "\n")
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, "\\");
     }
     return { command: cmd, description: "" };
   }
@@ -227,11 +284,19 @@ function BashOutput({ result, isError, onCopy, copied }: BashOutputProps) {
           label="Output"
           action={
             <button type="button" className={s.copy} onClick={onCopy}>
-              {copied ? <><Icon name="check" size={10} /> copied</> : "copy"}
+              {copied ? (
+                <>
+                  <Icon name="check" size={10} /> copied
+                </>
+              ) : (
+                "copy"
+              )}
             </button>
           }
         >
-          <pre className={`${s.pre} ${s.stdout}`}>{truncate(stripAnsi(parsed.stdout), 8000)}</pre>
+          <pre className={`${s.pre} ${s.stdout}`}>
+            {truncate(stripAnsi(parsed.stdout), 8000)}
+          </pre>
         </Section>
       )}
       {parsed.stdout === "(no output)" && !parsed.stderr && (
@@ -241,12 +306,16 @@ function BashOutput({ result, isError, onCopy, copied }: BashOutputProps) {
       )}
       {parsed.stderr && (
         <Section label="Stderr" error>
-          <pre className={`${s.pre} ${s.stderr}`}>{truncate(stripAnsi(parsed.stderr), 4000)}</pre>
+          <pre className={`${s.pre} ${s.stderr}`}>
+            {truncate(stripAnsi(parsed.stderr), 4000)}
+          </pre>
         </Section>
       )}
       {isError && parsed.errorMsg && !parsed.stdout && !parsed.stderr && (
         <Section label="Error" error>
-          <pre className={`${s.pre} ${s.stderr}`}>{truncate(parsed.errorMsg, 4000)}</pre>
+          <pre className={`${s.pre} ${s.stderr}`}>
+            {truncate(parsed.errorMsg, 4000)}
+          </pre>
         </Section>
       )}
     </>
@@ -282,7 +351,11 @@ interface FileBadge {
   color?: string;
 }
 
-function describe(name: string, rawInput: string, result?: string): RowDescription {
+function describe(
+  name: string,
+  rawInput: string,
+  result?: string
+): RowDescription {
   const n = name.toLowerCase();
   const obj = safeParse(rawInput);
 
@@ -320,7 +393,9 @@ function describe(name: string, rawInput: string, result?: string): RowDescripti
       verb: "Updated",
       badge: null,
       target: "todos",
-      meta: todos.length ? `${todos.length} item${todos.length === 1 ? "" : "s"}` : undefined
+      meta: todos.length
+        ? `${todos.length} item${todos.length === 1 ? "" : "s"}`
+        : undefined
     };
   }
 
@@ -338,17 +413,30 @@ function describe(name: string, rawInput: string, result?: string): RowDescripti
     const start = Number(obj?.offset ?? obj?.start_line ?? obj?.startLine);
     const limit = Number(obj?.limit ?? obj?.lines);
     const meta = lineRange(start, limit);
-    return { verb: "Analyzed", badge: badgeForPath(path), target: homeShort(path), meta };
+    return {
+      verb: "Analyzed",
+      badge: badgeForPath(path),
+      target: homeShort(path),
+      meta
+    };
   }
 
   if (/write|create/.test(n)) {
     const path = String(obj?.path ?? obj?.file_path ?? obj?.filePath ?? "");
-    return { verb: "Wrote", badge: badgeForPath(path), target: homeShort(path) };
+    return {
+      verb: "Wrote",
+      badge: badgeForPath(path),
+      target: homeShort(path)
+    };
   }
 
   if (/edit|replace|patch/.test(n)) {
     const path = String(obj?.path ?? obj?.file_path ?? obj?.filePath ?? "");
-    return { verb: "Edited", badge: badgeForPath(path), target: homeShort(path) };
+    return {
+      verb: "Edited",
+      badge: badgeForPath(path),
+      target: homeShort(path)
+    };
   }
 
   // Generic fallback: just show the tool name + first input value.
@@ -389,8 +477,10 @@ function parseSearchCount(result?: string): number | undefined {
 }
 
 const EXT_COLORS: Record<string, string> = {
-  ts: "#3b82f6", tsx: "#3b82f6",
-  js: "#eab308", jsx: "#eab308",
+  ts: "#3b82f6",
+  tsx: "#3b82f6",
+  js: "#eab308",
+  jsx: "#eab308",
   py: "#22c55e",
   rs: "#f97316",
   go: "#06b6d4",
@@ -398,11 +488,15 @@ const EXT_COLORS: Record<string, string> = {
   md: "#60a5fa",
   css: "#ec4899",
   html: "#ef4444",
-  c: "#60a5fa", h: "#60a5fa", cpp: "#60a5fa", hpp: "#60a5fa",
+  c: "#60a5fa",
+  h: "#60a5fa",
+  cpp: "#60a5fa",
+  hpp: "#60a5fa",
   java: "#f97316",
   rb: "#ef4444",
   sh: "#a3a3a3",
-  yml: "#a3a3a3", yaml: "#a3a3a3",
+  yml: "#a3a3a3",
+  yaml: "#a3a3a3",
   toml: "#a3a3a3",
   sql: "#06b6d4"
 };
@@ -445,12 +539,14 @@ function parseBashResult(result: string): ParsedBash {
       let stderr: string | null = null;
       if (siStdout !== -1) {
         const start = siStdout + stdoutTag.length;
-        const end = siStderr !== -1 && siStderr > siStdout ? siStderr : body.length;
+        const end =
+          siStderr !== -1 && siStderr > siStdout ? siStderr : body.length;
         stdout = body.slice(start, end).trimEnd();
       }
       if (siStderr !== -1) {
         const start = siStderr + stderrTag.length;
-        const end = siStdout !== -1 && siStdout > siStderr ? siStdout : body.length;
+        const end =
+          siStdout !== -1 && siStdout > siStderr ? siStdout : body.length;
         stderr = body.slice(start, end).trimEnd();
       }
       return { stdout, stderr, errorMsg: null };
@@ -470,8 +566,13 @@ function parseBashResult(result: string): ParsedBash {
   return { stdout: result, stderr: null, errorMsg: null };
 }
 
-// eslint-disable-next-line no-control-regex
-const ANSI_RE = /\x1b\[[0-9;]*[mGKHFJsu]|\x1b\][^\x07]*(\x07|\x1b\\)|\x1b[()][AB012]|\r/g;
+const ANSI_RE =
+  // Control characters are the point: this strips terminal escape sequences
+  // out of captured stdout. The disable has to sit on the regex's own line —
+  // prettier wraps the declaration, and a comment above `const` would apply
+  // to the wrong one.
+  // eslint-disable-next-line no-control-regex
+  /\x1b\[[0-9;]*[mGKHFJsu]|\x1b\][^\x07]*(\x07|\x1b\\)|\x1b[()][AB012]|\r/g;
 const stripAnsi = (s: string): string => s.replace(ANSI_RE, "");
 
 function pretty(raw: string): string {
@@ -483,5 +584,7 @@ function pretty(raw: string): string {
 }
 
 function truncate(s: string, n: number): string {
-  return s.length > n ? s.slice(0, n) + `\n… [truncated ${s.length - n} chars]` : s;
+  return s.length > n
+    ? s.slice(0, n) + `\n… [truncated ${s.length - n} chars]`
+    : s;
 }

@@ -543,7 +543,10 @@ function serialize(container: HTMLElement): string {
 
   function walk(node: Node) {
     if (node.nodeType === Node.TEXT_NODE) {
-      const t = (node.textContent ?? "").replace(/​/g, "");
+      // \u200B is a zero-width space; contenteditable sprays them in on paste
+      // and they survive into the value. Escaped, not literal — a literal one
+      // is invisible here and looks like an empty character class.
+      const t = (node.textContent ?? "").replace(/\u200B/g, "");
       if (t) out.push(t);
       return;
     }
@@ -622,7 +625,11 @@ function serialize(container: HTMLElement): string {
 function insertParsedAtSelection(container: HTMLElement, text: string): void {
   const sel = window.getSelection();
   let range: Range;
-  if (sel && sel.rangeCount > 0 && container.contains(sel.anchorNode as Node | null)) {
+  if (
+    sel &&
+    sel.rangeCount > 0 &&
+    container.contains(sel.anchorNode as Node | null)
+  ) {
     range = sel.getRangeAt(0);
     range.deleteContents();
   } else {
@@ -842,7 +849,7 @@ function handleBackspaceAtBoundary(container: HTMLElement | null): boolean {
   const offset = range.startOffset;
 
   // Walk back over an optional space/zero-width char then look for a badge.
-  let prev: ChildNode | null = null;
+  let prev: ChildNode | null;
 
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent ?? "";

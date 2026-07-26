@@ -143,7 +143,8 @@ const managedToolCache = new Map<
  * refreshClaudeCodeStatus(); read synchronously by listConnectors so a server
  * authorized via Claude Code's `/mcp` shows as connected here.
  */
-let cliStatusCache: { servers: CliMcpServer[]; fetchedAt: number } | null = null;
+let cliStatusCache: { servers: CliMcpServer[]; fetchedAt: number } | null =
+  null;
 const CLI_STATUS_TTL_MS = 45_000;
 
 /**
@@ -166,7 +167,10 @@ export async function refreshClaudeCodeStatus(
   }
   const parseInto = (stdout: unknown) => {
     if (typeof stdout === "string" && stdout) {
-      cliStatusCache = { servers: parseClaudeMcpList(stdout), fetchedAt: Date.now() };
+      cliStatusCache = {
+        servers: parseClaudeMcpList(stdout),
+        fetchedAt: Date.now()
+      };
     }
   };
   try {
@@ -206,7 +210,7 @@ function listManagedViews(): ConnectorView[] {
       // Show the real endpoint host (or "local") as the vendor so the subtitle
       // doesn't read "Claude Code · Claude Code · …"; the managed pill already
       // carries the "Claude Code · <scope>" label.
-      vendor: s.transport === "stdio" ? "local" : hostOf(s.url) ?? "remote",
+      vendor: s.transport === "stdio" ? "local" : (hostOf(s.url) ?? "remote"),
       description:
         s.transport === "stdio"
           ? `Local command managed by Claude Code (${s.scope} scope).`
@@ -222,7 +226,8 @@ function listManagedViews(): ConnectorView[] {
       toolCount: cached?.tools.length ?? 0,
       tools: cached?.tools,
       lastError: cached?.error,
-      command: s.transport === "stdio" ? commandLine(s.command, s.args) : undefined,
+      command:
+        s.transport === "stdio" ? commandLine(s.command, s.args) : undefined,
       managed: true,
       scope: s.scope
     };
@@ -266,7 +271,7 @@ function toView(
       ? "connected"
       : c.requiresClaudeCodeAuth && rec?.status === "error"
         ? "disconnected"
-        : rec?.status ?? "disconnected",
+        : (rec?.status ?? "disconnected"),
     connectedAt: rec?.connectedAt,
     toolCount: rec?.tools?.length ?? 0,
     tools: rec?.tools,
@@ -287,7 +292,8 @@ function customAsCatalog(c: CustomConnector): CatalogEntry {
       id: c.id,
       name: c.name,
       vendor: "local",
-      description: c.description ?? `Local MCP server: ${commandLine(c.command, c.args)}`,
+      description:
+        c.description ?? `Local MCP server: ${commandLine(c.command, c.args)}`,
       transport: "stdio",
       categories: ["custom", "local"],
       icon: "terminal",
@@ -362,11 +368,17 @@ async function addCustomRemote(
   } catch {
     throw new Error("URL is not valid.");
   }
-  if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
+  if (
+    parsed.protocol !== "https:" &&
+    parsed.hostname !== "localhost" &&
+    parsed.hostname !== "127.0.0.1"
+  ) {
     throw new Error("MCP server URLs must use HTTPS (except localhost).");
   }
 
-  const transport: McpTransport = /sse$/i.test(parsed.pathname) ? "sse" : "streamable-http";
+  const transport: McpTransport = /sse$/i.test(parsed.pathname)
+    ? "sse"
+    : "streamable-http";
   // Fix (#6): fold the *full* URL (path included) into the id. The previous
   // `slugify(name)-<host>` ignored the path, so `…/mcp` and `…/sse` on the
   // same host collided and the second save silently overwrote the first.
@@ -397,7 +409,8 @@ async function addCustomStdio(
   draft: CustomDraft
 ): Promise<ConnectorView> {
   const command = (draft.command ?? "").trim();
-  if (!command) throw new Error("Command is required for a local (stdio) server.");
+  if (!command)
+    throw new Error("Command is required for a local (stdio) server.");
   const args = (draft.args ?? []).map((a) => a.trim()).filter(Boolean);
   const env =
     draft.env && Object.keys(draft.env).length ? draft.env : undefined;
@@ -433,7 +446,11 @@ async function addCustomStdio(
  * the same id and overwrite each other (audit finding #6).
  */
 export function deriveConnectorId(name: string, discriminator: string): string {
-  const hash = crypto.createHash("sha256").update(discriminator).digest("hex").slice(0, 8);
+  const hash = crypto
+    .createHash("sha256")
+    .update(discriminator)
+    .digest("hex")
+    .slice(0, 8);
   return `${slugify(name)}-${hash}`;
 }
 
@@ -520,21 +537,32 @@ const MANAGED_TTL_MS = 60_000;
  * a server that fails to handshake caches its error instead of throwing.
  * Skips servers fetched within the last minute unless `force` is set.
  */
-export async function refreshManagedConnectors(opts?: { force?: boolean }): Promise<void> {
+export async function refreshManagedConnectors(opts?: {
+  force?: boolean;
+}): Promise<void> {
   const cwd = vscode.workspace?.workspaceFolders?.[0]?.uri?.fsPath;
   const servers = loadManagedServers(cwd);
   await Promise.allSettled(
     servers.map(async (s) => {
       const id = managedId(s.scope, s.name);
       const cached = managedToolCache.get(id);
-      if (!opts?.force && cached && !cached.error && Date.now() - cached.fetchedAt < MANAGED_TTL_MS) {
+      if (
+        !opts?.force &&
+        cached &&
+        !cached.error &&
+        Date.now() - cached.fetchedAt < MANAGED_TTL_MS
+      ) {
         return;
       }
       try {
         const tools = await fetchManagedTools(s);
         managedToolCache.set(id, { tools, fetchedAt: Date.now() });
       } catch (err) {
-        managedToolCache.set(id, { tools: [], error: errMsg(err), fetchedAt: Date.now() });
+        managedToolCache.set(id, {
+          tools: [],
+          error: errMsg(err),
+          fetchedAt: Date.now()
+        });
       }
     })
   );
@@ -543,22 +571,34 @@ export async function refreshManagedConnectors(opts?: { force?: boolean }): Prom
 /** (Re)fetch one managed server's tools on demand (the card's Refresh button). */
 async function connectManaged(id: string): Promise<ConnectorView> {
   const cwd = vscode.workspace?.workspaceFolders?.[0]?.uri?.fsPath;
-  const server = loadManagedServers(cwd).find((s) => managedId(s.scope, s.name) === id);
-  if (!server) throw new Error(`No Claude Code server "${id}". It may have been removed from your config.`);
+  const server = loadManagedServers(cwd).find(
+    (s) => managedId(s.scope, s.name) === id
+  );
+  if (!server)
+    throw new Error(
+      `No Claude Code server "${id}". It may have been removed from your config.`
+    );
   try {
     const tools = await fetchManagedTools(server);
     managedToolCache.set(id, { tools, fetchedAt: Date.now() });
   } catch (err) {
-    managedToolCache.set(id, { tools: [], error: errMsg(err), fetchedAt: Date.now() });
+    managedToolCache.set(id, {
+      tools: [],
+      error: errMsg(err),
+      fetchedAt: Date.now()
+    });
     throw err;
   }
   return listManagedViews().find((v) => v.id === id)!;
 }
 
 /** Handshake a managed server (remote via stored headers, or local stdio). */
-async function fetchManagedTools(server: ManagedServer): Promise<ConnectorTool[]> {
+async function fetchManagedTools(
+  server: ManagedServer
+): Promise<ConnectorTool[]> {
   if (server.transport === "stdio") {
-    if (!server.command) throw new Error("Managed stdio server has no command.");
+    if (!server.command)
+      throw new Error("Managed stdio server has no command.");
     const client = new StdioMcpClient({
       command: server.command,
       args: server.args,
@@ -603,11 +643,16 @@ export async function removeManaged(
   const parsed = parseManagedId(id);
   if (!parsed) throw new Error(`Not a Claude Code server id: "${id}".`);
   try {
-    await execFileAsync(binary, ["mcp", "remove", parsed.name, "-s", parsed.scope], { cwd });
+    await execFileAsync(
+      binary,
+      ["mcp", "remove", parsed.name, "-s", parsed.scope],
+      { cwd }
+    );
   } catch (err) {
     const e = err as { stderr?: string; message?: string };
     throw new Error(
-      `Couldn't remove "${parsed.name}" (${parsed.scope}): ${(e.stderr || e.message || String(err)).trim()}`
+      `Couldn't remove "${parsed.name}" (${parsed.scope}): ${(e.stderr || e.message || String(err)).trim()}`,
+      { cause: err }
     );
   }
   managedToolCache.delete(id);
@@ -632,7 +677,7 @@ async function connectStdio(
     timeoutMs: 90_000
   });
 
-  let tools: ConnectorTool[] = [];
+  let tools: ConnectorTool[];
   try {
     const handshake = await client.connectAndList();
     tools = handshake.tools;
@@ -732,7 +777,7 @@ async function connectRemote(
     accessToken: tokens.accessToken
   });
 
-  let tools: ConnectorTool[] = [];
+  let tools: ConnectorTool[];
   try {
     const handshake = await client.connectAndList();
     tools = handshake.tools;
@@ -801,19 +846,30 @@ export async function callTool(
       const res = await stdio.callTool(toolName, args);
       return { ok: true, content: res.content };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err)
+      };
     }
   }
 
   const conns = loadConnections(ctx);
   const rec = conns[id];
-  let { accessToken, refreshToken, clientSecret } = await loadTokens(ctx, id);
+  const stored = await loadTokens(ctx, id);
+  const { clientSecret } = stored;
+  let { accessToken, refreshToken } = stored;
 
   if (!accessToken) return { ok: false, error: "Not connected." };
   if (!config.url) return { ok: false, error: "No URL configured." };
 
   // Best-effort refresh if the token is known to be expired.
-  if (rec?.expiresAt && Date.now() > rec.expiresAt - 30_000 && refreshToken && rec.tokenEndpoint && rec.registeredClientId) {
+  if (
+    rec?.expiresAt &&
+    Date.now() > rec.expiresAt - 30_000 &&
+    refreshToken &&
+    rec.tokenEndpoint &&
+    rec.registeredClientId
+  ) {
     try {
       const refreshed = await refreshAccessToken({
         tokenEndpoint: rec.tokenEndpoint,
@@ -827,7 +883,10 @@ export async function callTool(
         accessToken,
         refreshToken
       });
-      await setConnectionRecord(ctx, { ...rec, expiresAt: refreshed.expiresAt });
+      await setConnectionRecord(ctx, {
+        ...rec,
+        expiresAt: refreshed.expiresAt
+      });
     } catch {
       // Fall through and try the call anyway — the server will 401 and we'll error out.
     }
@@ -844,7 +903,10 @@ export async function callTool(
     const res = await client.callTool(toolName, args);
     return { ok: true, content: res.content };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err)
+    };
   }
 }
 
@@ -866,11 +928,13 @@ function resolveConfig(
 }
 
 export function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 24) || "connector";
+  return (
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 24) || "connector"
+  );
 }
 
 export type { ConnectorTool } from "./storage.js";
@@ -899,7 +963,12 @@ export { OAuthCancelled } from "./oauth.js";
 /** A single server entry in the CLI's `mcpServers` map. */
 export type CliServerEntry =
   | { type: "http" | "sse"; url: string; headers: Record<string, string> }
-  | { type: "stdio"; command: string; args?: string[]; env?: Record<string, string> };
+  | {
+      type: "stdio";
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+    };
 
 export interface CliMcpConfig {
   /** Absolute path to the JSON config; pass via `--mcp-config`. Undefined when
@@ -992,7 +1061,11 @@ export async function writeCliMcpConfig(
   // dedupe: the same name can appear at multiple scopes (e.g. figma at user +
   // local) but the CLI exposes one `mcp__<name>` namespace either way.
   const serverNames = [
-    ...new Set([...own.map((o) => o.name), ...managedNames, ...cliConnectedNames])
+    ...new Set([
+      ...own.map((o) => o.name),
+      ...managedNames,
+      ...cliConnectedNames
+    ])
   ];
 
   if (own.length === 0) {

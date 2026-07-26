@@ -29,7 +29,10 @@ export interface OrchestratorOpts {
 export class Orchestrator {
   cancelled = false;
 
-  constructor(private session: Session, private o: OrchestratorOpts) {}
+  constructor(
+    private session: Session,
+    private o: OrchestratorOpts
+  ) {}
 
   cancel() {
     this.cancelled = true;
@@ -50,7 +53,8 @@ export class Orchestrator {
     };
 
     const blocks: ContentBlock[] = [];
-    let currentTool: { id: string; name: string; inputBuf: string } | null = null;
+    let currentTool: { id: string; name: string; inputBuf: string } | null =
+      null;
     const seenAssistantBlockIds = new Set<string>();
     const planIntercept = new PlanInterceptor(this.session);
     let textBuf = "";
@@ -58,7 +62,11 @@ export class Orchestrator {
     const flushText = () => {
       if (!textBuf) return;
       blocks.push({ type: "text", text: textBuf });
-      this.session.emit({ kind: "assistant", title: "Assistant", body: textBuf });
+      this.session.emit({
+        kind: "assistant",
+        title: "Assistant",
+        body: textBuf
+      });
       textBuf = "";
     };
 
@@ -71,16 +79,22 @@ export class Orchestrator {
           break;
         case "tool_use_start":
           flushText();
-          currentTool = { id: delta.tool!.id, name: delta.tool!.name, inputBuf: "" };
+          currentTool = {
+            id: delta.tool!.id,
+            name: delta.tool!.name,
+            inputBuf: ""
+          };
           break;
         case "tool_use_input":
           if (currentTool) currentTool.inputBuf += delta.partialInput ?? "";
           break;
         case "tool_use_end":
           if (currentTool) {
-            let input: Record<string, unknown> = {};
+            let input: Record<string, unknown>;
             try {
-              input = currentTool.inputBuf ? JSON.parse(currentTool.inputBuf) : {};
+              input = currentTool.inputBuf
+                ? JSON.parse(currentTool.inputBuf)
+                : {};
             } catch {
               input = {};
             }
@@ -99,7 +113,11 @@ export class Orchestrator {
             );
             if (!intercepted && !seenAssistantBlockIds.has(currentTool.id)) {
               seenAssistantBlockIds.add(currentTool.id);
-              this.session.emitToolCall(currentTool.id, currentTool.name, input);
+              this.session.emitToolCall(
+                currentTool.id,
+                currentTool.name,
+                input
+              );
             }
             currentTool = null;
           }

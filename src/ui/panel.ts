@@ -156,10 +156,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       }
       // Mirror plan changes into editor decorations so comments + active
       // step are visible inline next to the source.
-      if (
-        e.kind === "plan_revision" ||
-        e.kind === "plan_comment"
-      ) {
+      if (e.kind === "plan_revision" || e.kind === "plan_comment") {
         this.decorations.syncFromTimeline(this.session.timeline);
       }
       this.scheduleSave();
@@ -193,7 +190,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * restore it. This fires synchronously before the tool actually runs (we
    * see the tool_call event right before fs.writeFile / CLI Write executes).
    */
-  private trackFileForCheckpoint(e: { kind: string; body?: string; meta?: Record<string, unknown> }) {
+  private trackFileForCheckpoint(e: {
+    kind: string;
+    body?: string;
+    meta?: Record<string, unknown>;
+  }) {
     if (!this.checkpoints) return;
     if (e.kind !== "tool_call") return;
     let input: Record<string, unknown>;
@@ -206,7 +207,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (!rel) return;
     const name = String(e.meta?.name ?? "").toLowerCase();
     // Claude CLI's Write / Edit / MultiEdit / NotebookEdit / Update tools.
-    if (/^(write|edit|multiedit|notebookedit|update|create|str_replace_editor)/.test(name)) {
+    if (
+      /^(write|edit|multiedit|notebookedit|update|create|str_replace_editor)/.test(
+        name
+      )
+    ) {
       void this.checkpoints.addFileToLatest(rel);
     }
   }
@@ -221,7 +226,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.view = view;
     view.webview.options = {
       enableScripts: true,
-      localResourceRoots: [vscode.Uri.joinPath(this.ctx.extensionUri, "webview", "dist")]
+      localResourceRoots: [
+        vscode.Uri.joinPath(this.ctx.extensionUri, "webview", "dist")
+      ]
     };
     view.webview.html = this.html(view.webview);
 
@@ -299,7 +306,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
       this.session = new Session(stored.title);
       Object.defineProperty(this.session, "id", { value: stored.id });
-      Object.defineProperty(this.session, "createdAt", { value: stored.createdAt });
+      Object.defineProperty(this.session, "createdAt", {
+        value: stored.createdAt
+      });
       this.session.messages = stored.messages;
       this.session.timeline = stored.timeline;
       this.session.title = stored.title;
@@ -634,7 +643,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       );
       return;
     }
-    const revisionId = (latest.meta as { revisionId?: string }).revisionId ?? "";
+    const revisionId =
+      (latest.meta as { revisionId?: string }).revisionId ?? "";
     const quote = ed.document.getText(sel);
     void vscode.window
       .showInputBox({
@@ -674,7 +684,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private replayTimeline() {
-    for (const e of this.session.timeline) this.post({ type: "timeline", event: e });
+    for (const e of this.session.timeline)
+      this.post({ type: "timeline", event: e });
     this.decorations.syncFromTimeline(this.session.timeline);
   }
 
@@ -721,7 +732,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.broadcastAuthState();
         break;
       case "openExternal":
-        if (typeof msg.url === "string") await vscode.env.openExternal(vscode.Uri.parse(msg.url));
+        if (typeof msg.url === "string")
+          await vscode.env.openExternal(vscode.Uri.parse(msg.url));
         break;
       case "openFile":
         if (typeof msg.path === "string") {
@@ -779,7 +791,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (typeof msg.mode === "string") {
           await vscode.workspace
             .getConfiguration("luno")
-            .update("permissionMode", msg.mode, vscode.ConfigurationTarget.Global);
+            .update(
+              "permissionMode",
+              msg.mode,
+              vscode.ConfigurationTarget.Global
+            );
           await this.broadcastAuthState();
         }
         break;
@@ -795,7 +811,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (typeof msg.thinking === "boolean") {
           await vscode.workspace
             .getConfiguration("luno")
-            .update("thinking", msg.thinking, vscode.ConfigurationTarget.Global);
+            .update(
+              "thinking",
+              msg.thinking,
+              vscode.ConfigurationTarget.Global
+            );
           await this.broadcastAuthState();
         }
         break;
@@ -929,11 +949,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           typeof msg.startLine === "number" &&
           typeof msg.endLine === "number"
         ) {
-          await this.handlePlanOpenFileRef(msg.path, msg.startLine, msg.endLine);
+          await this.handlePlanOpenFileRef(
+            msg.path,
+            msg.startLine,
+            msg.endLine
+          );
         }
         break;
       case "planAcceptStep":
-        if (typeof msg.revisionId === "string" && typeof msg.taskId === "string") {
+        if (
+          typeof msg.revisionId === "string" &&
+          typeof msg.taskId === "string"
+        ) {
           await this.handlePlanAcceptStep(msg.revisionId, msg.taskId);
         }
         break;
@@ -951,7 +978,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
         break;
       case "planSkipStep":
-        if (typeof msg.revisionId === "string" && typeof msg.taskId === "string") {
+        if (
+          typeof msg.revisionId === "string" &&
+          typeof msg.taskId === "string"
+        ) {
           this.handlePlanSkipStep(msg.revisionId, msg.taskId);
         }
         break;
@@ -1105,10 +1135,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   /** Connect a local API-token preset (e.g. Figma's figma-developer-mcp): store
    *  the token in SecretStorage and spawn the server — no OAuth, fully local. */
-  private async handleConnectorConnectWithApiKey(id: string, apiKey: string): Promise<void> {
+  private async handleConnectorConnectWithApiKey(
+    id: string,
+    apiKey: string
+  ): Promise<void> {
     try {
       const connector = await mcpConnectWithApiKey(this.ctx, id, apiKey);
-      this.post({ type: "connectorResult", action: "connect", id, ok: true, connector });
+      this.post({
+        type: "connectorResult",
+        action: "connect",
+        id,
+        ok: true,
+        connector
+      });
     } catch (err) {
       this.post({
         type: "connectorResult",
@@ -1124,7 +1163,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private async handleConnectorConnect(id: string): Promise<void> {
     try {
       const connector = await mcpConnect(this.ctx, id);
-      this.post({ type: "connectorResult", action: "connect", id, ok: true, connector });
+      this.post({
+        type: "connectorResult",
+        action: "connect",
+        id,
+        ok: true,
+        connector
+      });
     } catch (err) {
       // Cancellation isn't an "error" the user needs to see in red — flag
       // it so the webview can clear the spinner without showing a toast.
@@ -1157,7 +1202,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private async handleConnectorDisconnect(id: string): Promise<void> {
     try {
       await mcpDisconnect(this.ctx, id);
-      this.post({ type: "connectorResult", action: "disconnect", id, ok: true });
+      this.post({
+        type: "connectorResult",
+        action: "disconnect",
+        id,
+        ok: true
+      });
     } catch (err) {
       this.post({
         type: "connectorResult",
@@ -1232,7 +1282,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     } catch {
       // best-effort
     }
-    const existing = vscode.window.terminals.find((t) => t.name === "Luno Setup");
+    const existing = vscode.window.terminals.find(
+      (t) => t.name === "Luno Setup"
+    );
     existing?.dispose();
     const term = vscode.window.createTerminal({ name: "Luno Setup" });
     term.show(true);
@@ -1379,7 +1431,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     return this.session.timeline.find(
       (e) =>
         e.kind === "plan_revision" &&
-        (e.meta as { revisionId?: string } | undefined)?.revisionId === revisionId
+        (e.meta as { revisionId?: string } | undefined)?.revisionId ===
+          revisionId
     );
   }
 
@@ -1443,8 +1496,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     const parent = this.findCommentEvent(parentCommentId);
     const parentMeta = parent?.meta as
-      | { taskId?: string; quote?: string }
-      | undefined;
+      { taskId?: string; quote?: string } | undefined;
     this.session.emitPlanComment({
       commentId: makeNonce().slice(0, 8),
       revisionId,
@@ -1554,7 +1606,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       this.post({ type: "revertResult", path: pathOrRel, ok: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.post({ type: "revertResult", path: pathOrRel, ok: false, error: msg });
+      this.post({
+        type: "revertResult",
+        path: pathOrRel,
+        ok: false,
+        error: msg
+      });
     }
   }
 
@@ -1585,7 +1642,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       if (startLine > 0) {
         const start = new vscode.Position(Math.max(0, startLine - 1), 0);
         const endIdx = Math.max(start.line, (endLine || startLine) - 1);
-        const lineLen = doc.lineAt(Math.min(endIdx, doc.lineCount - 1)).text.length;
+        const lineLen = doc.lineAt(Math.min(endIdx, doc.lineCount - 1)).text
+          .length;
         options.selection = new vscode.Range(
           start,
           new vscode.Position(endIdx, lineLen)
@@ -1594,7 +1652,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       await vscode.window.showTextDocument(doc, options);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.post({ type: "error", message: `Could not open ${pathOrRel}: ${msg}` });
+      this.post({
+        type: "error",
+        message: `Could not open ${pathOrRel}: ${msg}`
+      });
     }
   }
 
@@ -1605,7 +1666,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   ) {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!root) {
-      this.post({ type: "error", message: "Open a workspace folder to navigate plan steps." });
+      this.post({
+        type: "error",
+        message: "Open a workspace folder to navigate plan steps."
+      });
       return;
     }
     const target = vscode.Uri.joinPath(root, relPath);
@@ -1613,7 +1677,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const doc = await vscode.workspace.openTextDocument(target);
       const start = new vscode.Position(Math.max(0, startLine - 1), 0);
       const endLineIdx = Math.max(start.line, endLine - 1);
-      const lineLen = doc.lineAt(Math.min(endLineIdx, doc.lineCount - 1)).text.length;
+      const lineLen = doc.lineAt(Math.min(endLineIdx, doc.lineCount - 1)).text
+        .length;
       const end = new vscode.Position(endLineIdx, lineLen);
       await vscode.window.showTextDocument(doc, {
         selection: new vscode.Range(start, end),
@@ -1621,7 +1686,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.post({ type: "error", message: `Could not open ${relPath}: ${msg}` });
+      this.post({
+        type: "error",
+        message: `Could not open ${relPath}: ${msg}`
+      });
     }
   }
 
@@ -1637,10 +1705,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   ) {
     const ev = this.findRevisionEvent(revisionId);
     if (!ev) return null;
-    const meta = ev.meta as { tasks?: Array<{ id: string; status: string }> } & Record<
-      string,
-      unknown
-    >;
+    const meta = ev.meta as {
+      tasks?: Array<{ id: string; status: string }>;
+    } & Record<string, unknown>;
     const tasks = meta.tasks ?? [];
     const idx = tasks.findIndex((t) => t.id === taskId);
     if (idx === -1) return null;
@@ -1720,7 +1787,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // until the user rewinds to this revision's checkpoint. Capture the
     // pre-Proceed mode so rewind can restore it. (`ev` was fetched above.)
     const planFilePath =
-      ev && ((ev.meta as { planFilePath?: string } | undefined)?.planFilePath ?? undefined);
+      ev &&
+      ((ev.meta as { planFilePath?: string } | undefined)?.planFilePath ??
+        undefined);
     if (ev) {
       const meta = ev.meta as Record<string, unknown>;
       meta.proceeded = true;
@@ -1759,7 +1828,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       `Step approved — proceed with: "${content}".\n\n` +
         "Execute only this step, then stop and wait for the next instruction. " +
         "When done, emit a TodoWrite that marks this step's status as " +
-        "\"completed\" and leaves later steps untouched."
+        '"completed" and leaves later steps untouched.'
     );
   }
 
@@ -1776,7 +1845,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     const ev = this.findRevisionEvent(revisionId);
     if (!ev) return;
-    const meta = ev.meta as { tasks?: Array<{ id: string; content?: string; status: string }> };
+    const meta = ev.meta as {
+      tasks?: Array<{ id: string; content?: string; status: string }>;
+    };
     const task = meta.tasks?.find((t) => t.id === taskId);
     const content = task?.content ?? "the step";
     await this.handlePrompt(
@@ -1805,7 +1876,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private handlePlanOpenInEditor(revisionId: string) {
     const ev = this.findRevisionEvent(revisionId);
     if (!ev) {
-      this.post({ type: "error", message: "That plan revision is no longer available." });
+      this.post({
+        type: "error",
+        message: "That plan revision is no longer available."
+      });
       return;
     }
     const meta = ev.meta as unknown as PlanRevisionMeta;
@@ -1826,19 +1900,30 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const comments = this.session.timeline.filter(
       (e) =>
         e.kind === "plan_comment" &&
-        (e.meta as { revisionId?: string } | undefined)?.revisionId === revisionId &&
-        !(e.meta as { resolvedInRevisionId?: string } | undefined)?.resolvedInRevisionId
+        (e.meta as { revisionId?: string } | undefined)?.revisionId ===
+          revisionId &&
+        !(e.meta as { resolvedInRevisionId?: string } | undefined)
+          ?.resolvedInRevisionId
     );
     if (comments.length === 0) return;
 
     const tasksById = new Map<string, string>();
     const revEvent = this.session.timeline.find(
-      (e) => e.kind === "plan_revision" && (e.meta as { revisionId?: string })?.revisionId === revisionId
+      (e) =>
+        e.kind === "plan_revision" &&
+        (e.meta as { revisionId?: string })?.revisionId === revisionId
     );
-    const tasks = (revEvent?.meta as { tasks?: Array<{ id: string; content: string }> } | undefined)?.tasks ?? [];
+    const tasks =
+      (
+        revEvent?.meta as
+          { tasks?: Array<{ id: string; content: string }> } | undefined
+      )?.tasks ?? [];
     for (const t of tasks) tasksById.set(t.id, t.content);
 
-    interface CommentEntry { body: string; quote?: string }
+    interface CommentEntry {
+      body: string;
+      quote?: string;
+    }
     const grouped = new Map<string, CommentEntry[]>();
     for (const c of comments) {
       const meta = c.meta as { taskId: string; body: string; quote?: string };
@@ -1860,15 +1945,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (e.quote) {
           // Truncate long quotes — the agent doesn't need the whole passage,
           // just enough to relocate what the user was reacting to.
-          const snippet = e.quote.length > 240 ? `${e.quote.slice(0, 237)}…` : e.quote;
-          lines.push(`- (re: "${snippet.replace(/\s+/g, " ").trim()}") ${e.body}`);
+          const snippet =
+            e.quote.length > 240 ? `${e.quote.slice(0, 237)}…` : e.quote;
+          lines.push(
+            `- (re: "${snippet.replace(/\s+/g, " ").trim()}") ${e.body}`
+          );
         } else {
           lines.push(`- ${e.body}`);
         }
       }
       lines.push("");
     }
-    lines.push("Produce an updated plan via ExitPlanMode that addresses each comment.");
+    lines.push(
+      "Produce an updated plan via ExitPlanMode that addresses each comment."
+    );
     await this.handlePrompt(lines.join("\n"));
   }
 
@@ -1914,14 +2004,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // fresh id/createdAt — overwrite via Object.defineProperty since they're
     // declared readonly. Cleaner than reworking Session's API for one site.)
     Object.defineProperty(this.session, "id", { value: stored.id });
-    Object.defineProperty(this.session, "createdAt", { value: stored.createdAt });
+    Object.defineProperty(this.session, "createdAt", {
+      value: stored.createdAt
+    });
     this.session.messages = stored.messages;
     this.session.timeline = stored.timeline;
     this.session.title = stored.title;
 
     this.attachSessionListeners();
 
-    this.post({ type: "loadedSession", events: stored.timeline, title: stored.title });
+    this.post({
+      type: "loadedSession",
+      events: stored.timeline,
+      title: stored.title
+    });
   }
 
   // ── Models / skills / search ─────────────────────────────────
@@ -1968,7 +2064,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     try {
       // Sequential so we never hold more than one CLI process in memory.
       for (const alias of missing) {
-        const resolved = await this.probeModel(alias, binary, workspaceRoot, token);
+        const resolved = await this.probeModel(
+          alias,
+          binary,
+          workspaceRoot,
+          token
+        );
         if (resolved) {
           this.resolvedModels.set(alias, resolved);
           this.post({ type: "activeModel", model: resolved, alias });
@@ -2021,19 +2122,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         resolve(result);
       };
 
-      const rl = readline.createInterface({ input: child.stdout!, crlfDelay: Infinity });
+      const rl = readline.createInterface({
+        input: child.stdout!,
+        crlfDelay: Infinity
+      });
       rl.on("line", (line) => {
         if (settled) return;
         const trimmed = line.trim();
         if (!trimmed) return;
-        let ev: { type?: string; subtype?: string; model?: string } | null = null;
+        let ev: { type?: string; subtype?: string; model?: string };
         try {
           ev = JSON.parse(trimmed);
         } catch {
           return;
         }
         if (
-          ev?.type === "system" &&
+          ev.type === "system" &&
           ev.subtype === "init" &&
           typeof ev.model === "string"
         ) {
@@ -2052,7 +2156,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private async broadcastSkills() {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const disabled = new Set(
-      this.ctx.globalState.get<string[]>(ChatPanelProvider.DISABLED_SKILLS_KEY, [])
+      this.ctx.globalState.get<string[]>(
+        ChatPanelProvider.DISABLED_SKILLS_KEY,
+        []
+      )
     );
     const skills = await availableSkills(workspaceRoot, disabled);
     this.post({ type: "skills", skills });
@@ -2248,7 +2355,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       this.post({ type: "attachmentData", id, path: attachmentPath, dataUrl });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.post({ type: "attachmentData", id, path: attachmentPath, error: message });
+      this.post({
+        type: "attachmentData",
+        id,
+        path: attachmentPath,
+        error: message
+      });
     }
   }
 
@@ -2269,17 +2381,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // permission mode that was active just before they pressed Proceed.
     const target = surviving.find((e) => e.id === turnId);
     if (target && target.kind === "plan_revision") {
-      const meta = target.meta as {
-        proceeded?: boolean;
-        prePermissionMode?: PermissionMode;
-      } | undefined;
+      const meta = target.meta as
+        | {
+            proceeded?: boolean;
+            prePermissionMode?: PermissionMode;
+          }
+        | undefined;
       if (meta?.proceeded) {
         const prevMode = meta.prePermissionMode;
         delete meta.proceeded;
         delete meta.prePermissionMode;
         if (prevMode) {
           const cfg = vscode.workspace.getConfiguration("luno");
-          const currentMode = cfg.get<PermissionMode>("permissionMode", "default");
+          const currentMode = cfg.get<PermissionMode>(
+            "permissionMode",
+            "default"
+          );
           if (currentMode !== prevMode) {
             await cfg.update(
               "permissionMode",
@@ -2359,12 +2476,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // Surface pre-stream failures instead of letting the submit vanish.
       const message = err instanceof Error ? err.message : String(err);
       console.error("[luno] handlePrompt failed:", err);
-      this.post({ type: "error", message: `Couldn't start the turn: ${message}` });
+      this.post({
+        type: "error",
+        message: `Couldn't start the turn: ${message}`
+      });
     }
   }
 
   private async runPromptTurn(text: string) {
-    const workspaceForImages = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const workspaceForImages =
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (workspaceForImages) {
       text = await extractInlineImages(text, workspaceForImages);
     }
@@ -2409,7 +2530,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // conventions so the CLI gets the same grounding info every time.
     // Conventions are cached per-workspace and invalidated by file watcher.
     const activeFile = vscode.window.activeTextEditor
-      ? vscode.workspace.asRelativePath(vscode.window.activeTextEditor.document.uri)
+      ? vscode.workspace.asRelativePath(
+          vscode.window.activeTextEditor.document.uri
+        )
       : undefined;
     const taskType = classifyTask(text, activeFile);
     const conventions = await loadConventions(workspaceRoot);
@@ -2569,7 +2692,7 @@ function cleanSelection(raw: string): string {
 }
 
 function escapeGlob(s: string): string {
-  return s.replace(/[\[\]{}*?!()]/g, "\\$&");
+  return s.replace(/[[\]{}*?!()]/g, "\\$&");
 }
 
 // ── Models / skills catalogs ─────────────────────────────────
@@ -2599,10 +2722,34 @@ export interface ModelInfo {
 function availableModels(): ModelInfo[] {
   // Claude Code CLI aliases — each tracks the latest model for its tier.
   return [
-    { value: "default", label: "Default", note: "Most capable for complex work", supportsTools: true, group: "alias" },
-    { value: "opus",    label: "Opus",    note: "Deepest reasoning, hardest problems", supportsTools: true, group: "alias" },
-    { value: "sonnet",  label: "Sonnet",  note: "Best for everyday tasks", supportsTools: true, group: "alias" },
-    { value: "haiku",   label: "Haiku",   note: "Fastest for quick answers", supportsTools: true, group: "alias" }
+    {
+      value: "default",
+      label: "Default",
+      note: "Most capable for complex work",
+      supportsTools: true,
+      group: "alias"
+    },
+    {
+      value: "opus",
+      label: "Opus",
+      note: "Deepest reasoning, hardest problems",
+      supportsTools: true,
+      group: "alias"
+    },
+    {
+      value: "sonnet",
+      label: "Sonnet",
+      note: "Best for everyday tasks",
+      supportsTools: true,
+      group: "alias"
+    },
+    {
+      value: "haiku",
+      label: "Haiku",
+      note: "Fastest for quick answers",
+      supportsTools: true,
+      group: "alias"
+    }
   ];
 }
 
@@ -2635,20 +2782,84 @@ async function availableSkills(
   // Capabilities surfaced by Claude Code (CLI). Marked `external` because
   // they execute inside the CLI agent — Luno doesn't own them.
   const claudeCode: SkillInfo[] = [
-    { id: "Read",       name: "Read",       category: "tool",  description: "Read files in the workspace", enabled: true, toggleable: false, external: true },
-    { id: "Write",      name: "Write",      category: "tool",  description: "Create and edit files",       enabled: true, toggleable: false, external: true },
-    { id: "Bash",       name: "Bash",       category: "tool",  description: "Run shell commands",          enabled: true, toggleable: false, external: true },
-    { id: "Glob",       name: "Glob",       category: "skill", description: "Find files by glob pattern",  enabled: true, toggleable: false, external: true },
-    { id: "Grep",       name: "Grep",       category: "skill", description: "Search file contents",        enabled: true, toggleable: false, external: true },
-    { id: "Edit",       name: "Edit",       category: "skill", description: "Targeted in-file edits",      enabled: true, toggleable: false, external: true },
-    { id: "WebFetch",   name: "WebFetch",   category: "skill", description: "Fetch and read URLs",         enabled: true, toggleable: false, external: true },
-    { id: "Task",       name: "Sub-agents", category: "skill", description: "Spawn parallel sub-agents",   enabled: true, toggleable: false, external: true }
+    {
+      id: "Read",
+      name: "Read",
+      category: "tool",
+      description: "Read files in the workspace",
+      enabled: true,
+      toggleable: false,
+      external: true
+    },
+    {
+      id: "Write",
+      name: "Write",
+      category: "tool",
+      description: "Create and edit files",
+      enabled: true,
+      toggleable: false,
+      external: true
+    },
+    {
+      id: "Bash",
+      name: "Bash",
+      category: "tool",
+      description: "Run shell commands",
+      enabled: true,
+      toggleable: false,
+      external: true
+    },
+    {
+      id: "Glob",
+      name: "Glob",
+      category: "skill",
+      description: "Find files by glob pattern",
+      enabled: true,
+      toggleable: false,
+      external: true
+    },
+    {
+      id: "Grep",
+      name: "Grep",
+      category: "skill",
+      description: "Search file contents",
+      enabled: true,
+      toggleable: false,
+      external: true
+    },
+    {
+      id: "Edit",
+      name: "Edit",
+      category: "skill",
+      description: "Targeted in-file edits",
+      enabled: true,
+      toggleable: false,
+      external: true
+    },
+    {
+      id: "WebFetch",
+      name: "WebFetch",
+      category: "skill",
+      description: "Fetch and read URLs",
+      enabled: true,
+      toggleable: false,
+      external: true
+    },
+    {
+      id: "Task",
+      name: "Sub-agents",
+      category: "skill",
+      description: "Spawn parallel sub-agents",
+      enabled: true,
+      toggleable: false,
+      external: true
+    }
   ];
 
   // User-installed skills from disk. Both `~/.claude/skills/<name>/SKILL.md`
   // and `<ws>/.claude/skills/<name>/SKILL.md` are scanned; failures are
   // swallowed (missing dir, unreadable files, etc.).
-  let custom: SkillInfo[] = [];
+  let custom: SkillInfo[];
   try {
     const found = await discoverClaudeSkills(workspaceRoot);
     custom = found.map((s) => ({
@@ -2667,7 +2878,14 @@ async function availableSkills(
 
   // Optional integrations (placeholder — not yet wired).
   const integrations: SkillInfo[] = [
-    { id: "mcp", name: "MCP Servers", category: "integration", description: "Model Context Protocol servers (configure to enable)", enabled: false, toggleable: false }
+    {
+      id: "mcp",
+      name: "MCP Servers",
+      category: "integration",
+      description: "Model Context Protocol servers (configure to enable)",
+      enabled: false,
+      toggleable: false
+    }
   ];
 
   return [...claudeCode, ...custom, ...integrations];

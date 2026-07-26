@@ -206,7 +206,7 @@
   font-size: 11.5px;
   line-height: 1.55;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .exit {
@@ -274,7 +274,7 @@
   background: color-mix(in srgb, var(--s0) 65%, black);
   color: var(--accent-glow);
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .bashDesc {
