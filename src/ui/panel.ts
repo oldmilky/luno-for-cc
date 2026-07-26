@@ -49,27 +49,28 @@ import {
   uninstallMarketplaceSkill
 } from "./domains/skills.js";
 import {
+  addCustomConnector,
+  broadcastConnectors,
+  cancelConnectorConnect,
+  connectConnector,
+  connectConnectorWithApiKey,
+  disconnectConnector,
+  refreshManagedAndRebroadcast,
+  removeCustomConnector,
+  setupConnectorViaClaudeCode,
+  type CustomDraft
+} from "./domains/connectors.js";
+import {
   loadConventions,
   disposeConventionsWatchers,
   ConventionsFile
 } from "../services/conventions.js";
 import { classifyTask } from "../core/task-classifier.js";
 import type { InstallTarget } from "../services/marketplace.js";
-import {
-  listConnectors as mcpListConnectors,
-  connect as mcpConnect,
-  cancelConnect as mcpCancelConnect,
-  disconnect as mcpDisconnect,
-  addCustom as mcpAddCustom,
-  removeCustom as mcpRemoveCustom,
-  removeManaged as mcpRemoveManaged,
-  connectWithApiKey as mcpConnectWithApiKey,
-  refreshManagedConnectors as mcpRefreshManaged,
-  refreshClaudeCodeStatus as mcpRefreshCliStatus,
-  writeCliMcpConfig,
-  OAuthCancelled as McpOAuthCancelled,
-  CustomDraft as McpCustomDraft
-} from "../services/mcp/index.js";
+// Only what the turn path still needs: the connector *handlers* live in
+// `domains/connectors.ts`, but a turn has to hand the CLI an MCP config file
+// built from whatever is currently connected.
+import { writeCliMcpConfig } from "../services/mcp/index.js";
 
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = "luno.chat";
@@ -582,7 +583,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.reveal();
     this.post({ type: "openConnectors" });
     // Best-effort: also push the current list so the modal opens with data.
-    this.broadcastConnectors();
+    broadcastConnectors(this.post, this.ctx);
   }
 
   newSession() {
@@ -986,42 +987,47 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
     // ── MCP connectors ─────────────────────────────────────────
     requestConnectors: () => {
-      this.broadcastConnectors();
-      // Then fetch tool counts for Claude-Code-managed servers (figma, etc.)
-      // using their stored credentials, and re-broadcast so their cards fill
-      // in. Best-effort + cached, so reopening the panel is cheap.
-      void this.refreshManagedAndRebroadcast();
+      broadcastConnectors(this.post, this.ctx);
+      // Then fill in tool counts and the CLI-reported status, and re-broadcast
+      // so the cards complete themselves. Best-effort + cached, so reopening
+      // the panel is cheap.
+      void refreshManagedAndRebroadcast(this.post, this.ctx);
     },
     connectorConnect: async (m) => {
       const id = str(m, "id");
-      if (id) await this.handleConnectorConnect(id);
+      if (id) await connectConnector(this.post, this.ctx, id);
     },
     connectorCancelConnect: (m) => {
       const id = str(m, "id");
-      if (id) this.handleConnectorCancelConnect(id);
+      if (id) cancelConnectorConnect(this.post, id);
     },
     connectorDisconnect: async (m) => {
       const id = str(m, "id");
-      if (id) await this.handleConnectorDisconnect(id);
+      if (id) await disconnectConnector(this.post, this.ctx, id);
     },
     connectorAddCustom: async (m) => {
       const draft = obj(m, "draft");
       if (draft) {
-        await this.handleConnectorAddCustom(draft as unknown as McpCustomDraft);
+        await addCustomConnector(
+          this.post,
+          this.ctx,
+          draft as unknown as CustomDraft
+        );
       }
     },
     connectorRemoveCustom: async (m) => {
       const id = str(m, "id");
-      if (id) await this.handleConnectorRemoveCustom(id);
+      if (id) await removeCustomConnector(this.post, this.ctx, id);
     },
     connectorSetupViaClaudeCode: async (m) => {
       const id = str(m, "id");
-      if (id) await this.handleConnectorSetupViaClaudeCode(id);
+      if (id) await setupConnectorViaClaudeCode(this.post, this.ctx, id);
     },
     connectorConnectWithApiKey: async (m) => {
       const id = str(m, "id");
       const apiKey = str(m, "apiKey");
-      if (id && apiKey) await this.handleConnectorConnectWithApiKey(id, apiKey);
+      if (id && apiKey)
+        await connectConnectorWithApiKey(this.post, this.ctx, id, apiKey);
     }
   };
 
@@ -1051,199 +1057,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   // ── MCP connector handlers ──────────────────────────────────
-
-  private broadcastConnectors(): void {
-    try {
-      const connectors = mcpListConnectors(this.ctx);
-      this.post({ type: "connectorsList", connectors });
-    } catch (err) {
-      this.post({
-        type: "error",
-        message: `Couldn't list connectors: ${err instanceof Error ? err.message : String(err)}`
-      });
-    }
-  }
-
-  /** Fetch tool counts for Claude-Code-managed servers, then re-broadcast so
-   *  their cards show "N tools". Best-effort — failures cache as a card error. */
-  private async refreshManagedAndRebroadcast(): Promise<void> {
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    // Fetch managed tool counts and the `claude mcp list` status (which is the
-    // only source for claude.ai connector connection state) in parallel, then
-    // re-broadcast so e.g. a Figma the user authorized via Claude Code flips to
-    // connected here.
-    await Promise.allSettled([
-      mcpRefreshManaged(),
-      mcpRefreshCliStatus(resolveClaudeBinary(), cwd)
-    ]);
-    this.broadcastConnectors();
-  }
-
-  /** Connect a local API-token preset (e.g. Figma's figma-developer-mcp): store
-   *  the token in SecretStorage and spawn the server — no OAuth, fully local. */
-  private async handleConnectorConnectWithApiKey(
-    id: string,
-    apiKey: string
-  ): Promise<void> {
-    try {
-      const connector = await mcpConnectWithApiKey(this.ctx, id, apiKey);
-      this.post({
-        type: "connectorResult",
-        action: "connect",
-        id,
-        ok: true,
-        connector
-      });
-    } catch (err) {
-      this.post({
-        type: "connectorResult",
-        action: "connect",
-        id,
-        ok: false,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
-    this.broadcastConnectors();
-  }
-
-  private async handleConnectorConnect(id: string): Promise<void> {
-    try {
-      const connector = await mcpConnect(this.ctx, id);
-      this.post({
-        type: "connectorResult",
-        action: "connect",
-        id,
-        ok: true,
-        connector
-      });
-    } catch (err) {
-      // Cancellation isn't an "error" the user needs to see in red — flag
-      // it so the webview can clear the spinner without showing a toast.
-      const cancelled = err instanceof McpOAuthCancelled;
-      this.post({
-        type: "connectorResult",
-        action: "connect",
-        id,
-        ok: false,
-        cancelled,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
-    this.broadcastConnectors();
-  }
-
-  private handleConnectorCancelConnect(id: string): void {
-    const cancelled = mcpCancelConnect(id);
-    // We always echo back the cancel result so the webview can clear the
-    // pending state immediately, even if there was no in-flight attempt
-    // (e.g. the user clicked Cancel after the host already resolved).
-    this.post({
-      type: "connectorResult",
-      action: "cancel",
-      id,
-      ok: cancelled
-    });
-  }
-
-  private async handleConnectorDisconnect(id: string): Promise<void> {
-    try {
-      await mcpDisconnect(this.ctx, id);
-      this.post({
-        type: "connectorResult",
-        action: "disconnect",
-        id,
-        ok: true
-      });
-    } catch (err) {
-      this.post({
-        type: "connectorResult",
-        action: "disconnect",
-        id,
-        ok: false,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
-    this.broadcastConnectors();
-  }
-
-  private async handleConnectorAddCustom(draft: McpCustomDraft): Promise<void> {
-    try {
-      const connector = await mcpAddCustom(this.ctx, draft);
-      this.post({
-        type: "connectorResult",
-        action: "add",
-        id: connector.id,
-        ok: true,
-        connector
-      });
-    } catch (err) {
-      this.post({
-        type: "connectorResult",
-        action: "add",
-        id: "",
-        ok: false,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
-    this.broadcastConnectors();
-  }
-
-  private async handleConnectorRemoveCustom(id: string): Promise<void> {
-    try {
-      if (id.startsWith("managed:")) {
-        // Claude-Code-managed server → remove from the user's config via the
-        // supported `claude mcp remove` command (run in the workspace so
-        // local/project scopes resolve correctly).
-        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        await mcpRemoveManaged(id, resolveClaudeBinary(), cwd);
-      } else {
-        await mcpRemoveCustom(this.ctx, id);
-      }
-      this.post({ type: "connectorResult", action: "remove", id, ok: true });
-    } catch (err) {
-      this.post({
-        type: "connectorResult",
-        action: "remove",
-        id,
-        ok: false,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
-    this.broadcastConnectors();
-  }
-
-  /**
-   * Launch the Claude Code MCP auth flow for a connector that can't be OAuth'd
-   * directly (e.g. Figma — the vendor only allows Claude Code's pre-registered
-   * client). We can't complete the OAuth headlessly, so we drive Claude Code's
-   * own `/mcp` flow for the user: clear any stale error, open `claude` in an
-   * integrated terminal, and drop into `/mcp` once it boots. After the user
-   * authorizes in the browser, the connector loads automatically (Luno
-   * imports it as a managed card on the next list).
-   */
-  private async handleConnectorSetupViaClaudeCode(id: string): Promise<void> {
-    // Wipe the stale OAuth/DCR error record so the card stops showing 403.
-    try {
-      await mcpDisconnect(this.ctx, id);
-    } catch {
-      // best-effort
-    }
-    const existing = vscode.window.terminals.find(
-      (t) => t.name === "Luno Setup"
-    );
-    existing?.dispose();
-    const term = vscode.window.createTerminal({ name: "Luno Setup" });
-    term.show(true);
-    // Start the Claude Code TUI, then drop into the MCP connector menu. The
-    // second send is delayed so the TUI has booted and is reading stdin (if the
-    // timing is off the user just types `/mcp` themselves — the card says so).
-    setTimeout(() => term.sendText("claude", true), 300);
-    setTimeout(() => term.sendText("/mcp", true), 4000);
-    vscode.window.showInformationMessage(
-      "Opened Claude Code — choose your connector in the /mcp menu and authorize it in the browser. It'll appear in Luno once connected."
-    );
-    this.broadcastConnectors();
-  }
 
   /** Tell the webview which conventions file is loaded so the status pill can
    *  render. Posts even when null so the pill can clear. */
