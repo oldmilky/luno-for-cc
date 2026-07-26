@@ -16,7 +16,7 @@ import { createProvider, resolveClaudeBinary } from "../providers/factory.js";
 import type { EffortLevel } from "../providers/claude-cli.js";
 import { getToken, setToken, deleteToken, classifyToken } from "../secrets.js";
 import { CheckpointService } from "../services/checkpoint.js";
-import { HistoryService, deriveTitle } from "../services/history.js";
+import { HistoryService } from "../services/history.js";
 import { PlanDecorationService } from "../services/plan-decorations.js";
 import { PlanArtifactManager } from "./plan-artifact-panel.js";
 import { buildWebviewHtml, makeNonce } from "./webview-html.js";
@@ -33,10 +33,7 @@ import {
   type RawMessage
 } from "./messages.js";
 import { broadcastUsage } from "./domains/usage.js";
-import {
-  fileTouchedByTool,
-  type ToolCallEvent
-} from "./domains/checkpoint-triggers.js";
+import { SessionStore } from "./domains/session-store.js";
 import {
   findCommentEvent,
   findRevisionEvent,
@@ -95,23 +92,41 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = "luno.chat";
 
   private view?: vscode.WebviewView;
-  private session!: Session;
   private orchestrator?: Orchestrator;
   /** The provider running the current turn. Held so the `permissionResponse`
    *  message can route the user's allow/deny back to the live CLI process. */
   private activeProvider?: ChatProvider;
   // In-flight turn; awaited before starting a new one so turns never overlap.
   private activeTurn?: Promise<void>;
-  private resumeId?: string;
-  /** Short-lived CLI process used to resolve an alias → concrete model id
   /** Owns the model list, the alias → concrete-id cache, and the probe that
    *  fills it. Three fields and three methods used to live on this class. */
   private readonly models: ModelResolver;
-  private checkpoints?: CheckpointService;
+  /** Owns the current session, its timeline listeners, debounced persistence,
+   *  checkpoints and the CLI resume id. Four fields and six methods used to
+   *  live on this class. */
+  private readonly sessions: SessionStore;
   private history: HistoryService;
   private decorations: PlanDecorationService;
   private artifacts: PlanArtifactManager;
-  private saveTimer?: NodeJS.Timeout;
+
+  // Delegating accessors. The state moved into the store; the ~90 call sites
+  // that read it did not, which keeps this change small enough to verify. They
+  // migrate to `this.sessions.*` as the surrounding code is touched anyway.
+  private get session(): Session {
+    return this.sessions.current;
+  }
+  private get checkpoints(): CheckpointService | undefined {
+    return this.sessions.checkpoints;
+  }
+  private get resumeId(): string | undefined {
+    return this.sessions.resumeId;
+  }
+  private set resumeId(value: string | undefined) {
+    this.sessions.resumeId = value;
+  }
+  private scheduleSave(): void {
+    this.sessions.scheduleSave();
+  }
   /** Sticky flag set when the user has clicked Logout this session.
    *  `broadcastAuthState` ORs this with "no token in SecretStorage" to
    *  decide whether the webview should show the welcome screen — so even
@@ -139,6 +154,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
     );
     this.artifacts = new PlanArtifactManager(ctx);
+    // After history and decorations: the store wires session events straight
+    // into both, so it cannot be built before they exist.
+    this.sessions = new SessionStore(this.post, this.history, this.decorations);
     // Artifact panels share the chat panel's RPC handler so any user action
     // (comment, accept, reply, …) reaches the same session no matter which
     // surface fired it.
@@ -157,59 +175,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this.artifacts.closeAll();
         disposeConventionsWatchers();
         this.models.dispose();
+        this.sessions.dispose();
         cfgWatcher.dispose();
       }
     });
-    this.initSession();
-  }
-
-  private initSession() {
-    this.session = new Session();
-    this.attachSessionListeners();
-  }
-
-  /**
-   * Wire timeline + per-turn + per-plan-revision hooks onto the current
-   * session. Factored out so it can be reused after `loadHistorySession`
-   * and `restoreLatestSession` swap the session instance.
-   */
-  private attachSessionListeners() {
-    this.session.onEvent((e) => {
-      this.post({ type: "timeline", event: e });
-      this.trackFileForCheckpoint(e);
-      // Each plan revision is its own restore point so rewind can land on
-      // any revision and bring file state + comment threads with it.
-      if (e.kind === "plan_revision" && this.checkpoints) {
-        void this.checkpoints.captureBeforePlanRevision(e.id);
-      }
-      // Mirror plan changes into editor decorations so comments + active
-      // step are visible inline next to the source.
-      if (e.kind === "plan_revision" || e.kind === "plan_comment") {
-        this.decorations.syncFromTimeline(this.session.timeline);
-      }
-      this.scheduleSave();
-    });
-    this.session.onUserTurn(async (eventId) => {
-      if (this.checkpoints) {
-        await this.checkpoints.captureBefore(eventId);
-      }
-    });
-  }
-
-  /** Debounced save — coalesces bursts of timeline events into one write. */
-  private scheduleSave() {
-    if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => {
-      void this.history.save({
-        id: this.session.id,
-        title: deriveTitle(this.session.timeline),
-        createdAt: this.session.createdAt,
-        updatedAt: Date.now(),
-        messages: this.session.messages,
-        timeline: this.session.timeline,
-        resumeId: this.resumeId
-      });
-    }, 400);
+    this.sessions.reset();
   }
 
   /**
@@ -225,17 +195,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * Anyone "simplifying" it back to a disk read would break rewind for every
    * tracked file.
    */
-  private trackFileForCheckpoint(e: ToolCallEvent) {
-    if (!this.checkpoints) return;
-    const rel = fileTouchedByTool(e);
-    if (rel) void this.checkpoints.addFileToLatest(rel);
-  }
-
-  private ensureCheckpoints(workspaceRoot: string) {
-    if (!this.checkpoints) {
-      this.checkpoints = new CheckpointService(workspaceRoot);
-    }
-  }
 
   resolveWebviewView(view: vscode.WebviewView) {
     this.view = view;
@@ -300,20 +259,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // chat the user just cleared.
       if (!stored || !stored.timeline.some((e) => e.kind === "user")) return;
 
-      this.session = new Session(stored.title);
-      Object.defineProperty(this.session, "id", { value: stored.id });
-      Object.defineProperty(this.session, "createdAt", {
-        value: stored.createdAt
-      });
-      this.session.messages = stored.messages;
-      this.session.timeline = stored.timeline;
-      this.session.title = stored.title;
-      this.resumeId = stored.resumeId;
-
-      // Re-attach the same listener wiring `initSession` would have set.
-      // (We replaced this.session, so the prior closure now points at a
-      // dead Session object.)
-      this.attachSessionListeners();
+      this.sessions.adopt(stored);
     } catch {
       // Restore is best-effort; on any failure we fall through to the
       // empty session created by the constructor.
@@ -574,10 +520,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   newSession() {
     this.artifacts.closeAll();
-    this.initSession();
-    this.resumeId = undefined;
-    this.checkpoints?.clear();
-    this.checkpoints = undefined;
+    // `reset` covers the session, the resume id and the checkpoints together.
+    // They were three separate statements here, and forgetting one is how a
+    // "new" chat inherits the old one's rewind history.
+    this.sessions.reset();
     this.abortTurn();
     this.orchestrator = undefined;
     this.post({ type: "reset", sessionId: this.session.id });
@@ -1483,29 +1429,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       this.post({ type: "error", message: "Session not found." });
       return;
     }
-    // Replace the in-memory session with the stored one. We don't construct a
-    // brand-new Session() because we need the id/createdAt to match for
-    // subsequent saves to overwrite the same file.
     this.artifacts.closeAll();
     this.abortTurn();
     this.orchestrator = undefined;
-    this.checkpoints?.clear();
-    this.checkpoints = undefined;
-    this.resumeId = stored.resumeId;
-
-    this.session = new Session(stored.title);
-    // Splice in the persisted state. (The Session constructor already set a
-    // fresh id/createdAt — overwrite via Object.defineProperty since they're
-    // declared readonly. Cleaner than reworking Session's API for one site.)
-    Object.defineProperty(this.session, "id", { value: stored.id });
-    Object.defineProperty(this.session, "createdAt", {
-      value: stored.createdAt
-    });
-    this.session.messages = stored.messages;
-    this.session.timeline = stored.timeline;
-    this.session.title = stored.title;
-
-    this.attachSessionListeners();
+    // Splices the stored session in keeping its original id, so the next save
+    // overwrites the same file instead of forking the conversation into a
+    // second history entry — and drops the previous session's checkpoints.
+    // `restoreLatestSession` used to carry its own copy of this.
+    this.sessions.adopt(stored);
 
     this.post({
       type: "loadedSession",
@@ -1572,10 +1503,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // to resurrect on the next reload. So cancel any queued save and delete
     // the session file outright.
     if (surviving.length === 0) {
-      if (this.saveTimer) {
-        clearTimeout(this.saveTimer);
-        this.saveTimer = undefined;
-      }
+      this.sessions.cancelPendingSave();
       await this.history.delete(this.session.id);
     } else {
       this.scheduleSave();
@@ -1675,7 +1603,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    this.ensureCheckpoints(workspaceRoot);
+    this.sessions.ensureCheckpoints(workspaceRoot);
 
     // Per-turn prompt context: classify the task and discover project
     // conventions so the CLI gets the same grounding info every time.
