@@ -24,6 +24,17 @@ import { HistoryService, deriveTitle } from "../services/history.js";
 import { PlanDecorationService } from "../services/plan-decorations.js";
 import { PlanArtifactManager } from "./plan-artifact-panel.js";
 import { buildWebviewHtml, makeNonce } from "./webview-html.js";
+import {
+  arr,
+  bool,
+  num,
+  obj,
+  oneOf,
+  str,
+  type HandlerTable,
+  type InboundType,
+  type RawMessage
+} from "./messages.js";
 import { discoverClaudeSkills } from "../services/claude-skills.js";
 import {
   loadConventions,
@@ -700,408 +711,371 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.activeProvider?.cancel?.();
   }
 
-  private async onMessage(msg: { type: string; [k: string]: unknown }) {
-    switch (msg.type) {
-      case "prompt":
-        await this.handlePrompt(String(msg.text ?? ""));
-        break;
-      case "cancel":
-        this.abortTurn();
-        break;
-      case "permissionResponse":
-        if (
-          typeof msg.requestId === "string" &&
-          (msg.behavior === "allow" || msg.behavior === "deny")
-        ) {
-          if (!this.activeProvider?.respondToPermission) {
-            console.warn(
-              "[luno] permissionResponse arrived but no active provider to answer it"
-            );
-          }
-          this.activeProvider?.respondToPermission?.(
-            msg.requestId,
-            msg.behavior as PermissionBehavior,
-            { restOfTurn: msg.restOfTurn === true }
-          );
-        }
-        break;
-      case "newSession":
-        this.newSession();
-        break;
-      case "refreshAuth":
-        await this.broadcastAuthState();
-        break;
-      case "openExternal":
-        if (typeof msg.url === "string")
-          await vscode.env.openExternal(vscode.Uri.parse(msg.url));
-        break;
-      case "openFile":
-        if (typeof msg.path === "string") {
-          await this.handleOpenFile(
-            msg.path,
-            typeof msg.startLine === "number" ? msg.startLine : 0,
-            typeof msg.endLine === "number" ? msg.endLine : 0
-          );
-        }
-        break;
-      case "readAttachment":
-        if (typeof msg.id === "string" && typeof msg.path === "string") {
-          await this.handleReadAttachment(msg.id, msg.path);
-        }
-        break;
-      case "revertFile":
-        if (typeof msg.path === "string") {
-          await this.handleRevertFile(msg.path);
-        }
-        break;
-      case "refreshUsage":
-        await this.broadcastClaudeCodeUsage();
-        break;
-      case "runTerminalCommand":
-        if (typeof msg.command === "string") {
-          this.runTerminalCommand(msg.command);
-        }
-        break;
-      case "claudeLogout":
-        await this.handleClaudeLogout();
-        break;
-      case "submitToken":
-        if (typeof msg.token === "string") {
-          await this.handleSubmitToken(msg.token);
-        }
-        break;
-      case "startClaudeSetup":
-        this.handleStartClaudeSetup();
-        break;
-      case "cancelClaudeSetup":
-        this.cancelClaudeSetup();
-        break;
-      case "confirmClaudeSetup":
-        await this.confirmClaudeSetup();
-        break;
-      case "setModel":
-        if (typeof msg.model === "string") {
-          await vscode.workspace
-            .getConfiguration("luno")
-            .update("model", msg.model, vscode.ConfigurationTarget.Global);
-          await this.broadcastAuthState();
-        }
-        break;
-      case "setPermissionMode":
-        if (typeof msg.mode === "string") {
-          await vscode.workspace
-            .getConfiguration("luno")
-            .update(
-              "permissionMode",
-              msg.mode,
-              vscode.ConfigurationTarget.Global
-            );
-          await this.broadcastAuthState();
-        }
-        break;
-      case "setEffort":
-        if (typeof msg.effort === "string") {
-          await vscode.workspace
-            .getConfiguration("luno")
-            .update("effort", msg.effort, vscode.ConfigurationTarget.Global);
-          await this.broadcastAuthState();
-        }
-        break;
-      case "setThinking":
-        if (typeof msg.thinking === "boolean") {
-          await vscode.workspace
-            .getConfiguration("luno")
-            .update(
-              "thinking",
-              msg.thinking,
-              vscode.ConfigurationTarget.Global
-            );
-          await this.broadcastAuthState();
-        }
-        break;
-      case "rewindTo":
-        if (typeof msg.turnId === "string") {
-          await this.rewindTo(msg.turnId);
-        }
-        break;
-      case "editAt":
-        if (typeof msg.turnId === "string" && typeof msg.text === "string") {
-          await this.editAt(msg.turnId, msg.text, msg.revertFiles === true);
-        }
-        break;
-      case "refreshEditorContext":
-        this.broadcastEditorContext();
-        break;
-      case "requestModels":
-        await this.broadcastModels();
-        break;
-      case "requestSkills":
-        await this.broadcastSkills();
-        break;
-      case "setSkillEnabled":
-        if (typeof msg.id === "string" && typeof msg.enabled === "boolean") {
-          await this.setSkillEnabled(msg.id, msg.enabled);
-        }
-        break;
-      case "requestMarketplace":
-        await this.handleRequestMarketplace(
-          typeof msg.offset === "number" ? msg.offset : 0,
-          typeof msg.limit === "number" ? msg.limit : 24,
-          typeof msg.query === "string" ? msg.query : undefined
+  /**
+   * Every message the host accepts, one entry each.
+   *
+   * Typed as `HandlerTable` — `Record<InboundType, Handler>` — so leaving a
+   * message type out is a compile error. The `switch` this replaced had no
+   * `default`, which meant an unhandled or misspelled type fell off the end and
+   * did nothing, with no error and no log.
+   *
+   * A field arriving in the wrong shape drops the message and says so. The
+   * webview is ours, so that is a bug to see rather than an exception to raise
+   * inside the extension host.
+   */
+  private readonly handlers: HandlerTable = {
+    // ── Chat + turn lifecycle ──────────────────────────────────
+    prompt: async (m) => {
+      await this.handlePrompt(String(m.text ?? ""));
+    },
+    cancel: () => this.abortTurn(),
+    newSession: () => this.newSession(),
+    permissionResponse: (m) => {
+      const requestId = str(m, "requestId");
+      const behavior = oneOf(m, "behavior", ["allow", "deny"] as const);
+      if (!requestId || !behavior) return;
+      if (!this.activeProvider?.respondToPermission) {
+        console.warn(
+          "[luno] permissionResponse arrived but no active provider to answer it"
         );
-        break;
-      case "requestSkillDetail":
-        if (typeof msg.name === "string") {
-          await this.handleRequestSkillDetail(msg.name);
-        }
-        break;
-      case "installMarketplaceSkill":
-        if (
-          msg.target &&
-          typeof msg.target === "object" &&
-          (msg.scope === "user" || msg.scope === "project")
-        ) {
-          await this.handleInstallMarketplaceSkill(
-            msg.target as InstallTarget,
-            msg.scope
-          );
-        }
-        break;
-      case "uninstallMarketplaceSkill":
-        if (
-          typeof msg.name === "string" &&
-          (msg.scope === "user" || msg.scope === "project")
-        ) {
-          await this.handleUninstallMarketplaceSkill(msg.name, msg.scope);
-        }
-        break;
-      case "requestFileSearch":
-        await this.handleFileSearch(
-          String(msg.query ?? ""),
-          typeof msg.id === "string" ? msg.id : ""
+      }
+      this.activeProvider?.respondToPermission?.(
+        requestId,
+        behavior as PermissionBehavior,
+        { restOfTurn: m.restOfTurn === true }
+      );
+    },
+    rewindTo: async (m) => {
+      const turnId = str(m, "turnId");
+      if (turnId) await this.rewindTo(turnId);
+    },
+    editAt: async (m) => {
+      const turnId = str(m, "turnId");
+      const text = str(m, "text");
+      if (turnId && text !== undefined) {
+        await this.editAt(turnId, text, m.revertFiles === true);
+      }
+    },
+
+    // ── Auth + setup ───────────────────────────────────────────
+    refreshAuth: () => this.broadcastAuthState(),
+    claudeLogout: () => this.handleClaudeLogout(),
+    submitToken: async (m) => {
+      const token = str(m, "token");
+      if (token) await this.handleSubmitToken(token);
+    },
+    startClaudeSetup: () => this.handleStartClaudeSetup(),
+    cancelClaudeSetup: () => this.cancelClaudeSetup(),
+    confirmClaudeSetup: () => this.confirmClaudeSetup(),
+    runTerminalCommand: (m) => {
+      const command = str(m, "command");
+      if (command) this.runTerminalCommand(command);
+    },
+
+    // ── Settings ───────────────────────────────────────────────
+    setModel: async (m) => {
+      const model = str(m, "model");
+      if (model) await this.updateSetting("model", model);
+    },
+    setPermissionMode: async (m) => {
+      const mode = str(m, "mode");
+      if (mode) await this.updateSetting("permissionMode", mode);
+    },
+    setEffort: async (m) => {
+      const effort = str(m, "effort");
+      if (effort) await this.updateSetting("effort", effort);
+    },
+    setThinking: async (m) => {
+      const thinking = bool(m, "thinking");
+      if (thinking !== undefined) {
+        await this.updateSetting("thinking", thinking);
+      }
+    },
+
+    // ── Editor + files ─────────────────────────────────────────
+    openExternal: async (m) => {
+      const url = str(m, "url");
+      if (url) await vscode.env.openExternal(vscode.Uri.parse(url));
+    },
+    openFile: async (m) => {
+      const path = str(m, "path");
+      if (path) {
+        await this.handleOpenFile(
+          path,
+          num(m, "startLine") ?? 0,
+          num(m, "endLine") ?? 0
         );
-        break;
-      case "captureSelection":
-        this.sendSelectionToChat();
-        break;
-      case "requestHistory":
-        await this.broadcastHistory();
-        break;
-      case "loadSession":
-        if (typeof msg.id === "string") await this.loadHistorySession(msg.id);
-        break;
-      case "deleteHistoryEntry":
-        if (typeof msg.id === "string") {
-          await this.history.delete(msg.id);
-          await this.broadcastHistory();
-        }
-        break;
-      case "planComment":
-        if (
-          typeof msg.revisionId === "string" &&
-          typeof msg.taskId === "string" &&
-          typeof msg.body === "string"
-        ) {
-          this.handlePlanComment(
-            msg.revisionId,
-            msg.taskId,
-            msg.body,
-            typeof msg.quote === "string" ? msg.quote : undefined
-          );
-        }
-        break;
-      case "planEditComment":
-        if (typeof msg.commentId === "string" && typeof msg.body === "string") {
-          this.handlePlanEditComment(msg.commentId, msg.body);
-        }
-        break;
-      case "planDeleteComment":
-        if (typeof msg.commentId === "string") {
-          this.handlePlanDeleteComment(msg.commentId);
-        }
-        break;
-      case "planReplyComment":
-        if (
-          typeof msg.revisionId === "string" &&
-          typeof msg.parentCommentId === "string" &&
-          typeof msg.body === "string"
-        ) {
-          this.handlePlanReplyComment(
-            msg.revisionId,
-            msg.parentCommentId,
-            msg.body
-          );
-        }
-        break;
-      case "planResolveComment":
-        if (typeof msg.commentId === "string") {
-          this.handlePlanResolveComment(msg.commentId, true);
-        }
-        break;
-      case "planReopenComment":
-        if (typeof msg.commentId === "string") {
-          this.handlePlanResolveComment(msg.commentId, false);
-        }
-        break;
-      case "planOpenFileRef":
-        if (
-          typeof msg.path === "string" &&
-          typeof msg.startLine === "number" &&
-          typeof msg.endLine === "number"
-        ) {
-          await this.handlePlanOpenFileRef(
-            msg.path,
-            msg.startLine,
-            msg.endLine
-          );
-        }
-        break;
-      case "planAcceptStep":
-        if (
-          typeof msg.revisionId === "string" &&
-          typeof msg.taskId === "string"
-        ) {
-          await this.handlePlanAcceptStep(msg.revisionId, msg.taskId);
-        }
-        break;
-      case "planModifyStep":
-        if (
-          typeof msg.revisionId === "string" &&
-          typeof msg.taskId === "string" &&
-          typeof msg.instruction === "string"
-        ) {
-          await this.handlePlanModifyStep(
-            msg.revisionId,
-            msg.taskId,
-            msg.instruction
-          );
-        }
-        break;
-      case "planSkipStep":
-        if (
-          typeof msg.revisionId === "string" &&
-          typeof msg.taskId === "string"
-        ) {
-          this.handlePlanSkipStep(msg.revisionId, msg.taskId);
-        }
-        break;
-      case "planOpenInEditor":
-        if (typeof msg.revisionId === "string") {
-          this.handlePlanOpenInEditor(msg.revisionId);
-        }
-        break;
-      case "requestArtifactState":
-        // Webview-side handshake: the artifact panel mounts, asks for
-        // current state, and the host posts it back to that specific
-        // panel only. Avoids the race where the post fires before the
-        // webview's message listener is wired up.
-        if (typeof msg.revisionId === "string") {
-          this.artifacts.postToPanel(msg.revisionId, {
-            type: "loadedSession",
-            events: this.session.timeline,
-            title: ""
-          });
-        }
-        break;
-      case "planResubmit":
-        if (typeof msg.revisionId === "string") {
-          await this.handlePlanResubmit(msg.revisionId);
-        }
-        break;
-      case "planAnswer":
-        if (
-          typeof msg.questionId === "string" &&
-          typeof msg.toolUseId === "string" &&
-          Array.isArray(msg.answers)
-        ) {
-          await this.handlePlanAnswer(
-            msg.questionId,
-            msg.toolUseId,
-            msg.answers as Array<{ choice: string; note?: string }>
-          );
-        }
-        break;
-      case "planRewindTo":
-        if (typeof msg.revisionId === "string") {
-          await this.rewindTo(msg.revisionId);
-        }
-        break;
-      case "planProceedRequest":
-        if (typeof msg.revisionId === "string") {
-          await this.handlePlanProceed(msg.revisionId);
-        }
-        break;
-      case "dismissConventionsBanner":
+      }
+    },
+    readAttachment: async (m) => {
+      const id = str(m, "id");
+      const path = str(m, "path");
+      if (id && path) await this.handleReadAttachment(id, path);
+    },
+    revertFile: async (m) => {
+      const path = str(m, "path");
+      if (path) await this.handleRevertFile(path);
+    },
+    requestFileSearch: async (m) => {
+      await this.handleFileSearch(String(m.query ?? ""), str(m, "id") ?? "");
+    },
+    captureSelection: () => this.sendSelectionToChat(),
+    refreshEditorContext: () => this.broadcastEditorContext(),
+
+    // ── Models ─────────────────────────────────────────────────
+    requestModels: () => this.broadcastModels(),
+
+    // ── Skills + marketplace ───────────────────────────────────
+    requestSkills: () => this.broadcastSkills(),
+    setSkillEnabled: async (m) => {
+      const id = str(m, "id");
+      const enabled = bool(m, "enabled");
+      if (id && enabled !== undefined) await this.setSkillEnabled(id, enabled);
+    },
+    requestMarketplace: async (m) => {
+      await this.handleRequestMarketplace(
+        num(m, "offset") ?? 0,
+        num(m, "limit") ?? 24,
+        str(m, "query")
+      );
+    },
+    requestSkillDetail: async (m) => {
+      const name = str(m, "name");
+      if (name) await this.handleRequestSkillDetail(name);
+    },
+    installMarketplaceSkill: async (m) => {
+      const target = obj(m, "target");
+      const scope = oneOf(m, "scope", ["user", "project"] as const);
+      if (target && scope) {
+        await this.handleInstallMarketplaceSkill(
+          target as unknown as InstallTarget,
+          scope
+        );
+      }
+    },
+    uninstallMarketplaceSkill: async (m) => {
+      const name = str(m, "name");
+      const scope = oneOf(m, "scope", ["user", "project"] as const);
+      if (name && scope)
+        await this.handleUninstallMarketplaceSkill(name, scope);
+    },
+    dismissSkillSuggestion: async (m) => {
+      const skillId = str(m, "skillId");
+      if (!skillId) return;
+      const list = this.ctx.workspaceState.get<string[]>(
+        "luno.skillSuggestionDismissed.v1",
+        []
+      );
+      if (!list.includes(skillId)) {
         await this.ctx.workspaceState.update(
-          "luno.conventionsBannerDismissed.v1",
-          true
+          "luno.skillSuggestionDismissed.v1",
+          [...list, skillId]
         );
-        break;
-      case "openConventionsFile":
-        if (typeof msg.path === "string") {
-          await vscode.window.showTextDocument(vscode.Uri.file(msg.path));
-        }
-        break;
-      case "generateConventions":
-        await vscode.commands.executeCommand("luno.generateConventions");
-        break;
-      case "dismissSkillSuggestion":
-        if (typeof msg.skillId === "string") {
-          const list = this.ctx.workspaceState.get<string[]>(
-            "luno.skillSuggestionDismissed.v1",
-            []
-          );
-          if (!list.includes(msg.skillId)) {
-            await this.ctx.workspaceState.update(
-              "luno.skillSuggestionDismissed.v1",
-              [...list, msg.skillId]
-            );
-          }
-        }
-        break;
-      case "requestConnectors":
-        this.broadcastConnectors();
-        // Then fetch tool counts for Claude-Code-managed servers (figma, etc.)
-        // using their stored credentials, and re-broadcast so their cards fill
-        // in. Best-effort + cached, so reopening the panel is cheap.
-        void this.refreshManagedAndRebroadcast();
-        break;
-      case "connectorConnect":
-        if (typeof msg.id === "string") {
-          await this.handleConnectorConnect(msg.id);
-        }
-        break;
-      case "connectorCancelConnect":
-        if (typeof msg.id === "string") {
-          this.handleConnectorCancelConnect(msg.id);
-        }
-        break;
-      case "connectorDisconnect":
-        if (typeof msg.id === "string") {
-          await this.handleConnectorDisconnect(msg.id);
-        }
-        break;
-      case "connectorAddCustom":
-        if (msg.draft && typeof msg.draft === "object") {
-          await this.handleConnectorAddCustom(msg.draft as McpCustomDraft);
-        }
-        break;
-      case "connectorRemoveCustom":
-        if (typeof msg.id === "string") {
-          await this.handleConnectorRemoveCustom(msg.id);
-        }
-        break;
-      case "connectorSetupViaClaudeCode":
-        if (typeof msg.id === "string") {
-          await this.handleConnectorSetupViaClaudeCode(msg.id);
-        }
-        break;
-      case "connectorConnectWithApiKey":
-        if (typeof msg.id === "string" && typeof msg.apiKey === "string") {
-          await this.handleConnectorConnectWithApiKey(msg.id, msg.apiKey);
-        }
-        break;
+      }
+    },
+
+    // ── History ────────────────────────────────────────────────
+    requestHistory: () => this.broadcastHistory(),
+    loadSession: async (m) => {
+      const id = str(m, "id");
+      if (id) await this.loadHistorySession(id);
+    },
+    deleteHistoryEntry: async (m) => {
+      const id = str(m, "id");
+      if (!id) return;
+      await this.history.delete(id);
+      await this.broadcastHistory();
+    },
+
+    // ── Usage ──────────────────────────────────────────────────
+    refreshUsage: () => this.broadcastClaudeCodeUsage(),
+
+    // ── Conventions ────────────────────────────────────────────
+    dismissConventionsBanner: async () => {
+      await this.ctx.workspaceState.update(
+        "luno.conventionsBannerDismissed.v1",
+        true
+      );
+    },
+    openConventionsFile: async (m) => {
+      const path = str(m, "path");
+      if (path) await vscode.window.showTextDocument(vscode.Uri.file(path));
+    },
+    generateConventions: async () => {
+      await vscode.commands.executeCommand("luno.generateConventions");
+    },
+
+    // ── Plan review ────────────────────────────────────────────
+    planComment: (m) => {
+      const revisionId = str(m, "revisionId");
+      const taskId = str(m, "taskId");
+      const body = str(m, "body");
+      if (revisionId && taskId && body !== undefined) {
+        this.handlePlanComment(revisionId, taskId, body, str(m, "quote"));
+      }
+    },
+    planEditComment: (m) => {
+      const commentId = str(m, "commentId");
+      const body = str(m, "body");
+      if (commentId && body !== undefined) {
+        this.handlePlanEditComment(commentId, body);
+      }
+    },
+    planDeleteComment: (m) => {
+      const commentId = str(m, "commentId");
+      if (commentId) this.handlePlanDeleteComment(commentId);
+    },
+    planReplyComment: (m) => {
+      const revisionId = str(m, "revisionId");
+      const parentCommentId = str(m, "parentCommentId");
+      const body = str(m, "body");
+      if (revisionId && parentCommentId && body !== undefined) {
+        this.handlePlanReplyComment(revisionId, parentCommentId, body);
+      }
+    },
+    planResolveComment: (m) => {
+      const commentId = str(m, "commentId");
+      if (commentId) this.handlePlanResolveComment(commentId, true);
+    },
+    planReopenComment: (m) => {
+      const commentId = str(m, "commentId");
+      if (commentId) this.handlePlanResolveComment(commentId, false);
+    },
+    planOpenFileRef: async (m) => {
+      const path = str(m, "path");
+      const startLine = num(m, "startLine");
+      const endLine = num(m, "endLine");
+      if (path && startLine !== undefined && endLine !== undefined) {
+        await this.handlePlanOpenFileRef(path, startLine, endLine);
+      }
+    },
+    planAcceptStep: async (m) => {
+      const revisionId = str(m, "revisionId");
+      const taskId = str(m, "taskId");
+      if (revisionId && taskId) {
+        await this.handlePlanAcceptStep(revisionId, taskId);
+      }
+    },
+    planModifyStep: async (m) => {
+      const revisionId = str(m, "revisionId");
+      const taskId = str(m, "taskId");
+      const instruction = str(m, "instruction");
+      if (revisionId && taskId && instruction !== undefined) {
+        await this.handlePlanModifyStep(revisionId, taskId, instruction);
+      }
+    },
+    planSkipStep: (m) => {
+      const revisionId = str(m, "revisionId");
+      const taskId = str(m, "taskId");
+      if (revisionId && taskId) this.handlePlanSkipStep(revisionId, taskId);
+    },
+    planOpenInEditor: (m) => {
+      const revisionId = str(m, "revisionId");
+      if (revisionId) this.handlePlanOpenInEditor(revisionId);
+    },
+    planResubmit: async (m) => {
+      const revisionId = str(m, "revisionId");
+      if (revisionId) await this.handlePlanResubmit(revisionId);
+    },
+    planAnswer: async (m) => {
+      const questionId = str(m, "questionId");
+      const toolUseId = str(m, "toolUseId");
+      const answers = arr(m, "answers");
+      if (questionId && toolUseId && answers) {
+        await this.handlePlanAnswer(
+          questionId,
+          toolUseId,
+          answers as Array<{ choice: string; note?: string }>
+        );
+      }
+    },
+    planRewindTo: async (m) => {
+      const revisionId = str(m, "revisionId");
+      if (revisionId) await this.rewindTo(revisionId);
+    },
+    planProceedRequest: async (m) => {
+      const revisionId = str(m, "revisionId");
+      if (revisionId) await this.handlePlanProceed(revisionId);
+    },
+    requestArtifactState: (m) => {
+      // Webview-side handshake: the artifact panel mounts, asks for current
+      // state, and the host posts it back to that specific panel only. Avoids
+      // the race where the post fires before the webview's message listener is
+      // wired up.
+      const revisionId = str(m, "revisionId");
+      if (revisionId) {
+        this.artifacts.postToPanel(revisionId, {
+          type: "loadedSession",
+          events: this.session.timeline,
+          title: ""
+        });
+      }
+    },
+
+    // ── MCP connectors ─────────────────────────────────────────
+    requestConnectors: () => {
+      this.broadcastConnectors();
+      // Then fetch tool counts for Claude-Code-managed servers (figma, etc.)
+      // using their stored credentials, and re-broadcast so their cards fill
+      // in. Best-effort + cached, so reopening the panel is cheap.
+      void this.refreshManagedAndRebroadcast();
+    },
+    connectorConnect: async (m) => {
+      const id = str(m, "id");
+      if (id) await this.handleConnectorConnect(id);
+    },
+    connectorCancelConnect: (m) => {
+      const id = str(m, "id");
+      if (id) this.handleConnectorCancelConnect(id);
+    },
+    connectorDisconnect: async (m) => {
+      const id = str(m, "id");
+      if (id) await this.handleConnectorDisconnect(id);
+    },
+    connectorAddCustom: async (m) => {
+      const draft = obj(m, "draft");
+      if (draft) {
+        await this.handleConnectorAddCustom(draft as unknown as McpCustomDraft);
+      }
+    },
+    connectorRemoveCustom: async (m) => {
+      const id = str(m, "id");
+      if (id) await this.handleConnectorRemoveCustom(id);
+    },
+    connectorSetupViaClaudeCode: async (m) => {
+      const id = str(m, "id");
+      if (id) await this.handleConnectorSetupViaClaudeCode(id);
+    },
+    connectorConnectWithApiKey: async (m) => {
+      const id = str(m, "id");
+      const apiKey = str(m, "apiKey");
+      if (id && apiKey) await this.handleConnectorConnectWithApiKey(id, apiKey);
     }
+  };
+
+  /** Write a `luno.*` setting globally, then re-broadcast so the UI follows. */
+  private async updateSetting(
+    key: string,
+    value: string | boolean
+  ): Promise<void> {
+    await vscode.workspace
+      .getConfiguration("luno")
+      .update(key, value, vscode.ConfigurationTarget.Global);
+    await this.broadcastAuthState();
+  }
+
+  private async onMessage(msg: RawMessage) {
+    const handler = this.handlers[msg.type as InboundType];
+    if (!handler) {
+      // Previously silent. A type that reaches here is either a webview
+      // sending something the host never learned, or a typo on one side —
+      // both are contract drift, and both used to look like "nothing
+      // happened". `test/unit/protocol-contract.test.ts` catches the first
+      // kind before it ships.
+      console.warn(`[luno] no handler for message type "${msg.type}"`);
+      return;
+    }
+    await handler(msg);
   }
 
   // ── MCP connector handlers ──────────────────────────────────
