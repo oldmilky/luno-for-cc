@@ -35,6 +35,14 @@ import {
   type RawMessage
 } from "./messages.js";
 import { broadcastUsage } from "./domains/usage.js";
+import {
+  broadcastEditorContext,
+  openFile,
+  openPlanFileRef,
+  readAttachment,
+  revertFile,
+  searchFiles
+} from "./domains/files.js";
 import { broadcastHistory } from "./domains/history.js";
 import { ModelResolver } from "./domains/models.js";
 import {
@@ -315,7 +323,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private wireEditorContext() {
-    const broadcast = () => this.broadcastEditorContext();
+    const broadcast = () => broadcastEditorContext(this.post);
     this.ctx.subscriptions.push(
       vscode.window.onDidChangeActiveTextEditor((ed) => {
         broadcast();
@@ -324,26 +332,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       vscode.window.onDidChangeTextEditorSelection(broadcast)
     );
     broadcast();
-  }
-
-  private broadcastEditorContext() {
-    const ed = vscode.window.activeTextEditor;
-    if (!ed) {
-      this.post({ type: "editorContext", context: null });
-      return;
-    }
-    const rel = vscode.workspace.asRelativePath(ed.document.uri);
-    const sel = ed.selection;
-    this.post({
-      type: "editorContext",
-      context: {
-        file: rel,
-        language: ed.document.languageId,
-        selection: sel.isEmpty
-          ? null
-          : { startLine: sel.start.line + 1, endLine: sel.end.line + 1 }
-      }
-    });
   }
 
   /**
@@ -779,7 +767,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     openFile: async (m) => {
       const path = str(m, "path");
       if (path) {
-        await this.handleOpenFile(
+        await openFile(
+          this.post,
           path,
           num(m, "startLine") ?? 0,
           num(m, "endLine") ?? 0
@@ -789,17 +778,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     readAttachment: async (m) => {
       const id = str(m, "id");
       const path = str(m, "path");
-      if (id && path) await this.handleReadAttachment(id, path);
+      if (id && path) await readAttachment(this.post, id, path);
     },
     revertFile: async (m) => {
       const path = str(m, "path");
-      if (path) await this.handleRevertFile(path);
+      if (path) await revertFile(this.post, this.checkpoints, path);
     },
     requestFileSearch: async (m) => {
-      await this.handleFileSearch(String(m.query ?? ""), str(m, "id") ?? "");
+      await searchFiles(this.post, String(m.query ?? ""), str(m, "id") ?? "");
     },
     captureSelection: () => this.sendSelectionToChat(),
-    refreshEditorContext: () => this.broadcastEditorContext(),
+    refreshEditorContext: () => broadcastEditorContext(this.post),
 
     // ── Models ─────────────────────────────────────────────────
     requestModels: () => this.models.broadcast(),
@@ -919,7 +908,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const startLine = num(m, "startLine");
       const endLine = num(m, "endLine");
       if (path && startLine !== undefined && endLine !== undefined) {
-        await this.handlePlanOpenFileRef(path, startLine, endLine);
+        await openPlanFileRef(this.post, path, startLine, endLine);
       }
     },
     planAcceptStep: async (m) => {
@@ -1268,170 +1257,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * Reveal a workspace-relative path at the given range and select that
    * range so the user sees the slice the plan step is talking about.
    */
-  /**
-   * Restore a single file from the most recent checkpoint that snapshotted
-   * it. Used by the per-file "Revert" affordance on the EditedFilesCard.
-   *
-   * `pathOrRel` may be absolute or workspace-relative; `CheckpointService`
-   * normalizes both forms internally so the lookup matches regardless of
-   * which form the agent's tool input used.
-   *
-   * Posts a `revertResult` back to the webview with one of three shapes:
-   *   - ok: true                          — file overwritten or removed
-   *   - ok: false, error: "<no snapshot>" — no checkpoint contains this file
-   *   - ok: false, error: <other>         — IO failure
-   */
-  private async handleRevertFile(pathOrRel: string): Promise<void> {
-    if (!this.checkpoints) {
-      this.post({
-        type: "revertResult",
-        path: pathOrRel,
-        ok: false,
-        error:
-          "Checkpoints aren't initialized yet — run at least one prompt first."
-      });
-      return;
-    }
-    try {
-      const result = await this.checkpoints.restoreFile(pathOrRel);
-      if (!result) {
-        this.post({
-          type: "revertResult",
-          path: pathOrRel,
-          ok: false,
-          error:
-            "No prior snapshot for this file (the agent created it before checkpointing started, or it's outside the workspace)."
-        });
-        return;
-      }
-      // Synchronize the VS Code buffer with the restored file on disk.
-      // Without this, an editor that already had this file open keeps the
-      // stale in-memory version and the user can't see the rollback. Two
-      // cases:
-      //   • File was deleted (existed:false snapshot): close the editor.
-      //   • File was overwritten: revert the buffer to disk via the
-      //     workbench command. This works even if the user had unsaved
-      //     edits (those edits would have been the agent's post-write
-      //     content anyway, so dropping them is correct).
-      try {
-        const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-        const isAbs =
-          pathOrRel.startsWith("/") || /^[A-Za-z]:[\\/]/.test(pathOrRel);
-        const uri = isAbs
-          ? vscode.Uri.file(pathOrRel)
-          : root
-            ? vscode.Uri.joinPath(root, pathOrRel)
-            : null;
-        if (uri) {
-          if (result.deleted) {
-            // Try to close the now-deleted file's tab.
-            await vscode.commands.executeCommand(
-              "vscode.removeFromRecentlyOpened",
-              uri
-            );
-          } else {
-            // Force-refresh: show the file and revert its buffer to disk.
-            await vscode.window.showTextDocument(uri, {
-              preview: false,
-              preserveFocus: false
-            });
-            await vscode.commands.executeCommand(
-              "workbench.action.files.revert"
-            );
-          }
-        }
-      } catch {
-        // best-effort refresh; failure here doesn't change the revert outcome
-      }
-      this.post({ type: "revertResult", path: pathOrRel, ok: true });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.post({
-        type: "revertResult",
-        path: pathOrRel,
-        ok: false,
-        error: msg
-      });
-    }
-  }
-
-  /**
-   * Reveal a file in the editor. Accepts either an absolute path or a path
-   * relative to the workspace root. When a line range is given, the editor
-   * scrolls to it and selects that span; otherwise it just opens the file.
-   */
-  private async handleOpenFile(
-    pathOrRel: string,
-    startLine: number,
-    endLine: number
-  ): Promise<void> {
-    let target: vscode.Uri;
-    if (pathOrRel.startsWith("/") || /^[A-Za-z]:\\/.test(pathOrRel)) {
-      target = vscode.Uri.file(pathOrRel);
-    } else {
-      const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-      if (!root) {
-        this.post({ type: "error", message: "Open a workspace folder first." });
-        return;
-      }
-      target = vscode.Uri.joinPath(root, pathOrRel);
-    }
-    try {
-      const doc = await vscode.workspace.openTextDocument(target);
-      const options: vscode.TextDocumentShowOptions = { preview: false };
-      if (startLine > 0) {
-        const start = new vscode.Position(Math.max(0, startLine - 1), 0);
-        const endIdx = Math.max(start.line, (endLine || startLine) - 1);
-        const lineLen = doc.lineAt(Math.min(endIdx, doc.lineCount - 1)).text
-          .length;
-        options.selection = new vscode.Range(
-          start,
-          new vscode.Position(endIdx, lineLen)
-        );
-      }
-      await vscode.window.showTextDocument(doc, options);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.post({
-        type: "error",
-        message: `Could not open ${pathOrRel}: ${msg}`
-      });
-    }
-  }
-
-  private async handlePlanOpenFileRef(
-    relPath: string,
-    startLine: number,
-    endLine: number
-  ) {
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-    if (!root) {
-      this.post({
-        type: "error",
-        message: "Open a workspace folder to navigate plan steps."
-      });
-      return;
-    }
-    const target = vscode.Uri.joinPath(root, relPath);
-    try {
-      const doc = await vscode.workspace.openTextDocument(target);
-      const start = new vscode.Position(Math.max(0, startLine - 1), 0);
-      const endLineIdx = Math.max(start.line, endLine - 1);
-      const lineLen = doc.lineAt(Math.min(endLineIdx, doc.lineCount - 1)).text
-        .length;
-      const end = new vscode.Position(endLineIdx, lineLen);
-      await vscode.window.showTextDocument(doc, {
-        selection: new vscode.Range(start, end),
-        preview: false
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.post({
-        type: "error",
-        message: `Could not open ${relPath}: ${msg}`
-      });
-    }
-  }
 
   /**
    * Mutate a single task's status on its plan_revision and re-post the event.
@@ -1758,83 +1583,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // ── Models / skills / search ─────────────────────────────────
 
   // ── Marketplace handlers ────────────────────────────────────
-
-  private async handleFileSearch(query: string, id: string) {
-    const root = vscode.workspace.workspaceFolders?.[0];
-    if (!root) {
-      this.post({ type: "fileSearchResults", id, results: [] });
-      return;
-    }
-    const glob = query ? `**/*${escapeGlob(query)}*` : "**/*";
-    const found = await vscode.workspace.findFiles(
-      new vscode.RelativePattern(root, glob),
-      "**/{node_modules,.git,dist,build,out,.next,.venv,__pycache__}/**",
-      40
-    );
-    const q = query.toLowerCase();
-    const results = found
-      .map((u) => ({
-        path: vscode.workspace.asRelativePath(u),
-        name: u.path.split("/").pop() ?? ""
-      }))
-      .sort((a, b) => {
-        const an = a.name.toLowerCase();
-        const bn = b.name.toLowerCase();
-        if (q) {
-          const aMatch = an.startsWith(q) ? 0 : an.includes(q) ? 1 : 2;
-          const bMatch = bn.startsWith(q) ? 0 : bn.includes(q) ? 1 : 2;
-          if (aMatch !== bMatch) return aMatch - bMatch;
-        }
-        return a.path.localeCompare(b.path);
-      })
-      .slice(0, 12);
-    this.post({ type: "fileSearchResults", id, results });
-  }
-
-  /**
-   * Read an attachment file from disk and ship it back to the webview as a
-   * data URL. Used by UserMessage to preview the same image the user attached
-   * earlier — the wire format stores only a relative path so we hydrate it
-   * on demand. Path is sandboxed to the workspace root to refuse `../`
-   * traversal attempts.
-   */
-  private async handleReadAttachment(id: string, attachmentPath: string) {
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!root) {
-      this.post({
-        type: "attachmentData",
-        id,
-        path: attachmentPath,
-        error: "No workspace open."
-      });
-      return;
-    }
-    const abs = path.resolve(root, attachmentPath);
-    if (!abs.startsWith(root + path.sep) && abs !== root) {
-      this.post({
-        type: "attachmentData",
-        id,
-        path: attachmentPath,
-        error: "Attachment path is outside the workspace."
-      });
-      return;
-    }
-    try {
-      const buffer = await fs.promises.readFile(abs);
-      const ext = path.extname(abs).slice(1).toLowerCase();
-      const mime = MIME_BY_EXT[ext] ?? "application/octet-stream";
-      const dataUrl = `data:${mime};base64,${buffer.toString("base64")}`;
-      this.post({ type: "attachmentData", id, path: attachmentPath, dataUrl });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.post({
-        type: "attachmentData",
-        id,
-        path: attachmentPath,
-        error: message
-      });
-    }
-  }
 
   private async rewindTo(turnId: string) {
     this.abortTurn();
@@ -2163,11 +1911,10 @@ function cleanSelection(raw: string): string {
   return lines.join("\n");
 }
 
-function escapeGlob(s: string): string {
-  return s.replace(/[[\]{}*?!()]/g, "\\$&");
-}
+// ── Prompt attachments ───────────────────────────────────────
 
-// ── Models / skills catalogs ─────────────────────────────────
+const INLINE_DATA_IMAGE_RE =
+  /!\[([^\]]*)\]\(data:image\/([a-zA-Z0-9+.-]+);base64,([A-Za-z0-9+/=]+)\)/g;
 
 /**
  * Strip inline `![name](data:image/...;base64,...)` blobs out of a prompt by
@@ -2185,21 +1932,6 @@ function escapeGlob(s: string): string {
  * `.luno/` is added to the workspace `.gitignore` on first use so users
  * don't accidentally commit the temp attachments.
  */
-const MIME_BY_EXT: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-  bmp: "image/bmp",
-  ico: "image/x-icon",
-  avif: "image/avif"
-};
-
-const INLINE_DATA_IMAGE_RE =
-  /!\[([^\]]*)\]\(data:image\/([a-zA-Z0-9+.-]+);base64,([A-Za-z0-9+/=]+)\)/g;
-
 async function extractInlineImages(
   prompt: string,
   workspaceRoot: string
