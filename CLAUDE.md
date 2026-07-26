@@ -123,6 +123,7 @@ Each of these was invisible to the compiler and cost a debugging round.
 | Token contract every theme must satisfy | `docs/TOKENS.md`                |
 | Comment policy in full                  | `.claude/rules/comments.md`     |
 | Naming and code style                   | `.claude/rules/code-style.md`   |
+| What lives where, sizes, seams          | `.claude/project-map.md`        |
 | Phase log, decisions, what was tried    | `docs/PLAN.md` _(local only)_   |
 | Design rationale                        | `docs/DESIGN.md` _(local only)_ |
 
