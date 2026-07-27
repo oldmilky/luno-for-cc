@@ -182,6 +182,14 @@ export interface FileSearchResult {
   name: string;
 }
 
+/** Mirrors `SlashCommand` in src/services/slash-commands.ts. Expansion is the
+ *  CLI's own — this only drives the composer's popover. */
+export interface SlashCommand {
+  name: string;
+  description?: string;
+  source: "project" | "user" | "cli";
+}
+
 // ── Tool permission prompts ──────────────────────────────────
 //
 // When Luno runs in `default` (or `auto`) mode the CLI asks before each
@@ -373,6 +381,7 @@ export type Outbound =
   | { type: "confirmClaudeSetup" }
   | { type: "requestModels" }
   | { type: "requestSkills" }
+  | { type: "requestSlashCommands" }
   | { type: "requestFileSearch"; id: string; query: string }
   | { type: "captureSelection" }
   | { type: "requestHistory" }
@@ -497,6 +506,7 @@ export type Inbound =
    *  selection is still active). */
   | { type: "activeModel"; model: string; alias: string }
   | { type: "skills"; skills: SkillInfo[] }
+  | { type: "slashCommands"; commands: SlashCommand[] }
   | { type: "tokenResult"; ok: boolean; error?: string }
   | {
       type: "setupProgress";

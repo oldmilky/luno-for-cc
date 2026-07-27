@@ -20,14 +20,18 @@ import {
 import {
   send,
   newId,
+  onMessage,
   PermissionMode,
   EffortLevel,
   ModelInfo,
   SkillInfo,
-  FileSearchResult
+  FileSearchResult,
+  SlashCommand
 } from "../../lib/rpc";
 import { MODES, findMode } from "./constants";
 import { MentionPopover } from "./MentionPopover";
+import { SlashPopover } from "./SlashPopover";
+import { slashQuery } from "./slash-filter";
 import { SkillsPicker } from "./SkillsPicker";
 import { ModelPicker } from "./ModelPicker";
 import { ImageLightbox } from "./ImageLightbox";
@@ -81,6 +85,10 @@ interface ImageAttachment {
 
 const NO_MENTION: MentionState = { active: false, query: "" };
 
+/** A slash command is the whole message or nothing — the CLI only expands one
+ *  at the very start — so unlike `@`, this token is anchored to offset 0. */
+const NO_SLASH: MentionState = { active: false, query: "" };
+
 export function Composer({
   value,
   onChange,
@@ -106,6 +114,8 @@ export function Composer({
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [focused, setFocused] = useState(false);
   const [mention, setMention] = useState<MentionState>(NO_MENTION);
+  const [slash, setSlash] = useState<MentionState>(NO_SLASH);
+  const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [preview, setPreview] = useState<ImageAttachment | null>(null);
   // The editor is mounted once with its persisted text; React shouldn't keep
@@ -209,9 +219,24 @@ export function Composer({
       document.removeEventListener("selectionchange", refreshMention);
   }, [refreshMention]);
 
+  // The list is the same for every conversation and changes only when the user
+  // writes a command file, so it is fetched once per mount rather than on `/`.
+  useEffect(() => {
+    send({ type: "requestSlashCommands" });
+    return onMessage((m) => {
+      if (m.type === "slashCommands") setCommands(m.commands);
+    });
+  }, []);
+
+  const refreshSlash = useCallback((text: string) => {
+    const query = slashQuery(text);
+    setSlash(query === null ? NO_SLASH : { active: true, query });
+  }, []);
+
   const handleEditorChange = (text: string) => {
     onChange(text);
     refreshMention();
+    refreshSlash(text);
   };
 
   const handleSubmit = () => {
@@ -348,6 +373,20 @@ export function Composer({
     onChange(editorRef.current?.serialize() ?? "");
   };
 
+  /**
+   * Replace the half-typed command with the one that was picked.
+   *
+   * Plain text, and a trailing space so arguments can be typed straight on:
+   * the CLI reads `/name args` from the message itself, so anything richer
+   * here would have to be flattened back to exactly this before sending.
+   */
+  const handleSlashPick = (command: SlashCommand) => {
+    editorRef.current?.setText(`/${command.name} `);
+    onChange(`/${command.name} `);
+    setSlash(NO_SLASH);
+    editorRef.current?.focus();
+  };
+
   /** Splice a mention pill at the current caret position. */
   const insertMentionAtCursor = (fullPath: string, basename: string) => {
     const sel = window.getSelection();
@@ -387,6 +426,14 @@ export function Composer({
         query={mention.query}
         onPick={handleMentionPick}
         onClose={() => setMention(NO_MENTION)}
+      />
+
+      <SlashPopover
+        open={slash.active && !mention.active}
+        query={slash.query}
+        commands={commands}
+        onPick={handleSlashPick}
+        onClose={() => setSlash(NO_SLASH)}
       />
 
       {dropping && (

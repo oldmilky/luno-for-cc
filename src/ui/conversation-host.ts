@@ -62,6 +62,11 @@ import {
   searchFiles
 } from "./domains/files.js";
 import { collectDiagnostics } from "./domains/diagnostics.js";
+import { collectEditorContext } from "./domains/editor-context.js";
+import {
+  broadcastSlashCommands,
+  rememberCliCommands
+} from "./domains/slash-commands.js";
 import { broadcastHistory, type LiveState } from "./domains/history.js";
 import { ModelResolver } from "./domains/models.js";
 import {
@@ -1133,6 +1138,8 @@ export class ConversationHost {
 
     // ── Skills + marketplace ───────────────────────────────────
     requestSkills: () => broadcastSkills(this.post, this.ctx),
+    requestSlashCommands: () =>
+      broadcastSlashCommands(this.post, this.ctx, this.workingRoot),
     setSkillEnabled: async (m) => {
       const id = str(m, "id");
       const enabled = bool(m, "enabled");
@@ -1781,9 +1788,18 @@ export class ConversationHost {
         taskType,
         conventions,
         diagnostics: collectDiagnostics(workspaceRoot),
+        editorContext: collectEditorContext(workspaceRoot),
         getResumeSessionId: () => this.resumeId,
         setResumeSessionId: (id) => {
           this.resumeId = id;
+        },
+        onSlashCommands: (names) => {
+          rememberCliCommands(this.ctx, names);
+          void broadcastSlashCommands(
+            this.post,
+            this.ctx,
+            this.workingRoot
+          );
         },
         token,
         mcpConfigPath: mcpConfig?.path,

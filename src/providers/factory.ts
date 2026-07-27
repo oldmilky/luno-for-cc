@@ -34,8 +34,12 @@ export interface ProviderContext {
   conventions?: ConventionsFile | null;
   /** The editor's Problems for this turn, already formatted. */
   diagnostics?: string | null;
+  /** The active file and selection for this turn, already formatted. */
+  editorContext?: string | null;
   getResumeSessionId?: () => string | undefined;
   setResumeSessionId?: (id: string) => void;
+  /** Told the CLI's slash-command list when a turn reports one. */
+  onSlashCommands?: (names: string[]) => void;
   /** Auth token (OAuth or API key) injected into the CLI's environment. */
   token?: string;
   /** Optional path to a temp JSON file in CLI's `--mcp-config` format. */
@@ -265,8 +269,10 @@ export function createProvider(ctx: ProviderContext): ChatProvider {
     taskType: ctx.taskType,
     conventions: ctx.conventions,
     diagnostics: ctx.diagnostics,
+    editorContext: ctx.editorContext,
     getResumeSessionId: ctx.getResumeSessionId,
     setResumeSessionId: ctx.setResumeSessionId,
+    onSlashCommands: ctx.onSlashCommands,
     token: ctx.token,
     mcpConfigPath: ctx.mcpConfigPath,
     mcpServerNames: ctx.mcpServerNames,

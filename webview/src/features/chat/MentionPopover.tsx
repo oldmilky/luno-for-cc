@@ -52,19 +52,29 @@ export function MentionPopover({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowDown") {
+      // The editor submits from its own keydown handler and never checks
+      // `defaultPrevented`, so preventing the default was not enough: picking
+      // a file with Enter inserted the mention *and* sent the message, which
+      // went out as a bare "@file.ts" before the user had written their
+      // question. The event has to stop here.
+      const consume = () => {
         e.preventDefault();
+        e.stopPropagation();
+      };
+
+      if (e.key === "ArrowDown") {
+        consume();
         setActive((i) => Math.min(i + 1, Math.max(results.length - 1, 0)));
       } else if (e.key === "ArrowUp") {
-        e.preventDefault();
+        consume();
         setActive((i) => Math.max(i - 1, 0));
       } else if (e.key === "Enter" || e.key === "Tab") {
         if (results.length > 0) {
-          e.preventDefault();
+          consume();
           onPick(results[active]);
         }
       } else if (e.key === "Escape") {
-        e.preventDefault();
+        consume();
         onClose();
       }
     };

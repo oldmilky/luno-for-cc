@@ -2,7 +2,7 @@
   "name": "luno-for-cc",
   "displayName": "LUNO for CC",
   "description": "LUNO for CC — personal Claude Code chat for Cursor / VS Code.",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "publisher": "lunoweb",
   "license": "MIT",
   "icon": "assets/luno-icon-500.png",
@@ -214,6 +214,11 @@
           "type": "boolean",
           "default": true,
           "description": "Include the editor's Problems (errors and warnings from language servers) with each turn, so the agent can see what your IDE already knows instead of running a compiler through the shell to rediscover it. Errors are sent first and the list is capped."
+        },
+        "luno.sendEditorContext": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include the file you have open and any highlighted text with each turn, so 'why does this crash?' with a line selected has a subject. Only the selection is sent, capped in size — never the whole file. Off means the agent learns about a selection only when you press Ctrl+U."
         },
         "luno.maxTokens": {
           "type": "number",

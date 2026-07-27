@@ -53,6 +53,7 @@ export type InboundType =
   | "requestModels"
   // skills + marketplace
   | "requestSkills"
+  | "requestSlashCommands"
   | "setSkillEnabled"
   | "requestMarketplace"
   | "requestSkillDetail"

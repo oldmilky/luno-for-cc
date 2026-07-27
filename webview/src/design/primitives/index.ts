@@ -1,5 +1,7 @@
 export { Chip } from "./Chip";
 export type { ChipProps, ChipTone } from "./Chip";
+export { DotGlobe } from "./DotGlobe";
+export type { DotGlobeProps } from "./DotGlobe";
 export { Dropdown } from "./Dropdown";
 export type { DropdownOption, DropdownProps } from "./Dropdown";
 export { IconButton } from "./IconButton";

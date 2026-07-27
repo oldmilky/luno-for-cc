@@ -187,8 +187,13 @@ export interface ClaudeCliOpts {
    *  describe the tree as it is right now, not as it was when the session
    *  started. */
   diagnostics?: string | null;
+  /** The active file and selection, already formatted. Per turn for the same
+   *  reason: it describes where the user's attention is as they hit send. */
+  editorContext?: string | null;
   getResumeSessionId?: () => string | undefined;
   setResumeSessionId?: (id: string) => void;
+  /** Told the CLI's slash-command list when a turn reports one. */
+  onSlashCommands?: (names: string[]) => void;
   /** Anthropic auth token (OAuth `sk-ant-oat...` or API `sk-ant-api...`)
    *  injected as `ANTHROPIC_API_KEY` when spawning the CLI. Optional —
    *  if absent the CLI falls back to its own `~/.claude/` credentials. */
@@ -502,7 +507,10 @@ export class ClaudeCliProvider implements ChatProvider {
       push({ type: "done" });
     };
 
-    const processor = makeProcessor(this.opts.setResumeSessionId);
+    const processor = makeProcessor(
+      this.opts.setResumeSessionId,
+      this.opts.onSlashCommands
+    );
 
     rl.on("line", (line) => {
       const trimmed = line.trim();
@@ -748,6 +756,11 @@ export function buildArgs(
     args.push("--append-system-prompt", opts.diagnostics);
   }
 
+  // What the user has open and highlighted as they send the message.
+  if (opts.editorContext) {
+    args.push("--append-system-prompt", opts.editorContext);
+  }
+
   // Project conventions. CLAUDE.md at root is auto-loaded by the CLI itself —
   // re-injecting would double the token cost — so skip in that case.
   if (opts.conventions && !opts.conventions.alreadyLoadedByCli) {
@@ -991,6 +1004,8 @@ export interface CliEvent {
   session_id?: string;
   /** Resolved model id on the `system`/`init` event (alias → concrete id). */
   model?: string;
+  /** Every slash command the CLI knows, reported on `system`/`init`. */
+  slash_commands?: string[];
   message?: {
     /** Resolved model id on each `assistant` message — the model that
      *  actually produced this turn's output. */
@@ -1058,7 +1073,10 @@ export interface CliEvent {
 
 type Processor = (ev: CliEvent) => StreamDelta[];
 
-export function makeProcessor(setResume?: (id: string) => void): Processor {
+export function makeProcessor(
+  setResume?: (id: string) => void,
+  onSlashCommands?: (names: string[]) => void
+): Processor {
   let sawPartialText = false;
   const startedToolIds = new Set<string>();
   let currentBlockType: "text" | "tool_use" | "other" | null = null;
@@ -1078,6 +1096,10 @@ export function makeProcessor(setResume?: (id: string) => void): Processor {
 
     if (ev.type === "system" && ev.subtype === "init") {
       if (ev.session_id) setResume?.(ev.session_id);
+      // The CLI's own answer to "what can be typed after a slash" — built-ins,
+      // plugins and the user's `.claude/commands` alike. It arrives only on a
+      // turn, so the composer caches it rather than asking.
+      if (ev.slash_commands?.length) onSlashCommands?.(ev.slash_commands);
       emitModel(ev.model, out);
       return out;
     }

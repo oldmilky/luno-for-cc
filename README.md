@@ -7,7 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/install-build%20from%20source-8b64ff" alt="Install: build from source" />
-  <img src="https://img.shields.io/badge/VSIX-733%20kB-555" alt="VSIX size: 733 kB" />
+  <img src="https://img.shields.io/badge/VSIX-734%20kB-555" alt="VSIX size: 734 kB" />
 </p>
 
 <p align="center">
@@ -33,7 +33,7 @@ LUNO brings the full Claude Code agent into a native editor side panel: streamin
 - 🔌 **MCP connectors.** Browse and connect remote MCP servers — Linear, Notion, Atlassian, Sentry and more — over OAuth, straight from the panel.
 - 🕰 **Checkpoints + rewind.** Every assistant turn snapshots edited files so you can roll back without leaving the chat.
 - 📦 **Runs your own CLI.** No bundled copy: LUNO finds the `claude` binary on your
-  PATH (or in the standard install locations) and drives that. The VSIX is 733 kB,
+  PATH (or in the standard install locations) and drives that. The VSIX is 734 kB,
   and model aliases resolve against whatever your CLI knows — a self-updating
   install picks up new models with no LUNO release.
 - 🎨 **Seven palettes.** copper, purple, red, blue, green, pink, white — every
@@ -219,7 +219,7 @@ project — it is built primarily as a personal tool, and features are chosen on
 basis. Two things to know before you send one:
 
 - `bun run lint` typechecks **both** projects and `bun run test` must stay green
-  (527 pass / 6 skipped; the skips are filesystem-gated, not broken).
+  (556 pass / 6 skipped; the skips are filesystem-gated, not broken).
 - The webview reads design tokens only — every color, radius, shadow and glow is a
   CSS custom property declared per palette. No hard-coded values in components.
 

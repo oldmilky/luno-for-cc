@@ -1,0 +1,24 @@
+// ─────────────────────────────────────────────────────────────
+// Dot globe — the breathing half of the animation. Rotation is
+// the component's own frame loop; this is only the pulse.
+// ─────────────────────────────────────────────────────────────
+
+// CSS rather than the frame loop on purpose: it is one composited property on
+// one element instead of 53 more attribute writes a frame, and theme.css's
+// global reduced-motion rule already stops it without the component asking.
+.globe {
+  display: block;
+  overflow: visible;
+  animation: globe-breathe var(--motion-ambient) ease-in-out infinite;
+}
+
+@keyframes globe-breathe {
+  0%,
+  100% {
+    opacity: 0.72;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}

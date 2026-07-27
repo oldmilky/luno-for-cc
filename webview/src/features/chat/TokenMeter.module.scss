@@ -1,6 +1,5 @@
 // ─────────────────────────────────────────────────────────────
 // Token meter — the header chip and its usage popover.
-// Converted from Tailwind in Ф2а.
 //
 // The chip, the usage bars and the over-limit pill all shift color
 // with pressure. That used to be four `var(--…)` strings computed in
@@ -8,6 +7,10 @@
 // that publishes `--tone` / `--tone-soft`, so the colors live here
 // and the component only decides *which* tone applies.
 // ─────────────────────────────────────────────────────────────
+
+// The popover's own geometry, named because three rules have to agree on it.
+$pop-width: 380px;
+$pop-gutter: 12px;
 
 .root {
   position: relative;
@@ -98,13 +101,28 @@
 
 // ── Popover shell ────────────────────────────────────────────
 
+// Anchored to the chip's left edge, not its right. Hanging it off the right
+// pushed 380px leftward from a trigger that sits ~a third of the way across
+// the header, so in a sidebar the panel started outside the extension and the
+// first column of every row was cut off. `max-width` is what keeps the other
+// direction honest: the panel may be narrower than its content wants, never
+// wider than the surface it opens on.
 .popover {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 0;
   z-index: 80;
   overflow: hidden;
-  width: 380px;
+  width: $pop-width;
+  max-width: calc(100vw - #{$pop-gutter * 2});
+  // Negative only when the panel would run past the right edge, so it opens at
+  // the chip whenever there is room and slides back just enough when there is
+  // not. `margin-left`, not `transform`: framer writes transform inline for the
+  // open/close travel and no rule here could outrank it.
+  margin-left: min(
+    0px,
+    calc(100vw - var(--pop-anchor, 0px) - #{$pop-width} - #{$pop-gutter})
+  );
   border: 1px solid var(--glass-border);
   border-radius: 12px;
   background: var(--glass);

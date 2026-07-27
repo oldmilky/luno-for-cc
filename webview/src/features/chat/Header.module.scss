@@ -194,6 +194,12 @@
 // Ring spinner inside the "streaming" chip. ToolCard's `.spinner` looks
 // identical but spins from a CSS animation; here framer-motion owns the
 // transform, and an animation would win over its inline style.
+// CSS, not framer. A `motion.span` with `animate={{ rotate: 360 }}` ran the
+// revolution once and stopped dead on `rotate(360deg)` — the header re-renders
+// on every streamed delta, and the reconciliation against an already-reached
+// target dropped `repeat: Infinity` on the floor. 360° is the identity matrix,
+// so the ring froze in its starting position and read as a hung turn. This is
+// the same mixin the other three spinners use, on the same `--motion-spin`.
 .chipSpinner {
   display: inline-block;
   width: 10px;
@@ -201,6 +207,7 @@
   border: 1.5px solid currentColor;
   border-right-color: transparent;
   border-radius: 50%;
+  @include motion.spin;
 }
 
 // ── Action cluster ───────────────────────────────────────────

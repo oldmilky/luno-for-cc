@@ -16,7 +16,6 @@ import { Icon, BrandMark } from "../../design/icons";
 import { IconButton, Chip, Tooltip } from "../../design/primitives";
 import {
   PRESS,
-  SPIN,
   SPRING_POP,
   SWAP,
   DURATION,
@@ -186,16 +185,9 @@ export function Header({
               <motion.span key={status} className={s.sessionStatus} {...SWAP}>
                 <Chip tone={LOOK[status].tone} pulse={status === "working"}>
                   {status === "working" ? (
-                    // SPIN, not a period derived from DURATION.enter. This is
-                    // the same ring the three CSS spinners draw, and deriving
-                    // its cadence here made it a fourth rate (0.72s) alongside
-                    // their 700/700/800 — the exact drift the shared preset
-                    // exists to stop.
-                    <motion.span
-                      className={s.chipSpinner}
-                      animate={{ rotate: 360 }}
-                      transition={SPIN}
-                    />
+                    // The rotation is the `spin` mixin's, in the stylesheet —
+                    // see the note there for why framer could not hold it.
+                    <span className={s.chipSpinner} />
                   ) : (
                     <Icon name={LOOK[status].icon as IconName} size={10} />
                   )}

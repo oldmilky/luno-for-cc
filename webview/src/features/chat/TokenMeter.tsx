@@ -14,7 +14,8 @@
 // the bar at a misleading 100% red.
 // ─────────────────────────────────────────────────────────────
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import {
   motion,
   AnimatePresence,
@@ -192,6 +193,15 @@ interface AuthoritativeUsage {
 
 export function TokenMeter({ events, streaming }: TokenMeterProps) {
   const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * How far the chip sits from the panel's left edge, published to the
+   * stylesheet as `--pop-anchor` so the popover can shift itself back on
+   * screen when there is not 380px to its right. CSS cannot ask where its own
+   * anchor is, and in a sidebar that answer is the difference between a panel
+   * and a panel with its first column cut off.
+   */
+  const [anchorLeft, setAnchorLeft] = useState(0);
   const [settings, setSettings] = useState<MeterSettings>(() => readSettings());
   const [showPlanPicker, setShowPlanPicker] = useState(false);
   const [auth, setAuth] = useState<AuthoritativeUsage>({
@@ -293,11 +303,16 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
   };
 
   return (
-    <div className={s.root}>
+    <div ref={rootRef} className={s.root}>
       <Tooltip label={`${primaryLabel}: ${primaryDisplay}`}>
         <motion.button
           type="button"
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            // Measured on the click, not on mount: the chip's offset moves
+            // with the panel's width and with what sits left of it.
+            setAnchorLeft(rootRef.current?.getBoundingClientRect().left ?? 0);
+            setOpen((o) => !o);
+          }}
           {...PRESS}
           whileHover={{ y: -1 }}
           className={`${s.chip} ${TONE_CLASS[primaryTone]}`}
@@ -326,6 +341,7 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
             initial={{ ...OVERLAY_PANEL.initial, y: -TRAVEL.lg }}
             exit={{ ...OVERLAY_PANEL.exit, y: -TRAVEL.sm }}
             className={s.popover}
+            style={{ "--pop-anchor": `${anchorLeft}px` } as CSSProperties}
           >
             {/* Header */}
             <div className={s.head}>

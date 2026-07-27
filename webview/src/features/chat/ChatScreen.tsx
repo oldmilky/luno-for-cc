@@ -74,16 +74,17 @@ export interface ChatScreenProps {
   skills: ReadonlyArray<SkillInfo>;
   composerFocusKey: number;
   pendingInsert: CodeInsert | null;
+  /** What the host calls this conversation, and how it reads its stored
+   *  timeline. Both come from `sessionMeta`, which the host recomputes
+   *  whenever the name or the attention could have moved. */
+  sessionTitle: string;
+  sessionStatus: ChatStatus | null;
   /** The follow-up waiting for the running turn to end, "" when none. */
   queued: string;
   onQueuedEdit: (text: string) => void;
   onQueuedDrop: () => void;
   pendingRestore: string | null;
   onRestored: () => void;
-  /** What the host calls this conversation, and how it reads its stored
-   *  timeline — both straight through to the header. */
-  sessionTitle: string;
-  sessionStatus: ChatStatus | null;
   bannerVisible: boolean;
   onHideBanner: () => void;
   skillSuggestion: {
@@ -126,13 +127,13 @@ export function ChatScreen({
   skills,
   composerFocusKey,
   pendingInsert,
+  sessionTitle,
+  sessionStatus,
   queued,
   onQueuedEdit,
   onQueuedDrop,
   pendingRestore,
   onRestored,
-  sessionTitle,
-  sessionStatus,
   bannerVisible,
   onHideBanner,
   skillSuggestion,
