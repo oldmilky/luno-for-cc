@@ -28,12 +28,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   resolveWebviewView(view: vscode.WebviewView) {
-    this.sidebar.attach({
-      webview: view.webview,
-      // `show` is optional on the view type and absent in some hosts, hence the
-      // guard rather than a direct call.
-      reveal: () => view.show?.(true)
-    });
+    this.sidebar.attach(
+      {
+        webview: view.webview,
+        // `show` is optional on the view type and absent in some hosts, hence
+        // the guard rather than a direct call.
+        reveal: () => view.show?.(true)
+      },
+      // Only the sidebar resumes: it is the surface a window reload is expected
+      // to bring back. A tab that did this would reopen a chat already on
+      // screen.
+      { resumeLastConversation: true }
+    );
+  }
+
+  /** Open an additional conversation as an editor tab. It runs its own turn,
+   *  and nothing about it disturbs the sidebar's. */
+  openInNewTab() {
+    this.registry.openInTab();
   }
 
   // ── Commands bound in extension.ts ───────────────────────────

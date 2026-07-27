@@ -2,7 +2,7 @@
   "name": "luno-for-cc",
   "displayName": "LUNO for CC",
   "description": "LUNO for CC — personal Claude Code chat for Cursor / VS Code.",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "publisher": "lunoweb",
   "license": "MIT",
   "icon": "assets/luno-icon-500.png",
@@ -66,6 +66,11 @@
         "title": "LUNO: New Chat"
       },
       {
+        "command": "luno.openInNewTab",
+        "title": "LUNO: Open Chat in New Tab",
+        "icon": "$(add)"
+      },
+      {
         "command": "luno.toggleChat",
         "title": "LUNO: Toggle Chat Panel"
       },
@@ -114,6 +119,13 @@
           "command": "luno.commentOnSelection",
           "group": "luno@1",
           "when": "editorHasSelection"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "luno.openInNewTab",
+          "when": "view == luno.chat",
+          "group": "navigation@1"
         }
       ]
     },

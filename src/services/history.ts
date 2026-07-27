@@ -18,6 +18,16 @@ export interface StoredSession {
   timeline: TimelineEvent[];
   /** Claude CLI session id used with `claude --resume`. Subscription-mode only. */
   resumeId?: string;
+  /**
+   * Absolute path of the workspace folder this conversation belongs to.
+   *
+   * Sessions live in globalStorage, which is shared across every project, so
+   * without this the history list mixes chats from unrelated repositories.
+   * Absent on sessions written before this field existed; those are treated as
+   * belonging to no project rather than to all of them, which is what keeps the
+   * list scoped instead of merely reordered.
+   */
+  workspaceRoot?: string;
 }
 
 export interface HistoryEntry {
@@ -35,8 +45,26 @@ export interface HistoryEntry {
 export class HistoryService {
   private dir: string;
 
+  /** The project whose chats `list()` returns. Undefined when no folder is
+   *  open, in which case nothing is filtered — there is no project to scope to
+   *  and an empty list would just look broken. */
+  private readonly workspaceRoot?: string;
+
   constructor(ctx: vscode.ExtensionContext) {
     this.dir = path.join(ctx.globalStorageUri.fsPath, "sessions");
+    this.workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  }
+
+  /** Stamp a session with the project it belongs to. Called on the way to disk
+   *  so a conversation carries its own scope rather than the list guessing. */
+  private scoped(session: StoredSession): StoredSession {
+    if (!this.workspaceRoot || session.workspaceRoot) return session;
+    return { ...session, workspaceRoot: this.workspaceRoot };
+  }
+
+  private belongsHere(session: StoredSession): boolean {
+    if (!this.workspaceRoot) return true;
+    return session.workspaceRoot === this.workspaceRoot;
   }
 
   async ensureReady(): Promise<void> {
@@ -55,7 +83,7 @@ export class HistoryService {
     await this.ensureReady();
     const file = path.join(this.dir, `${session.id}.json`);
     const tmp = `${file}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(session));
+    await fs.writeFile(tmp, JSON.stringify(this.scoped(session)));
     await fs.rename(tmp, file);
   }
 
@@ -68,6 +96,7 @@ export class HistoryService {
       try {
         const raw = await fs.readFile(path.join(this.dir, f), "utf8");
         const s = JSON.parse(raw) as StoredSession;
+        if (!this.belongsHere(s)) continue;
         // Derive title/snippet fresh from the timeline so the cleaning rules
         // below apply retroactively to sessions saved with older logic.
         const title = deriveTitle(s.timeline) || s.title || "New chat";

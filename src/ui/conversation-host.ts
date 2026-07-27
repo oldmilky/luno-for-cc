@@ -93,6 +93,15 @@ export interface SharedServices {
   decorations: PlanDecorationService;
   models: ModelResolver;
   auth: AuthManager;
+  /**
+   * The conversation already showing `sessionId`, if one is open.
+   *
+   * A host asks before adopting a stored session so it can hand over instead of
+   * opening a second view onto the same chat. Two hosts on one session would
+   * resume the same CLI session from two processes and interleave their
+   * timelines into one history file.
+   */
+  conversationFor(sessionId: string): ConversationHost | undefined;
 }
 
 /**
@@ -105,6 +114,19 @@ export interface SharedServices {
 export interface HostTarget {
   webview: vscode.Webview;
   reveal(): void;
+}
+
+export interface AttachOptions {
+  /**
+   * Adopt the most recently updated stored session instead of starting empty.
+   *
+   * True for the sidebar only. Without it a window reload would give the user's
+   * one chat a new session id and split it across history entries. A new tab
+   * must not do this: it would open a second view onto a conversation that is
+   * already on screen, and two hosts resuming one CLI session is the process
+   * contention this whole design exists to avoid.
+   */
+  resumeLastConversation?: boolean;
 }
 
 /**
@@ -243,7 +265,7 @@ export class ConversationHost {
    * editor tab, whose `WebviewPanel` shares only the webview and a way to come
    * forward.
    */
-  attach(target: HostTarget) {
+  attach(target: HostTarget, opts: AttachOptions = {}) {
     this.target = target;
     const view = target;
     view.webview.options = {
@@ -264,13 +286,10 @@ export class ConversationHost {
     });
     this.post({ type: "hello", sessionId: this.session.id });
     void this.broadcastAuthState();
-    // Try to pick up the most recently used chat instead of starting fresh.
-    // Without this, every VS Code reload / extension activation would create
-    // a new Session id and the user's "one chat" would split across
-    // history entries on each reload. The restore is best-effort: if there's
-    // no prior session (or none with user content) we just keep the empty
-    // session that the constructor created.
-    void this.restoreLatestSession().then(() => {
+    const booted = opts.resumeLastConversation
+      ? this.restoreLatestSession()
+      : Promise.resolve();
+    void booted.then(() => {
       this.replayTimeline();
       void broadcastUsage(this.post);
     });
@@ -865,6 +884,15 @@ export class ConversationHost {
   }
 
   private async loadHistorySession(id: string) {
+    // Already open somewhere else — bring that one forward rather than start a
+    // rival host on the same session. Matches what the official extension's URI
+    // handler does, and here it is also a correctness guard: two hosts sharing a
+    // session id would resume one CLI session twice.
+    const open = this.shared.conversationFor(id);
+    if (open && open !== this) {
+      open.reveal();
+      return;
+    }
     const stored = await this.history.load(id);
     if (!stored) {
       this.post({ type: "error", message: "Session not found." });

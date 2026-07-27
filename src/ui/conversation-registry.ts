@@ -29,11 +29,18 @@ import type { Post } from "./messages.js";
  *  `claude` in a terminal. */
 const USAGE_POLL_MS = 60_000;
 
+/** Webview panel type for a conversation opened as an editor tab. VS Code keys
+ *  serialization and `retainContextWhenHidden` off it. */
+const TAB_VIEW_TYPE = "luno.conversation";
+
 export class ConversationRegistry {
   private readonly hosts = new Set<ConversationHost>();
   private readonly shared: SharedServices;
   private readonly disposables: vscode.Disposable[] = [];
   private usageTimer?: NodeJS.Timeout;
+  /** Tabs are numbered so five of them are tellable apart. Real conversation
+   *  titles land with the rest of the tab status work. */
+  private nextTabNumber = 1;
 
   /**
    * The conversation the editor follows.
@@ -79,7 +86,8 @@ export class ConversationRegistry {
       history: new HistoryService(ctx),
       decorations,
       models,
-      auth
+      auth,
+      conversationFor: (sessionId) => this.conversationFor(sessionId)
     };
 
     // Pointing at a different `claude` binary changes which models the aliases
@@ -101,11 +109,54 @@ export class ConversationRegistry {
     ctx.subscriptions.push({ dispose: () => this.dispose() });
   }
 
+  /**
+   * The conversation showing `sessionId`, if one is open.
+   *
+   * Walks the live hosts rather than reading an index: a host's session id
+   * changes under it on New Chat and on load, and a stale index would hand back
+   * the wrong conversation. A handful of hosts makes the walk free.
+   */
+  conversationFor(sessionId: string): ConversationHost | undefined {
+    return [...this.hosts].find((h) => h.sessionId === sessionId);
+  }
+
   /** Create a conversation. The first one becomes the primary. */
   create(): ConversationHost {
     const host = new ConversationHost(this.shared);
     this.hosts.add(host);
     this.primary ??= host;
+    return host;
+  }
+
+  /**
+   * Open a conversation as an editor tab.
+   *
+   * `retainContextWhenHidden` keeps a hidden tab's DOM alive. It costs memory
+   * per tab, and it is the deliberate trade: without it VS Code tears the
+   * webview down on hide and the chat would have to replay its whole timeline —
+   * and drop its scroll position and half-typed prompt — every time the user
+   * looked at another file.
+   */
+  openInTab(): ConversationHost {
+    const host = this.create();
+    const panel = vscode.window.createWebviewPanel(
+      TAB_VIEW_TYPE,
+      `Luno ${this.nextTabNumber++}`,
+      vscode.ViewColumn.Active,
+      { enableScripts: true, retainContextWhenHidden: true }
+    );
+    panel.iconPath = vscode.Uri.joinPath(
+      this.shared.ctx.extensionUri,
+      "assets",
+      "luno-activitybar.png"
+    );
+    host.attach({
+      webview: panel.webview,
+      reveal: () => panel.reveal()
+    });
+    // Closing the tab ends the conversation: its CLI process must die with it
+    // rather than keep streaming into a webview nobody can see.
+    panel.onDidDispose(() => this.close(host));
     return host;
   }
 

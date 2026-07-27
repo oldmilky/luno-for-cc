@@ -18,6 +18,9 @@ export function activate(ctx: vscode.ExtensionContext) {
 
   ctx.subscriptions.push(
     vscode.commands.registerCommand("luno.newChat", () => panel.newSession()),
+    vscode.commands.registerCommand("luno.openInNewTab", () =>
+      panel.openInNewTab()
+    ),
     vscode.commands.registerCommand("luno.toggleChat", () =>
       vscode.commands.executeCommand("workbench.view.extension.luno")
     ),
