@@ -90,6 +90,8 @@ interface FakeWebview {
   asWebviewUri(u: unknown): unknown;
   postMessage(m: unknown): Promise<boolean>;
   onDidReceiveMessage(cb: (m: unknown) => void): { dispose(): void };
+  /** Bind this surface to whoever occupies it, the way the panel does. */
+  route(pick: () => { receiveMessage(m: never): void } | undefined): void;
   deliver(m: unknown): void;
 }
 
@@ -104,6 +106,9 @@ const makeWebview = vi.hoisted(() => (): FakeWebview => {
     onDidReceiveMessage: (cb: (m: unknown) => void) => {
       handler = cb;
       return disposable;
+    },
+    route: (pick: () => { receiveMessage(m: never): void } | undefined) => {
+      handler = (m: unknown) => pick()?.receiveMessage(m as never);
     },
     deliver: (m: unknown) => handler?.(m)
   };
@@ -174,6 +179,7 @@ describe("worktree isolation", () => {
     const host = registry.create();
     const surface = fakeTarget();
     host.attach(surface.target as never, { isolate: true });
+    surface.webview.route(() => host as never);
 
     surface.webview.deliver({ type: "prompt", text: "hello" });
     await settle();
@@ -191,6 +197,7 @@ describe("worktree isolation", () => {
     const host = registry.create();
     const surface = fakeTarget();
     host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
 
     surface.webview.deliver({ type: "prompt", text: "hello" });
     await settle();
@@ -204,6 +211,7 @@ describe("worktree isolation", () => {
     const host = registry.create();
     const surface = fakeTarget();
     host.attach(surface.target as never, { isolate: true });
+    surface.webview.route(() => host as never);
 
     surface.webview.deliver({ type: "prompt", text: "one" });
     await settle();
@@ -219,6 +227,7 @@ describe("worktree isolation", () => {
     const host = registry.create();
     const surface = fakeTarget();
     host.attach(surface.target as never, { isolate: true });
+    surface.webview.route(() => host as never);
 
     surface.webview.deliver({ type: "prompt", text: "hello" });
     await settle();
@@ -237,6 +246,7 @@ describe("worktree isolation", () => {
     const host = registry.create();
     const surface = fakeTarget();
     host.attach(surface.target as never, { isolate: true });
+    surface.webview.route(() => host as never);
 
     surface.webview.deliver({ type: "prompt", text: "hello" });
     await settle();

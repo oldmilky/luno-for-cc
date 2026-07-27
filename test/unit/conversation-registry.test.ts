@@ -21,6 +21,8 @@ interface FakeWebview {
   asWebviewUri(u: unknown): unknown;
   postMessage(m: { type?: string }): Promise<boolean>;
   onDidReceiveMessage(cb: (m: unknown) => void): { dispose(): void };
+  /** Bind this surface to whoever occupies it, the way the panel does. */
+  route(pick: () => { receiveMessage(m: never): void } | undefined): void;
   sent: { type?: string }[];
   deliver(m: unknown): void;
 }
@@ -40,6 +42,9 @@ const makeWebview = vi.hoisted(() => (): FakeWebview => {
     onDidReceiveMessage: (cb: (m: unknown) => void) => {
       handler = cb;
       return disposable;
+    },
+    route: (pick: () => { receiveMessage(m: never): void } | undefined) => {
+      handler = (m: unknown) => pick()?.receiveMessage(m as never);
     },
     sent,
     deliver: (m: unknown) => handler?.(m)
@@ -238,6 +243,9 @@ describe("ConversationRegistry", () => {
     const sidebar = fakeTarget();
     const first = registry.create();
     registry.useSidebar(sidebar.target as never, first);
+    // The panel binds one listener to the surface and routes it to whoever
+    // occupies it; a test that bound it to `first` would not exercise the swap.
+    sidebar.webview.route(() => registry.sidebarConversation() as never);
     first.attach(sidebar.target as never);
     // Give it a conversation of its own to be protective of.
     sidebar.webview.deliver({ type: "loadSession", id: "stored-2" });
@@ -264,6 +272,9 @@ describe("ConversationRegistry", () => {
     const sidebar = fakeTarget();
     const first = registry.create();
     registry.useSidebar(sidebar.target as never, first);
+    // The panel binds one listener to the surface and routes it to whoever
+    // occupies it; a test that bound it to `first` would not exercise the swap.
+    sidebar.webview.route(() => registry.sidebarConversation() as never);
     first.attach(sidebar.target as never);
     sidebar.webview.deliver({ type: "loadSession", id: "stored-2" });
     await settle();
@@ -273,8 +284,6 @@ describe("ConversationRegistry", () => {
     sidebar.webview.deliver({ type: "loadSession", id: "stored-2" });
     await settle();
 
-    // Switching back must land on the same host: a second one would resume the
-    // same CLI session from a second process.
     expect(registry.sidebarConversation()).toBe(first);
     expect(first.hasSurface).toBe(true);
   });
@@ -285,6 +294,7 @@ describe("ConversationRegistry", () => {
     const blank = fakeTarget();
     const blankHost = registry.create();
     blankHost.attach(blank.target as never);
+    blank.webview.route(() => blankHost as never);
 
     blank.webview.deliver({ type: "loadSession", id: "stored-1" });
     await settle();
@@ -322,6 +332,8 @@ describe("ConversationRegistry", () => {
     const otherHost = registry.create();
     ownerHost.attach(owner.target as never);
     otherHost.attach(other.target as never);
+    owner.webview.route(() => ownerHost as never);
+    other.webview.route(() => otherHost as never);
 
     owner.webview.deliver({ type: "loadSession", id: "stored-1" });
     await settle();
@@ -401,5 +413,46 @@ describe("switching away from a running conversation", () => {
     // Replaying the buffer here would print the answer twice: once from the
     // timeline, once from the buffer it was flushed out of.
     expect(sidebar.webview.sent.filter((m) => m.type === "delta")).toEqual([]);
+  });
+});
+
+describe("the sidebar's listener follows its occupant", () => {
+  it("answers into the sidebar after switching conversations", async () => {
+    writeStoredSession("stored-1");
+    writeStoredSession("stored-2");
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const sidebar = fakeTarget();
+    const first = registry.create();
+    registry.useSidebar(sidebar.target as never, first);
+    sidebar.webview.route(() => registry.sidebarConversation() as never);
+    first.attach(sidebar.target as never);
+
+    sidebar.webview.deliver({ type: "loadSession", id: "stored-1" });
+    await settle();
+    sidebar.webview.deliver({ type: "loadSession", id: "stored-2" });
+    await settle();
+
+    sidebar.webview.sent.length = 0;
+    sidebar.webview.deliver({ type: "requestHistory" });
+    await settle();
+
+    // The reported failure: a listener bound to the conversation that happened
+    // to be first kept receiving after the swap and answered into a webview it
+    // no longer posted to — a history panel stuck on skeletons, and a composer
+    // that swallowed every prompt.
+    expect(typesOf(sidebar.webview.sent)).toContain("historyList");
+  });
+
+  it("does not let a conversation capture the surface it is attached to", () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = fakeTarget();
+    registry.create().attach(surface.target as never);
+
+    surface.webview.sent.length = 0;
+    // Nothing routed this surface, so nothing should be listening. A host that
+    // registers its own listener would answer here and outlive its own tenancy.
+    surface.webview.deliver({ type: "requestHistory" });
+
+    expect(surface.webview.sent).toEqual([]);
   });
 });

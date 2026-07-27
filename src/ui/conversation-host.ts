@@ -565,15 +565,6 @@ export class ConversationHost {
       ]
     };
     view.webview.html = this.html(view.webview);
-
-    view.webview.onDidReceiveMessage((msg) => {
-      // onMessage is async; surface rejections instead of letting them become
-      // silent unhandled promise rejections (which previously masked failures
-      // like a throwing checkpoint restore mid-rewind).
-      void this.onMessage(msg).catch((err) =>
-        console.error("[luno] onMessage failed:", err)
-      );
-    });
     this.post({ type: "hello", sessionId: this.session.id });
     void this.broadcastAuthState();
     const booted = opts.adoptSessionId
@@ -1167,6 +1158,24 @@ export class ConversationHost {
     }
   };
 
+  /**
+   * Take one message from a webview.
+   *
+   * Public, and the listener lives with the *surface* rather than here. The
+   * sidebar's occupant changes; a listener registered by whichever conversation
+   * happened to be first would keep receiving after the swap and answer into a
+   * webview it no longer owns — which is a chat that renders but cannot be
+   * typed into, and a history panel that never loads.
+   */
+  receiveMessage(msg: RawMessage): void {
+    // onMessage is async; surface rejections instead of letting them become
+    // silent unhandled promise rejections (which previously masked failures
+    // like a throwing checkpoint restore mid-rewind).
+    void this.onMessage(msg).catch((err) =>
+      console.error("[luno] onMessage failed:", err)
+    );
+  }
+
   private async onMessage(msg: RawMessage) {
     // Any inbound message means the user is working in this conversation.
     this.shared.markActive(this);
@@ -1223,21 +1232,18 @@ export class ConversationHost {
   }
 
   private async loadHistorySession(id: string) {
-    // Already open somewhere else — bring that one forward rather than start a
-    // rival host on the same session. Matches what the official extension's URI
-    // handler does, and here it is also a correctness guard: two hosts sharing a
-    // session id would resume one CLI session twice.
+    // Two reasons not to adopt this session here, and both end the same way:
+    // another conversation already owns it — two hosts on one session would
+    // resume the same CLI session twice — or this conversation has work in it,
+    // and replacing that in place is what used to kill a running turn.
+    //
+    // Deciding *how* to show it is the registry's job, because only it knows
+    // whether the owner is on screen or merely detached. Answering that here
+    // was the bug: a detached owner was told to `reveal`, which does nothing
+    // without a surface, so switching back to a chat left running silently
+    // did nothing at all.
     const open = this.shared.conversationFor(id);
-    if (open && open !== this) {
-      open.reveal();
-      return;
-    }
-    // A conversation with work in it is never replaced in place — adopting
-    // here would end the turn running in it. The surface switches to the picked
-    // chat instead, and this one carries on where it is, reachable again from
-    // history. Only a blank conversation is reused, which is the case where the
-    // user is plainly choosing what to put in it.
-    if (this.activeTurn || this.session.timeline.length > 0) {
+    if ((open && open !== this) || this.hasWork) {
       this.shared.showConversation(id);
       return;
     }

@@ -91,6 +91,8 @@ interface FakeWebview {
   asWebviewUri(u: unknown): unknown;
   postMessage(m: { type?: string }): Promise<boolean>;
   onDidReceiveMessage(cb: (m: unknown) => void): { dispose(): void };
+  /** Bind this surface to whoever occupies it, the way the panel does. */
+  route(pick: () => { receiveMessage(m: never): void } | undefined): void;
   sent: { type?: string }[];
   deliver(m: unknown): void;
 }
@@ -110,6 +112,9 @@ const makeWebview = vi.hoisted(() => (): FakeWebview => {
     onDidReceiveMessage: (cb: (m: unknown) => void) => {
       handler = cb;
       return disposable;
+    },
+    route: (pick: () => { receiveMessage(m: never): void } | undefined) => {
+      handler = (m: unknown) => pick()?.receiveMessage(m as never);
     },
     sent,
     deliver: (m: unknown) => handler?.(m)
@@ -178,8 +183,16 @@ describe("per-conversation settings", () => {
     const registry = new ConversationRegistry(fakeContext() as never);
     const first = fakeTarget();
     const second = fakeTarget();
-    registry.create().attach(first.target as never);
-    registry.create().attach(second.target as never);
+    {
+      const h = registry.create();
+      h.attach(first.target as never);
+      first.webview.route(() => h as never);
+    }
+    {
+      const h = registry.create();
+      h.attach(second.target as never);
+      second.webview.route(() => h as never);
+    }
 
     first.webview.deliver({ type: "setPermissionMode", mode: "plan" });
     second.webview.deliver({ type: "setEffort", effort: "max" });
@@ -195,8 +208,16 @@ describe("per-conversation settings", () => {
     const registry = new ConversationRegistry(fakeContext() as never);
     const planning = fakeTarget();
     const working = fakeTarget();
-    registry.create().attach(planning.target as never);
-    registry.create().attach(working.target as never);
+    {
+      const h = registry.create();
+      h.attach(planning.target as never);
+      planning.webview.route(() => h as never);
+    }
+    {
+      const h = registry.create();
+      h.attach(working.target as never);
+      working.webview.route(() => h as never);
+    }
 
     planning.webview.deliver({ type: "setPermissionMode", mode: "plan" });
     working.webview.deliver({ type: "setPermissionMode", mode: "auto" });
@@ -217,6 +238,7 @@ describe("per-conversation settings", () => {
     const first = fakeTarget();
     const host = registry.create();
     host.attach(first.target as never);
+    first.webview.route(() => host as never);
 
     first.webview.deliver({ type: "prompt", text: "hello" });
     await settle();
@@ -254,6 +276,7 @@ describe("per-conversation settings", () => {
     const surface = fakeTarget();
     const host = registry.create();
     host.attach(surface.target as never, { adoptSessionId: "old" });
+    surface.webview.route(() => host as never);
     await settle();
 
     // No `effort` in the file, and reading `undefined` back would have left the
@@ -267,8 +290,16 @@ describe("per-conversation settings", () => {
     const registry = new ConversationRegistry(fakeContext() as never);
     const first = fakeTarget();
     const second = fakeTarget();
-    registry.create().attach(first.target as never);
-    registry.create().attach(second.target as never);
+    {
+      const h = registry.create();
+      h.attach(first.target as never);
+      first.webview.route(() => h as never);
+    }
+    {
+      const h = registry.create();
+      h.attach(second.target as never);
+      second.webview.route(() => h as never);
+    }
 
     // Interacting with the second one makes it the target of a keybinding.
     second.webview.deliver({ type: "refreshAuth" });
@@ -304,6 +335,7 @@ describe("conversation status", () => {
     const surface = titledTarget();
     const host = registry.create();
     host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
 
     surface.webview.deliver({
       type: "prompt",
@@ -319,6 +351,7 @@ describe("conversation status", () => {
     const surface = titledTarget();
     const host = registry.create();
     host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
     host.setVisible(false);
 
     surface.webview.deliver({ type: "prompt", text: "do the thing" });
@@ -334,6 +367,7 @@ describe("conversation status", () => {
     const surface = titledTarget();
     const host = registry.create();
     host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
     host.setVisible(false);
     surface.webview.deliver({ type: "prompt", text: "do the thing" });
     await settle();
@@ -349,6 +383,7 @@ describe("conversation status", () => {
     const surface = titledTarget();
     const host = registry.create();
     host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
 
     surface.webview.deliver({ type: "prompt", text: "do the thing" });
     await settle();
@@ -364,7 +399,9 @@ describe("conversation status", () => {
     const first = registry.create();
     const second = registry.create();
     first.attach(one.target as never);
+    one.webview.route(() => first as never);
     second.attach(two.target as never);
+    two.webview.route(() => second as never);
     first.setVisible(false);
     second.setVisible(false);
 

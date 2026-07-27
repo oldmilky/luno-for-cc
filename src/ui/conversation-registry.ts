@@ -294,6 +294,10 @@ export class ConversationRegistry {
       },
       { adoptSessionId: sessionId, isolate: isolationWanted("tab") }
     );
+    // A tab is built around one conversation and dies with it, so its listener
+    // can bind to that host directly — unlike the sidebar, whose occupant
+    // changes underneath it.
+    panel.webview.onDidReceiveMessage((msg) => host.receiveMessage(msg));
     // A hidden tab keeps running, so it has to be able to say it finished or
     // needs an answer without being on screen.
     panel.onDidChangeViewState(() => host.setVisible(panel.visible));

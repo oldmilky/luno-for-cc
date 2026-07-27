@@ -48,6 +48,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // The sidebar is a fixed surface whose occupant changes; the registry owns
     // that swap, so it needs both.
     this.registry.useSidebar(target, this.sidebar);
+    // Registered once, on the surface, and routed to whoever occupies it now.
+    // A listener owned by a conversation would keep answering after it had been
+    // swapped out — into a webview it no longer posts to.
+    view.webview.onDidReceiveMessage((msg) => this.current.receiveMessage(msg));
     this.sidebar.attach(
       target,
       // Only the sidebar resumes: it is the surface a window reload is expected
