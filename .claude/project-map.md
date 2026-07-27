@@ -17,15 +17,17 @@ carries a contract lens.
 
 ## Extension host — `src/` · 35 files, 11.5k lines
 
-| Path                      | Owns                                                                 | Lines        |
-| ------------------------- | -------------------------------------------------------------------- | ------------ |
-| `ui/panel.ts`             | the webview provider, all 63 handlers, half the business logic       | **2981**     |
-| `providers/claude-cli.ts` | spawn, stream-json parsing, the control protocol                     | 1290         |
-| `providers/factory.ts`    | binary discovery — the single entry point                            | ~260         |
-| `services/mcp/`           | connectors: OAuth, stdio, catalog, storage, CLI config               | 1122 (index) |
-| `core/`                   | orchestrator, session, plan-intercept, task-classifier, types        | —            |
-| `services/`               | checkpoint, history, conventions, skills, marketplace, usage, memory | —            |
-| `ui/webview-html.ts`      | the page for both surfaces, prod and dev-server branches             | ~160         |
+| Path                          | Owns                                                                 | Lines        |
+| ----------------------------- | -------------------------------------------------------------------- | ------------ |
+| `ui/conversation-host.ts`     | one conversation: session, checkpoints, turn, all 63 handlers        | **1696**     |
+| `ui/conversation-registry.ts` | every live conversation, the shared services, the sidebar swap       | 349          |
+| `ui/panel.ts`                 | the `WebviewViewProvider` contract and the bound commands            | 104          |
+| `providers/claude-cli.ts`     | spawn, stream-json parsing, the control protocol                     | 1290         |
+| `providers/factory.ts`        | binary discovery — the single entry point                            | ~260         |
+| `services/mcp/`               | connectors: OAuth, stdio, catalog, storage, CLI config               | 1122 (index) |
+| `core/`                       | orchestrator, session, plan-intercept, task-classifier, types        | —            |
+| `services/`                   | checkpoint, history, conventions, skills, marketplace, usage, memory | —            |
+| `ui/webview-html.ts`          | the page for both surfaces, prod and dev-server branches             | ~160         |
 
 **`src/core/*` imports zero VS Code APIs** — verified, not assumed. That is the
 only part testable without a mock editor, and it is where logic belongs.
@@ -46,15 +48,15 @@ only part testable without a mock editor, and it is where logic belongs.
 
 ## Where to change what
 
-| To add…                   | Touch                                                   |
-| ------------------------- | ------------------------------------------------------- |
-| a message across the seam | `lib/rpc.ts` union **and** a handler in `ui/panel.ts`   |
-| a colour, radius, shadow  | a token in `themes/*` — never a component               |
-| a palette                 | one file in `themes/` — components are not touched      |
-| a duration or curve       | `design/motion.ts` — then spread the preset             |
-| an icon                   | one Solar import in `design/icons.tsx`                  |
-| a tooltip                 | `design/primitives/Tooltip` — never `title=`            |
-| a settings key            | `package.json` `contributes.configuration` + the reader |
+| To add…                   | Touch                                                                                              |
+| ------------------------- | -------------------------------------------------------------------------------------------------- |
+| a message across the seam | `lib/rpc.ts` union, `ui/messages.ts` `InboundType`, **and** a handler in `ui/conversation-host.ts` |
+| a colour, radius, shadow  | a token in `themes/*` — never a component                                                          |
+| a palette                 | one file in `themes/` — components are not touched                                                 |
+| a duration or curve       | `design/motion.ts` — then spread the preset                                                        |
+| an icon                   | one Solar import in `design/icons.tsx`                                                             |
+| a tooltip                 | `design/primitives/Tooltip` — never `title=`                                                       |
+| a settings key            | `package.json` `contributes.configuration` + the reader                                            |
 
 ## Shared resources — edit deliberately
 
@@ -76,15 +78,15 @@ The webview was rewritten across six phases and is ours. Treat a surprise in
 
 ## Size and debt
 
-| File                               | Lines | Judgement                                                                                                                                                               |
-| ---------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ui/panel.ts`                      | 2981  | **The god-file.** Protocol, routing and business logic in one switch. The main obstacle to any functional work; wants splitting by domain before the next feature round |
-| `providers/claude-cli.ts`          | 1290  | Big but coherent — one process lifecycle, one parser                                                                                                                    |
-| `services/mcp/index.ts`            | 1122  | Several transports in one module; a natural seam per transport                                                                                                          |
-| `features/chat/ChatScreen.tsx`     | 1037  | Owns too much state for one component                                                                                                                                   |
-| `features/chat/TokenMeter.tsx`     | 998   | A meter, a popover, a plan picker and an editor in one file                                                                                                             |
-| `features/mcp/ConnectorsModal.tsx` | 945   | Modal plus every connector flow                                                                                                                                         |
-| `design/primitives/RichEditor.tsx` | 881   | contenteditable serialisation — inherently dense, not accidental                                                                                                        |
+| File                               | Lines | Judgement                                                                                                                                                                              |
+| ---------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ui/conversation-host.ts`          | 1696  | The old god-file after Ф7 split out the registry and the provider. Still large, and still the place protocol handling and turn logic meet — the handler table is the natural next seam |
+| `providers/claude-cli.ts`          | 1290  | Big but coherent — one process lifecycle, one parser                                                                                                                                   |
+| `services/mcp/index.ts`            | 1122  | Several transports in one module; a natural seam per transport                                                                                                                         |
+| `features/chat/ChatScreen.tsx`     | 1037  | Owns too much state for one component                                                                                                                                                  |
+| `features/chat/TokenMeter.tsx`     | 998   | A meter, a popover, a plan picker and an editor in one file                                                                                                                            |
+| `features/mcp/ConnectorsModal.tsx` | 945   | Modal plus every connector flow                                                                                                                                                        |
+| `design/primitives/RichEditor.tsx` | 881   | contenteditable serialisation — inherently dense, not accidental                                                                                                                       |
 
 Everything else is under 700 lines.
 

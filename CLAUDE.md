@@ -19,7 +19,7 @@ reappears, something ran `npm install` and the two will drift.
 | ------------------ | ------------------------------------------------------- |
 | All gates          | `bun run lint` (tsc ×2 → eslint → stylelint)            |
 | Types only         | `bun run lint:types`                                    |
-| Tests              | `bun run test` — expect `357 passed, 6 skipped`         |
+| Tests              | `bun run test` — expect `441 passed, 6 skipped`         |
 | Build              | `bun run build` (esbuild → dist/, vite → webview/dist/) |
 | Package            | `bun run package` → `luno-for-cc-<ver>.vsix`, ~589 kB   |
 | Format             | `bun run format` · check with `format:check`            |
@@ -65,7 +65,7 @@ Fire these without being asked. Each row is a trip-wire, not a suggestion.
 Never report work as complete without all four:
 
 1. `bun run lint` clean — that is tsc over **both** projects, eslint, stylelint
-2. `bun run test` at `357 passed, 6 skipped` or better
+2. `bun run test` at `441 passed, 6 skipped` or better
 3. Behaviour verified where it runs — the harness for UI, tests for host logic
 4. Every claim tied to evidence actually seen: a command's output, a measured
    value, a screenshot
