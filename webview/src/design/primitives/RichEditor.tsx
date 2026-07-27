@@ -38,6 +38,10 @@ export interface RichEditorHandle {
   focus(): void;
   clear(): void;
   serialize(): string;
+  /** Replace the content with markdown, as if the editor had mounted with it.
+   *  The DOM is the source of truth after mount, so a caller that needs to put
+   *  text *in* has no other way to reach it. */
+  setText(text: string): void;
 }
 
 export interface RichEditorProps {
@@ -61,7 +65,6 @@ export interface RichEditorProps {
    * attachment chips above the composer).
    */
   onImagePaste?: (files: File[]) => void;
-  busy: boolean;
   placeholder?: string;
 }
 
@@ -79,7 +82,6 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(
       onOpenBadge,
       onOpenMention,
       onImagePaste,
-      busy,
       placeholder = "Ask, edit, or plan anything. Type @ to mention a file. ⌘U to insert selection."
     },
     forwardedRef
@@ -159,7 +161,17 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(
         setIsEmpty(true);
         onChange("");
       },
-      serialize: () => (ref.current ? serialize(ref.current) : "")
+      serialize: () => (ref.current ? serialize(ref.current) : ""),
+      setText: (text: string) => {
+        const el = ref.current;
+        if (!el) return;
+        el.innerHTML = "";
+        if (text) renderInitial(el, text);
+        const next = serialize(el);
+        setIsEmpty(next.trim().length === 0);
+        onChange(next);
+        placeCaretAtEnd(el);
+      }
     }));
 
     const handleInput = () => {
@@ -317,10 +329,13 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(
     return (
       <div className={s.wrap}>
         {isEmpty && <div className={s.placeholder}>{placeholder}</div>}
+        {/* Editable through a running turn: what happens to a message sent
+            mid-turn is the host's decision (it queues it), and taking the
+            keyboard away here made the answer "nothing, silently". */}
         <div
           ref={ref}
           className={s.editor}
-          contentEditable={!busy}
+          contentEditable
           suppressContentEditableWarning
           spellCheck={false}
           onInput={handleInput}

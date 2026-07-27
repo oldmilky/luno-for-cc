@@ -14,7 +14,7 @@ import {
   EffortLevel,
   ModelInfo,
   SkillInfo,
-  ConventionsSource,
+  ChatStatus,
   PermissionRequestView
 } from "../../lib/rpc";
 import { ConnectorsModal } from "../mcp";
@@ -29,6 +29,7 @@ import type { CodeInsert } from "../../design/primitives";
 import { Header } from "./Header";
 import { Composer } from "./Composer";
 import { ContextStrip } from "./ContextStrip";
+import { QueuedPrompt } from "./QueuedPrompt";
 import { EmptyState } from "./EmptyState";
 import { ErrorBanner } from "./ErrorBanner";
 import { RewindModal } from "./RewindModal";
@@ -73,11 +74,16 @@ export interface ChatScreenProps {
   skills: ReadonlyArray<SkillInfo>;
   composerFocusKey: number;
   pendingInsert: CodeInsert | null;
-  conventions: {
-    source: ConventionsSource | null;
-    path: string | null;
-    relativePath: string | null;
-  };
+  /** The follow-up waiting for the running turn to end, "" when none. */
+  queued: string;
+  onQueuedEdit: (text: string) => void;
+  onQueuedDrop: () => void;
+  pendingRestore: string | null;
+  onRestored: () => void;
+  /** What the host calls this conversation, and how it reads its stored
+   *  timeline — both straight through to the header. */
+  sessionTitle: string;
+  sessionStatus: ChatStatus | null;
   bannerVisible: boolean;
   onHideBanner: () => void;
   skillSuggestion: {
@@ -120,7 +126,13 @@ export function ChatScreen({
   skills,
   composerFocusKey,
   pendingInsert,
-  conventions,
+  queued,
+  onQueuedEdit,
+  onQueuedDrop,
+  pendingRestore,
+  onRestored,
+  sessionTitle,
+  sessionStatus,
   bannerVisible,
   onHideBanner,
   skillSuggestion,
@@ -293,9 +305,11 @@ export function ChatScreen({
   return (
     <>
       <Header
-        permissionMode={permissionMode}
+        title={sessionTitle}
+        storedStatus={sessionStatus}
         busy={busy}
-        conventions={conventions}
+        awaitingApproval={pendingPermission !== null}
+        errored={error !== null}
         events={events}
         streaming={streaming}
         onOpenHistory={() => setHistoryOpen(true)}
@@ -527,6 +541,16 @@ export function ChatScreen({
           }}
           onUnpin={() => editorContext && onUnpin(editorContext.file)}
         />
+        <AnimatePresence initial={false}>
+          {queued && (
+            <QueuedPrompt
+              key="queued"
+              text={queued}
+              onEdit={onQueuedEdit}
+              onDrop={onQueuedDrop}
+            />
+          )}
+        </AnimatePresence>
         <Composer
           value={input}
           onChange={onInput}
@@ -547,6 +571,8 @@ export function ChatScreen({
           focusKey={composerFocusKey}
           pendingInsert={pendingInsert}
           onInserted={onInserted}
+          pendingRestore={pendingRestore}
+          onRestored={onRestored}
         />
       </div>
     </>

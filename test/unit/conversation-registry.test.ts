@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { HistoryEntry } from "../../src/services/history.js";
 
 // The extension host imports `vscode` at module load, which does not exist off
 // a real editor. Only what the registry and a host touch while being built and
@@ -11,7 +12,7 @@ const disposable = { dispose: () => {} };
 
 /** Panels the code under test asked VS Code to create, newest last. */
 const panels = vi.hoisted(
-  () => [] as { webview: FakeWebview; revealed: number; disposed: number }[]
+  () => [] as { webview: FakeWebview; revealed: number; disposed: number; title?: string }[]
 );
 
 /** The tab serializer the registry registers, so a test can hand a panel back
@@ -515,12 +516,11 @@ describe("naming a conversation", () => {
     return (lists[lists.length - 1] as { sessions?: HistoryRow[] }).sessions;
   }
 
-  interface HistoryRow {
-    id: string;
-    title: string;
-    named?: boolean;
-    live?: string;
-  }
+  /** The row as the host actually posts it: a stored entry, plus the `open`
+   *  flag the registry adds for a session a conversation is holding. A local
+   *  hand-copy of this drifted from the real type without anything noticing —
+   *  `test/` was outside the type gate. */
+  type HistoryRow = HistoryEntry & { open?: boolean };
 
   it("gives a stored chat a name that outranks its first prompt", async () => {
     writeStoredSession("stored-1", 2, "the auth token expires mid-turn");

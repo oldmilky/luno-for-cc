@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────
-// Panel header — brand mark, identity chips, session actions.
-// Converted from Tailwind in Ф2а.
+// Panel header — two rows: the product and its quota above, the
+// conversation's name and state below.
 //
 // The two hard-coded rgba() values it carried were tokens in
 // disguise: the tile's inner highlight is --sheen (the token
@@ -17,11 +17,9 @@
   top: 0;
   z-index: 10;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   flex-shrink: 0;
-  gap: 8px;
-  min-height: 46px;
+  gap: 6px;
   padding: 9px 12px;
   border-bottom: 1px solid var(--b1);
   background: linear-gradient(
@@ -54,12 +52,69 @@
   }
 }
 
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+
+// Never wraps. The identity group used to carry the mode and conventions
+// chips too, and on a narrow sidebar they fell to a second line — which left
+// the action cluster centred against a two-line block instead of level with
+// the brand. What does not fit is dropped by `.optional` below, in order.
 .left {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+// ── Conversation row ─────────────────────────────────────────
+
+.session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  // Without this the title's ellipsis never engages: a flex item's floor is
+  // its content, so a long name pushes the status off the panel instead.
+  min-width: 0;
+}
+
+.sessionName,
+.sessionPlaceholder {
+  overflow: hidden;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sessionName {
+  color: var(--t2);
+}
+
+// A chat with nothing in it has no name yet, only a placeholder for one.
+.sessionPlaceholder {
+  color: var(--t4);
+  font-weight: 500;
+}
+
+.sessionRule {
+  flex-shrink: 0;
+  width: 1px;
+  height: 12px;
+  background: var(--b1);
+}
+
+.sessionStatus {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
 }
 
 // ── Brand mark ───────────────────────────────────────────────
@@ -101,6 +156,28 @@
   font-size: 13.5px;
   font-weight: 700;
   letter-spacing: -0.3px;
+}
+
+// A webview's viewport is the panel, so a media query measures the thing that
+// actually runs out. Below each width the least informative element goes: the
+// plan never changes, and the brand tile says "Luno" as well as the word does.
+//
+// Measured: the row needs 24px of padding + the identity group + an 8px gap +
+// 159px of actions, which is 469px with the subscription chip and 366px
+// without it. Both thresholds carry 8px on top, because a media query is
+// answered against a width that still counts the scrollbar while the layout
+// gets what is left — without the margin the group compresses by those 8px
+// before the chip gives way.
+@media (max-width: 477px) {
+  .optional {
+    display: none;
+  }
+}
+
+@media (max-width: 374px) {
+  .title {
+    display: none;
+  }
 }
 
 // ── Chip contents ────────────────────────────────────────────

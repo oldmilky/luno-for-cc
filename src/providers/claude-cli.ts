@@ -1,3 +1,4 @@
+import { log as logInfo } from "../services/logger.js";
 import { spawn, ChildProcess } from "node:child_process";
 import * as readline from "node:readline";
 import { ChatProvider, ProviderRequest } from "./base.js";
@@ -182,6 +183,10 @@ export interface ClaudeCliOpts {
   /** Project conventions file (CLAUDE.md / AGENTS.md / etc.). Injected via
    *  --append-system-prompt unless `alreadyLoadedByCli` is true. */
   conventions?: ConventionsFile | null;
+  /** The editor's Problems, already formatted. Injected per turn because they
+   *  describe the tree as it is right now, not as it was when the session
+   *  started. */
+  diagnostics?: string | null;
   getResumeSessionId?: () => string | undefined;
   setResumeSessionId?: (id: string) => void;
   /** Anthropic auth token (OAuth `sk-ant-oat...` or API `sk-ant-api...`)
@@ -266,13 +271,13 @@ export class ClaudeCliProvider implements ChatProvider {
     // is at best a no-op and at worst sends an empty `updatedInput`, which
     // would make an "allow" silently run the tool with no arguments.
     if (!pending) {
-      console.log(
+      logInfo(
         `[luno] permission response for unknown id ${requestId} — ignored`
       );
       return;
     }
     this.pendingPermissions.delete(requestId);
-    console.log(
+    logInfo(
       `[luno] permission ${behavior} for ${pending.toolName} (${requestId})`
     );
     if (behavior === "allow") {
@@ -368,7 +373,7 @@ export class ClaudeCliProvider implements ChatProvider {
       suggestions: (req.permission_suggestions ?? []) as PermissionSuggestion[]
     };
     this.pendingPermissions.set(requestId, payload);
-    console.log(
+    logInfo(
       `[luno] permission needed: ${toolName}${destructive ? " (destructive)" : network ? " (network)" : ""} — awaiting user`
     );
     push({ type: "permission_request", permission: payload });
@@ -735,6 +740,12 @@ export function buildArgs(
   if (mode === "plan" && opts.taskType) {
     const taskAppend = getTaskTypePrompt(opts.taskType);
     if (taskAppend) args.push("--append-system-prompt", taskAppend);
+  }
+
+  // What the language servers already know. Sent as its own append so it can
+  // be dropped without disturbing the mode or conventions prompts.
+  if (opts.diagnostics) {
+    args.push("--append-system-prompt", opts.diagnostics);
   }
 
   // Project conventions. CLAUDE.md at root is auto-loaded by the CLI itself —

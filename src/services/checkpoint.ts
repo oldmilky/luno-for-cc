@@ -1,10 +1,37 @@
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { exec, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 const pexec = promisify(exec);
 const MAX_PER_SESSION = 20;
+
+/** Checkpoints older than this are swept at startup. They pin file contents
+ *  from a tree that has moved on, and nobody rewinds a month-old chat. */
+const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Bumped when the on-disk shape changes; an unreadable or older file is
+ *  discarded rather than migrated — a lost undo history is recoverable, a
+ *  misread one restores wrong bytes over the user's work. */
+const STATE_VERSION = 1;
+
+/** Where snapshots live, given VS Code's per-extension storage path. A
+ *  function rather than a constant so this module keeps importing no vscode
+ *  API — `src/core` and the services under it are unit-tested off an editor. */
+export function checkpointStoreDir(globalStoragePath: string): string {
+  return path.join(globalStoragePath, "checkpoints");
+}
+
+interface PersistedState {
+  v: number;
+  order: string[];
+  checkpoints: Array<{
+    turnId: string;
+    createdAt: number;
+    files: Array<{ relPath: string; existed: boolean; content?: string }>;
+  }>;
+}
 
 interface FileSnapshot {
   relPath: string;
@@ -22,7 +49,134 @@ export class CheckpointService {
   private checkpoints: Map<string, Checkpoint> = new Map();
   private order: string[] = [];
 
-  constructor(private workspaceRoot: string) {}
+  /** Where this session's snapshots live, or undefined when there is nowhere
+   *  to put them and rewind lasts only as long as the window does. */
+  private readonly stateFile?: string;
+
+  /** Serialises writes. Two turns can finish close enough together that their
+   *  saves interleave, and a half-written state file is worse than none. */
+  private writing: Promise<void> = Promise.resolve();
+
+  /**
+   * @param sessionId keys the snapshots on disk. Checkpoints belong to one
+   *   conversation: a rewind restoring files snapshotted by a different chat
+   *   is data loss, so nothing is shared between sessions.
+   * @param storeDir root for persisted snapshots. Omit both to keep the
+   *   in-memory behaviour, which is what the tests without storage exercise.
+   */
+  constructor(
+    private workspaceRoot: string,
+    sessionId?: string,
+    storeDir?: string
+  ) {
+    if (sessionId && storeDir) {
+      this.stateFile = path.join(storeDir, `${sessionId}.json`);
+      this.load();
+    }
+  }
+
+  /** The checkout every snapshot in here is relative to. A conversation can
+   *  move into its own worktree after checkpoints were armed, and snapshots
+   *  taken against the wrong root would restore into the wrong tree. */
+  get root(): string {
+    return this.workspaceRoot;
+  }
+
+  /**
+   * Read this session's snapshots back.
+   *
+   * Synchronous on purpose: `hasSnapshotFor` and `hasCheckpoint` are sync, and
+   * the webview asks them as soon as it mounts. An async load would answer
+   * "no snapshot" for the first render after a reload — which renders as a
+   * missing Undo button on files that can, in fact, be reverted.
+   */
+  private load(): void {
+    if (!this.stateFile) return;
+    try {
+      const raw = JSON.parse(
+        readFileSync(this.stateFile, "utf8")
+      ) as PersistedState;
+      if (raw.v !== STATE_VERSION || !Array.isArray(raw.checkpoints)) return;
+      for (const cp of raw.checkpoints) {
+        this.checkpoints.set(cp.turnId, {
+          turnId: cp.turnId,
+          createdAt: cp.createdAt,
+          files: cp.files.map((f) => ({
+            relPath: f.relPath,
+            existed: f.existed,
+            content:
+              f.content === undefined
+                ? undefined
+                : Buffer.from(f.content, "base64")
+          }))
+        });
+      }
+      this.order = raw.order.filter((id) => this.checkpoints.has(id));
+    } catch {
+      // No file yet, or one this build cannot read. Either way the session
+      // starts with no undo history rather than refusing to open.
+    }
+  }
+
+  private persist(): Promise<void> {
+    if (!this.stateFile) return Promise.resolve();
+    const file = this.stateFile;
+    const state: PersistedState = {
+      v: STATE_VERSION,
+      order: [...this.order],
+      checkpoints: this.order.flatMap((id) => {
+        const cp = this.checkpoints.get(id);
+        if (!cp) return [];
+        return [
+          {
+            turnId: cp.turnId,
+            createdAt: cp.createdAt,
+            files: cp.files.map((f) => ({
+              relPath: f.relPath,
+              existed: f.existed,
+              ...(f.content ? { content: f.content.toString("base64") } : {})
+            }))
+          }
+        ];
+      })
+    };
+    this.writing = this.writing.then(async () => {
+      try {
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await fs.writeFile(file, JSON.stringify(state));
+      } catch {
+        // Losing the mirror costs rewind after a reload, not this session's.
+      }
+    });
+    return this.writing;
+  }
+
+  /** Forget a session's snapshots for good. Called when its chat is deleted —
+   *  the undo history of a conversation the user removed is not theirs to
+   *  keep, and it pins file contents nothing will ever restore. */
+  static async forget(storeDir: string, sessionId: string): Promise<void> {
+    try {
+      await fs.rm(path.join(storeDir, `${sessionId}.json`), { force: true });
+    } catch {
+      // Nothing to drop.
+    }
+  }
+
+  /** Sweep snapshots nobody will rewind to. Best-effort and never throws:
+   *  this runs at startup, where a storage hiccup must not block activation. */
+  static async prune(storeDir: string, now = Date.now()): Promise<void> {
+    try {
+      const entries = await fs.readdir(storeDir);
+      for (const name of entries) {
+        if (!name.endsWith(".json")) continue;
+        const full = path.join(storeDir, name);
+        const st = await fs.stat(full);
+        if (now - st.mtimeMs > MAX_AGE_MS) await fs.rm(full, { force: true });
+      }
+    } catch {
+      // No store yet.
+    }
+  }
 
   /**
    * Normalize a path coming from the agent/tool into a workspace-relative
@@ -62,6 +216,7 @@ export class CheckpointService {
     this.checkpoints.set(turnId, { turnId, createdAt: Date.now(), files });
     this.order.push(turnId);
     this.gc();
+    await this.persist();
   }
 
   /**
@@ -106,6 +261,7 @@ export class CheckpointService {
       for (const d of drop) this.checkpoints.delete(d);
       this.order = this.order.slice(0, idx + 1);
     }
+    await this.persist();
     return { restored, deleted };
   }
 
@@ -189,6 +345,7 @@ export class CheckpointService {
     const head = await this.readGitHeadContent(rel);
     if (head !== null) {
       latest.files.push({ relPath: rel, existed: true, content: head });
+      await this.persist();
       return;
     }
 
@@ -208,6 +365,7 @@ export class CheckpointService {
     } catch {
       latest.files.push({ relPath: rel, existed: false });
     }
+    await this.persist();
   }
 
   /**

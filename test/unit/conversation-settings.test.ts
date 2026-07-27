@@ -338,6 +338,110 @@ describe("per-conversation settings", () => {
 // `when: "luno.chatFocused"`. Nothing ever set that key, so the binding could
 // not match under any condition and the shortcut the hints overlay advertises
 // did nothing. These pin the key to the focus the webview reports.
+// Rewinding truncated the timeline, rewrote the session file and dropped the
+// CLI resume id. Between them that left no route back to the conversation as it
+// stood — the messages were gone from disk and the CLI session behind them was
+// unreachable. These pin the safety copy that makes it recoverable.
+describe("rewind keeps the branch it leaves", () => {
+  /** Every stored conversation on disk, newest content first read fresh. */
+  function storedSessions(): Array<Record<string, unknown>> {
+    const dir = path.join(storage, "sessions");
+    if (!fs.existsSync(dir)) return [];
+    return fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith(".json"))
+      .map(
+        (f) =>
+          JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as Record<
+            string,
+            unknown
+          >
+      );
+  }
+
+  function userEventIds(sent: { type?: string }[]): string[] {
+    return sent
+      .filter(
+        (m): m is { type: string; event: { kind: string; id: string } } =>
+          m.type === "timeline" &&
+          (m as { event?: { kind?: string } }).event?.kind === "user"
+      )
+      .map((m) => m.event.id);
+  }
+
+  /**
+   * Three exchanges, then rewind to the second.
+   *
+   * `truncateAt` slices `[0, idx)` — the target message goes too — so rewinding
+   * to the middle turn leaves exactly the first and discards the other two.
+   */
+  async function threeTurnsThenRewind() {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = fakeTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
+
+    for (const text of ["first", "second", "third"]) {
+      surface.webview.deliver({ type: "prompt", text });
+      await settle();
+    }
+
+    const ids = userEventIds(surface.webview.sent);
+    surface.webview.deliver({ type: "rewindTo", turnId: ids[1] });
+    // Longer than the save debounce: both the fork and the truncated original
+    // land through it.
+    await new Promise((r) => setTimeout(r, 800));
+    return { host, ids };
+  }
+
+  it("leaves the discarded branch on disk as its own chat", async () => {
+    const { host } = await threeTurnsThenRewind();
+
+    const fork = storedSessions().find((s) => s.id !== host.sessionId);
+    expect(fork).toBeDefined();
+    // The whole conversation, not the part that survived the rewind.
+    const timeline = fork!.timeline as Array<{ kind: string }>;
+    expect(timeline.filter((e) => e.kind === "user")).toHaveLength(3);
+  });
+
+  it("names the fork so the list does not show two identical rows", async () => {
+    const { host } = await threeTurnsThenRewind();
+
+    const fork = storedSessions().find((s) => s.id !== host.sessionId);
+    expect(String(fork!.name)).toContain("before rewind");
+  });
+
+  it("truncates the conversation the user is still in", async () => {
+    const { host } = await threeTurnsThenRewind();
+
+    const live = storedSessions().find((s) => s.id === host.sessionId);
+    const timeline = live!.timeline as Array<{ kind: string }>;
+    expect(timeline.filter((e) => e.kind === "user")).toHaveLength(1);
+  });
+
+  // A rewind to the newest turn discards nothing, and a history row per no-op
+  // buries the forks that matter.
+  it("does not fork when nothing would be lost", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = fakeTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
+
+    surface.webview.deliver({ type: "prompt", text: "only question" });
+    await settle();
+    const ids = userEventIds(surface.webview.sent);
+
+    surface.webview.deliver({ type: "rewindTo", turnId: ids[ids.length - 1] });
+    await new Promise((r) => setTimeout(r, 800));
+
+    expect(
+      storedSessions().filter((s) => s.id !== host.sessionId)
+    ).toHaveLength(0);
+  });
+});
+
 describe("chat focus context key", () => {
   /** What VS Code was last told `luno.chatFocused` is. */
   function chatFocused(): unknown {
@@ -428,6 +532,32 @@ describe("conversation status", () => {
     await settle();
 
     expect(surface.titles.at(-1)).toContain("Refactor the permission gate");
+  });
+
+  it("tells the panel the same name it gave the tab", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = titledTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
+
+    surface.webview.deliver({
+      type: "prompt",
+      text: "Refactor the permission gate"
+    });
+    await settle();
+
+    // The header renders this. A tab that says one thing while the panel above
+    // the chat says another is the drift the shared call site exists to stop.
+    const meta = surface.webview.sent.filter(
+      (m): m is { type: string; title?: string; status?: string } =>
+        m.type === "sessionMeta"
+    );
+    expect(meta.at(-1)?.title).toBe("Refactor the permission gate");
+    // The fake CLI answers with nothing, so the last word in the timeline is
+    // the user's. `no-reply` rather than `done` is the point: the status is
+    // read off the timeline, not off the fact that a turn finished.
+    expect(meta.at(-1)?.status).toBe("no-reply");
   });
 
   it("marks a conversation that finished while the user was elsewhere", async () => {

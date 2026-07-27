@@ -34,7 +34,6 @@ function orchestratorFor(
     provider,
     model: "opus",
     maxTokens: 1000,
-    systemPrompt: ""
   });
 }
 

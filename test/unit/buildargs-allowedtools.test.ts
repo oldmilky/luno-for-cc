@@ -123,3 +123,32 @@ describe("buildArgs auto-mode allowedTools", () => {
     expect(tools).toContain("Bash(npm test)");
   });
 });
+
+// The editor's Problems ride along as their own `--append-system-prompt`, so
+// they can be dropped without disturbing the mode or conventions prompts.
+describe("buildArgs diagnostics", () => {
+  /** Every `--append-system-prompt` value, in order. */
+  function appends(args: string[]): string[] {
+    const out: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "--append-system-prompt") out.push(args[i + 1]);
+    }
+    return out;
+  }
+
+  it("passes the editor's problems to the CLI", () => {
+    const args = buildArgs("hi", "sonnet", {
+      ...base,
+      diagnostics: "# Problems currently reported in the editor\n\na.ts:1:1 …"
+    });
+
+    expect(appends(args).some((a) => a.includes("Problems"))).toBe(true);
+  });
+
+  it("adds no argument at all when there is nothing to report", () => {
+    const withNone = buildArgs("hi", "sonnet", { ...base, diagnostics: null });
+    const without = buildArgs("hi", "sonnet", { ...base });
+
+    expect(appends(withNone)).toEqual(appends(without));
+  });
+});

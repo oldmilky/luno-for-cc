@@ -38,12 +38,23 @@ rather than racing a timer.
 | `__luno.send(msg)`        | push a host → webview message                          |
 | `__luno.clear()`          | reset the recording                                    |
 | `__luno.replies`          | the fake host's reply table, editable at runtime       |
+| `__luno.state`            | what the app has persisted through `setState`          |
+| `__luno.resetState()`     | drop it, then reload for a genuinely fresh chat        |
 
 Add a reply when a flow needs one the table does not cover:
 
 ```js
 window.__luno.replies.requestSkills = { type: "skills", skills: [...] };
 ```
+
+The table the page starts with lives in `webview/src/lib/harness-host.ts`,
+typed against `Inbound` — a reply that no longer matches the protocol fails
+`bun run lint` instead of blanking the page at runtime. Make a lasting addition
+there; the runtime override above is for one-off states.
+
+**State survives a reload**, in sessionStorage, the way a real webview's does.
+That is what makes "the chat comes back" verifiable in here — persist, reload,
+read `__luno.state`. It dies with the tab, so a fresh tab is a fresh install.
 
 ## What to actually do
 

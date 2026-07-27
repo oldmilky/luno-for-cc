@@ -17,6 +17,7 @@ import { ChatProvider } from "./base.js";
 import { ClaudeCliProvider, EffortLevel } from "./claude-cli.js";
 import { PermissionMode, TaskType } from "../core/types.js";
 import { ConventionsFile } from "../services/conventions.js";
+import { warn as logWarn } from "../services/logger.js";
 
 export interface ProviderContext {
   cwd: string;
@@ -31,6 +32,8 @@ export interface ProviderContext {
   /** Project conventions file (CLAUDE.md / AGENTS.md / etc.) for the current
    *  workspace — auto-discovered, injected into the system prompt. */
   conventions?: ConventionsFile | null;
+  /** The editor's Problems for this turn, already formatted. */
+  diagnostics?: string | null;
   getResumeSessionId?: () => string | undefined;
   setResumeSessionId?: (id: string) => void;
   /** Auth token (OAuth or API key) injected into the CLI's environment. */
@@ -89,7 +92,7 @@ export function ensureExecutable(binaryPath: string): void {
   } catch (err) {
     // Read-only filesystem or insufficient permissions. The spawn may still
     // fail, but that path surfaces its own actionable error to the user.
-    console.warn(`[luno] could not make ${binaryPath} executable:`, err);
+    logWarn(`[luno] could not make ${binaryPath} executable:`, err);
   }
 }
 
@@ -261,6 +264,7 @@ export function createProvider(ctx: ProviderContext): ChatProvider {
     disabledSkills: ctx.disabledSkills,
     taskType: ctx.taskType,
     conventions: ctx.conventions,
+    diagnostics: ctx.diagnostics,
     getResumeSessionId: ctx.getResumeSessionId,
     setResumeSessionId: ctx.setResumeSessionId,
     token: ctx.token,

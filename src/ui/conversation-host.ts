@@ -1,3 +1,8 @@
+import {
+  log as logInfo,
+  warn as logWarn,
+  error as logError
+} from "../services/logger.js";
 import * as vscode from "vscode";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -12,8 +17,12 @@ import {
 import type { ChatProvider } from "../providers/base.js";
 import { createProvider } from "../providers/factory.js";
 import type { EffortLevel } from "../providers/claude-cli.js";
-import { CheckpointService } from "../services/checkpoint.js";
 import {
+  CheckpointService,
+  checkpointStoreDir
+} from "../services/checkpoint.js";
+import {
+  deriveStatus,
   deriveTitle,
   HistoryService,
   type StoredSession
@@ -49,8 +58,10 @@ import {
   openPlanFileRef,
   readAttachment,
   revertFile,
+  saveDirtyEditors,
   searchFiles
 } from "./domains/files.js";
+import { collectDiagnostics } from "./domains/diagnostics.js";
 import { broadcastHistory, type LiveState } from "./domains/history.js";
 import { ModelResolver } from "./domains/models.js";
 import {
@@ -250,6 +261,21 @@ export class ConversationHost {
   private busy = false;
   private streamed = "";
   private pendingRequest?: unknown;
+  /**
+   * What the user typed while this conversation was mid-turn, waiting for the
+   * turn to end. It lives here rather than in the webview because a
+   * conversation outlives its surface: switching chats or opening one in a tab
+   * must not lose the sentence someone was halfway through.
+   *
+   * The CLI cannot take a hint mid-generation — a `user` message written to a
+   * running turn's stdin is queued and answered only after that turn's
+   * `result` (verified against 2.1.219), so waiting here costs nothing the
+   * process would not cost anyway.
+   */
+  private queued = "";
+  /** Whether the turn in flight has already reported a failure. A queued
+   *  follow-up is held back rather than fired into a session that just broke. */
+  private turnFailed = false;
   /** The posture this conversation runs in. Born from the `luno.*` defaults,
    *  then owned here and saved with the session. */
   private settings: ConversationSettings = defaultSettings();
@@ -516,6 +542,9 @@ export class ConversationHost {
     if (m.type === "turnStart") {
       this.busy = true;
       this.streamed = "";
+      this.turnFailed = false;
+    } else if (m.type === "error") {
+      this.turnFailed = true;
     } else if (m.type === "turnEnd") {
       this.busy = false;
       this.streamed = "";
@@ -592,6 +621,9 @@ export class ConversationHost {
     });
     void this.publishAuthState();
     if (this.busy) void webview.postMessage({ type: "turnStart" });
+    if (this.queued) {
+      void webview.postMessage({ type: "queued", text: this.queued });
+    }
     if (this.streamed) {
       void webview.postMessage({
         type: "delta",
@@ -637,6 +669,15 @@ export class ConversationHost {
     // thing about this mode that surprises people.
     const branch = this.worktree ? ` · ${this.worktree.branch}` : "";
     this.target?.setTitle?.(`${prefix}${title}${branch}`);
+    // The panel's own header names the conversation too, and this is the one
+    // place that already runs whenever the name or the attention could have
+    // moved. Posting from here is what keeps the tab and the header from
+    // drifting into two different answers.
+    this.post({
+      type: "sessionMeta",
+      title,
+      status: deriveStatus(this.session.timeline)
+    });
     this.shared.attentionChanged();
   }
 
@@ -713,6 +754,28 @@ export class ConversationHost {
     if (!stored) return;
     this.sessions.adopt(stored);
     this.applyStoredSettings(stored);
+    this.armCheckpoints();
+  }
+
+  /**
+   * Load this session's snapshots without waiting for a prompt.
+   *
+   * Rewind and per-file revert are offered the moment a restored chat renders,
+   * and they read the checkpoint service. Armed only on the first prompt, both
+   * reported "no snapshot" for a conversation whose snapshots were sitting on
+   * disk the whole time.
+   *
+   * Uses the root already known rather than resolving one: creating a worktree
+   * here would do it for every chat a reload brings back. If this conversation
+   * later moves into its own tree, `ensureCheckpoints` rebuilds against it.
+   */
+  private armCheckpoints(): void {
+    const root = this.workingRoot;
+    if (!root) return;
+    this.sessions.ensureCheckpoints(
+      root,
+      checkpointStoreDir(this.ctx.globalStorageUri.fsPath)
+    );
   }
 
   private async restoreLatestSession(): Promise<void> {
@@ -738,6 +801,7 @@ export class ConversationHost {
 
       this.sessions.adopt(stored);
       this.applyStoredSettings(stored);
+      this.armCheckpoints();
     } catch {
       // Restore is best-effort; on any failure we fall through to the
       // empty session created by the constructor.
@@ -818,6 +882,9 @@ export class ConversationHost {
 
   newSession() {
     this.artifacts.closeAll();
+    // Cleared, not returned: the follow-up belonged to the conversation being
+    // left behind, and a blank chat is the one place it would read as noise.
+    this.clearQueued();
     // `reset` covers the session, the resume id and the checkpoints together.
     // They were three separate statements here, and forgetting one is how a
     // "new" chat inherits the old one's rewind history.
@@ -915,7 +982,7 @@ export class ConversationHost {
    *  without it the Stop button (and rewind/edit/new-session) would hang on the
    *  blocked child. */
   private abortTurn(): void {
-    console.log("[luno] aborting turn (cancel/rewind/new-session)");
+    logInfo("[luno] aborting turn (cancel/rewind/new-session)");
     this.orchestrator?.cancel();
     this.activeProvider?.cancel?.();
   }
@@ -937,7 +1004,11 @@ export class ConversationHost {
     prompt: async (m) => {
       await this.handlePrompt(String(m.text ?? ""));
     },
-    cancel: () => this.abortTurn(),
+    cancel: () => {
+      this.returnQueued();
+      this.abortTurn();
+    },
+    dropQueued: () => this.clearQueued(),
     newSession: () => this.newSession(),
     permissionResponse: (m) => {
       const requestId = str(m, "requestId");
@@ -946,7 +1017,7 @@ export class ConversationHost {
       this.awaitingApproval = false;
       this.refreshSurface();
       if (!this.activeProvider?.respondToPermission) {
-        console.warn(
+        logWarn(
           "[luno] permissionResponse arrived but no active provider to answer it"
         );
       }
@@ -1037,10 +1108,17 @@ export class ConversationHost {
     },
     revertFile: async (m) => {
       const path = str(m, "path");
-      if (path) await revertFile(this.post, this.checkpoints, path);
+      if (path) {
+        await revertFile(this.post, this.checkpoints, path, this.workingRoot);
+      }
     },
     requestFileSearch: async (m) => {
-      await searchFiles(this.post, String(m.query ?? ""), str(m, "id") ?? "");
+      await searchFiles(
+        this.post,
+        String(m.query ?? ""),
+        str(m, "id") ?? "",
+        this.workingRoot
+      );
     },
     captureSelection: () => this.sendSelectionToChat(),
     refreshEditorContext: () => broadcastEditorContext(this.post),
@@ -1109,6 +1187,12 @@ export class ConversationHost {
       // would rewrite it on its next debounced save.
       this.shared.discardConversation(id);
       await this.history.delete(id);
+      // The snapshots outlive the chat otherwise: they are keyed by session id
+      // and nothing else would ever collect them.
+      await CheckpointService.forget(
+        checkpointStoreDir(this.ctx.globalStorageUri.fsPath),
+        id
+      );
       await this.publishHistory();
     },
     renameSession: async (m) => {
@@ -1308,7 +1392,7 @@ export class ConversationHost {
     // silent unhandled promise rejections (which previously masked failures
     // like a throwing checkpoint restore mid-rewind).
     void this.onMessage(msg).catch((err) =>
-      console.error("[luno] onMessage failed:", err)
+      logError("[luno] onMessage failed:", err)
     );
   }
 
@@ -1322,7 +1406,7 @@ export class ConversationHost {
       // both are contract drift, and both used to look like "nothing
       // happened". `test/unit/protocol-contract.test.ts` catches the first
       // kind before it ships.
-      console.warn(`[luno] no handler for message type "${msg.type}"`);
+      logWarn(`[luno] no handler for message type "${msg.type}"`);
       return;
     }
     await handler(msg);
@@ -1429,6 +1513,7 @@ export class ConversationHost {
     // `restoreLatestSession` used to carry its own copy of this.
     this.sessions.adopt(stored);
     this.applyStoredSettings(stored);
+    this.armCheckpoints();
 
     this.post({
       type: "loadedSession",
@@ -1443,7 +1528,9 @@ export class ConversationHost {
   // ── Marketplace handlers ────────────────────────────────────
 
   private async rewindTo(turnId: string) {
+    this.returnQueued();
     this.abortTurn();
+    await this.forkBeforeTruncating(turnId);
     // Truncate the conversation and clear the UI FIRST. File restore (below)
     // can be slow or throw on a large/dirty tree, and its rejection used to
     // be swallowed by the fire-and-forget message handler — which silently
@@ -1499,20 +1586,52 @@ export class ConversationHost {
       try {
         await this.checkpoints.restore(turnId);
       } catch (err) {
-        console.error("[luno] checkpoint restore failed during rewind:", err);
+        logError("[luno] checkpoint restore failed during rewind:", err);
       }
+    }
+  }
+
+  /**
+   * Keep the branch a rewind is about to discard.
+   *
+   * Rewinding truncated the timeline, rewrote the file and dropped `resumeId`,
+   * which between them left no way back to the conversation as it stood — not
+   * the messages, not the CLI session behind them. The copy goes into history
+   * as its own chat, so the user can open it and carry on from where they were.
+   *
+   * Skipped when nothing after the target would be lost: a rewind to the last
+   * turn is a no-op, and a history row per no-op is clutter that makes the real
+   * forks harder to find.
+   */
+  private async forkBeforeTruncating(turnId: string): Promise<void> {
+    const timeline = this.session.timeline;
+    const idx = timeline.findIndex((e) => e.id === turnId);
+    if (idx === -1 || idx === timeline.length - 1) return;
+
+    try {
+      const forkId = await this.sessions.forkCurrent(
+        `${this.session.id}-fork-${Date.now()}`,
+        forkName(this.sessions.name, timeline)
+      );
+      if (forkId) await this.publishHistory();
+    } catch (err) {
+      // A rewind the user asked for must still happen. Losing the safety copy
+      // is worth saying out loud, but not worth refusing the operation over.
+      logError("[luno] could not fork before rewind:", err);
     }
   }
 
   private async editAt(turnId: string, text: string, revertFiles: boolean) {
     const trimmed = text.trim();
     if (!trimmed) return;
+    this.returnQueued();
     this.abortTurn();
+    await this.forkBeforeTruncating(turnId);
     if (revertFiles && this.checkpoints?.hasCheckpoint(turnId)) {
       try {
         await this.checkpoints.restore(turnId);
       } catch (err) {
-        console.error("[luno] checkpoint restore failed during edit:", err);
+        logError("[luno] checkpoint restore failed during edit:", err);
       }
     }
     const surviving = this.session.truncateAt(turnId);
@@ -1523,22 +1642,25 @@ export class ConversationHost {
 
   private async handlePrompt(text: string) {
     if (!text.trim()) return;
-    // Cancel + drain any in-flight turn first so two CLI processes never
-    // contend for the same resumed session.
+    // A turn already running takes the text as an addition, not a replacement.
+    // Two CLI processes must never contend for the same resumed session, and
+    // the alternative — killing the running turn to make room — throws away
+    // work nobody asked to lose.
     if (this.activeTurn) {
-      this.abortTurn();
-      try {
-        await this.activeTurn;
-      } catch {
-        /* previous turn surfaces its own errors; we only need it done */
-      }
+      this.enqueue(text);
+      return;
     }
+    await this.runTurnReportingFailure(text);
+    await this.flushQueued();
+  }
+
+  private async runTurnReportingFailure(text: string): Promise<void> {
     try {
       await this.runPromptTurn(text);
     } catch (err) {
       // Surface pre-stream failures instead of letting the submit vanish.
       const message = err instanceof Error ? err.message : String(err);
-      console.error("[luno] handlePrompt failed:", err);
+      logError("[luno] handlePrompt failed:", err);
       this.post({
         type: "error",
         message: `Couldn't start the turn: ${message}`
@@ -1546,7 +1668,48 @@ export class ConversationHost {
     }
   }
 
+  /** Append to what is waiting on the running turn. Everything typed during
+   *  one turn arrives as a single message, so the model weighs the additions
+   *  together instead of answering the first one blind to the rest. */
+  private enqueue(text: string): void {
+    const trimmed = text.trim();
+    this.queued = this.queued ? `${this.queued}\n\n${trimmed}` : trimmed;
+    this.post({ type: "queued", text: this.queued });
+  }
+
+  /**
+   * Send what accumulated while the turn ran, and keep going while more keeps
+   * arriving — the answer to a follow-up is itself long enough to type behind.
+   * A failed turn stops the loop: the follow-up goes back to the composer
+   * rather than into a session that just broke.
+   */
+  private async flushQueued(): Promise<void> {
+    while (this.queued && !this.turnFailed) {
+      const text = this.queued;
+      this.queued = "";
+      this.post({ type: "queued", text: "" });
+      await this.runTurnReportingFailure(text);
+    }
+    if (this.queued) this.returnQueued();
+  }
+
+  /** Hand the queue back to the composer: nothing typed is lost, and nothing
+   *  is sent without the user pressing send again. */
+  private returnQueued(): void {
+    if (!this.queued) return;
+    const text = this.queued;
+    this.clearQueued();
+    this.post({ type: "returnToComposer", text });
+  }
+
+  private clearQueued(): void {
+    if (!this.queued) return;
+    this.queued = "";
+    this.post({ type: "queued", text: "" });
+  }
+
   private async runPromptTurn(text: string) {
+    await saveDirtyEditors();
     // Resolved once and used for everything downstream. In an isolated
     // conversation this is the worktree, not the folder VS Code has open, and a
     // path that misses it lands in the wrong tree: attachments the agent cannot
@@ -1580,7 +1743,10 @@ export class ConversationHost {
       return;
     }
 
-    this.sessions.ensureCheckpoints(workspaceRoot);
+    this.sessions.ensureCheckpoints(
+      workspaceRoot,
+      checkpointStoreDir(this.ctx.globalStorageUri.fsPath)
+    );
 
     // Per-turn prompt context: classify the task and discover project
     // conventions so the CLI gets the same grounding info every time.
@@ -1614,6 +1780,7 @@ export class ConversationHost {
         disabledSkills,
         taskType,
         conventions,
+        diagnostics: collectDiagnostics(workspaceRoot),
         getResumeSessionId: () => this.resumeId,
         setResumeSessionId: (id) => {
           this.resumeId = id;
@@ -1768,6 +1935,22 @@ function defaultSettings(): ConversationSettings {
 
 function worktreeName(sessionId: string): string {
   return `luno-${sessionId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8)}`;
+}
+
+/**
+ * What a rewind's safety copy is called in the history list.
+ *
+ * Named rather than left to the derived title: the fork and the chat it came
+ * from open with the same first prompt, so without this the list shows two rows
+ * that read identically and the user has to open both to tell which is which.
+ */
+function forkName(
+  current: string | undefined,
+  timeline: ReadonlyArray<{ kind: string }>
+): string {
+  const base = current ?? "Chat";
+  const turns = timeline.filter((e) => e.kind === "user").length;
+  return `${base} — before rewind (${turns} messages)`;
 }
 
 /** Strip stray slash prefixes and trailing whitespace from a captured selection. */

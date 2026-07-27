@@ -56,6 +56,10 @@ export interface ComposerProps {
   /** When set, splice this code block at the caret then call onInserted. */
   pendingInsert: CodeInsert | null;
   onInserted: () => void;
+  /** A queued follow-up the host handed back (Stop, rewind, failed turn).
+   *  Appended to whatever is already typed, then cleared via onRestored. */
+  pendingRestore?: string | null;
+  onRestored?: () => void;
   /** Compact in-message edit mode: hides the toolbar, swaps in a Cancel/Send footer. */
   inline?: boolean;
   /** Inline mode only — called when the user discards the edit. */
@@ -93,6 +97,8 @@ export function Composer({
   focusKey,
   pendingInsert,
   onInserted,
+  pendingRestore,
+  onRestored,
   inline = false,
   onDiscard
 }: ComposerProps) {
@@ -120,6 +126,18 @@ export function Composer({
   useEffect(() => {
     if (focusKey > 0) editorRef.current?.focus();
   }, [focusKey]);
+
+  // A queue handed back lands *after* whatever has been typed since, because
+  // the two were written in that order and neither may be dropped.
+  useEffect(() => {
+    if (!pendingRestore) return;
+    const current = (editorRef.current?.serialize() ?? "").trim();
+    editorRef.current?.setText(
+      current ? `${current}\n\n${pendingRestore}` : pendingRestore
+    );
+    onRestored?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRestore]);
 
   // Inline edit mode: focus once on mount, then keep listeners alive for
   // the lifetime of the inline editor.
@@ -197,11 +215,11 @@ export function Composer({
   };
 
   const handleSubmit = () => {
-    // In inline (edit) mode submit is allowed even while a turn is streaming —
-    // the server's editAt handler cancels the in-flight stream and rewinds
-    // before re-prompting. Blocking on `busy` here would silently swallow
-    // the Enter and the EditConfirmModal would never open.
-    if (busy && !inline) return;
+    // Submitting mid-turn is deliberate, in both modes. Inline (edit) rewinds
+    // and re-prompts; a normal send is queued by the host and delivered when
+    // the turn ends. Neither needs the composer to police it, and the `busy`
+    // gate that used to sit here swallowed every follow-up typed while the
+    // model was still talking.
     const text = (editorRef.current?.serialize() ?? "").trim();
     const imageMd = attachments
       .map((a) => `![${a.name}](${a.dataUrl})`)
@@ -272,7 +290,7 @@ export function Composer({
     setAttachments((prev) => [...prev, ...added]);
   }, []);
 
-  const canSend = !busy && (value.trim().length > 0 || attachments.length > 0);
+  const canSend = value.trim().length > 0 || attachments.length > 0;
   const mode = findMode(permissionMode);
   const [dropping, setDropping] = useState(false);
 
@@ -457,7 +475,6 @@ export function Composer({
           }
           onOpenMention={(path) => send({ type: "openFile", path })}
           onImagePaste={addImageAttachments}
-          busy={busy}
         />
       </div>
 
@@ -520,7 +537,10 @@ export function Composer({
             onThinking={(on) => send({ type: "setThinking", thinking: on })}
           />
 
-          {busy ? (
+          {/* Both, mid-turn: stopping and adding to what is running are two
+              different intentions, and typing a follow-up must not take the
+              only way to stop off the screen. */}
+          {busy && (
             <Tooltip label="Cancel">
               <button
                 type="button"
@@ -531,10 +551,17 @@ export function Composer({
                 <Icon name="stop" size={11} />
               </button>
             </Tooltip>
-          ) : (
+          )}
+          {(!busy || canSend) && (
             <Tooltip
               icon="send"
-              label={canSend ? "Send" : "Nothing to send yet"}
+              label={
+                busy
+                  ? "Add to this turn — sent as soon as it ends"
+                  : canSend
+                    ? "Send"
+                    : "Nothing to send yet"
+              }
               hint={canSend ? "↵" : "Type a message first"}
             >
               <button
@@ -542,7 +569,7 @@ export function Composer({
                 className={s.sendBtn}
                 onClick={handleSubmit}
                 disabled={!canSend}
-                aria-label="Send"
+                aria-label={busy ? "Add to this turn" : "Send"}
               >
                 <Icon name="send" size={13} />
               </button>

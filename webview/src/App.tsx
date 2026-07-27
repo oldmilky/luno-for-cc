@@ -17,7 +17,7 @@ import {
   EditorContext,
   ModelInfo,
   SkillInfo,
-  ConventionsSource,
+  ChatStatus,
   PermissionRequestView
 } from "./lib/rpc";
 import { Spinner, type CodeInsert } from "./design/primitives";
@@ -124,11 +124,17 @@ export function App() {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [composerFocusKey, setComposerFocusKey] = useState(0);
   const [pendingInsert, setPendingInsert] = useState<CodeInsert | null>(null);
-  const [conventions, setConventions] = useState<{
-    source: ConventionsSource | null;
-    path: string | null;
-    relativePath: string | null;
-  }>({ source: null, path: null, relativePath: null });
+  // Typed during a turn and held by the host until that turn ends. Mirrored
+  // here only to render it — the host owns it, because a conversation outlives
+  // the surface showing it.
+  const [queued, setQueued] = useState("");
+  const [pendingRestore, setPendingRestore] = useState<string | null>(null);
+  // What the host calls this conversation and how it reads its stored
+  // timeline. Both arrive together because the host recomputes them together.
+  const [sessionMeta, setSessionMeta] = useState<{
+    title: string;
+    status: ChatStatus | null;
+  }>({ title: "", status: null });
   const [bannerVisible, setBannerVisible] = useState(false);
   const [skillSuggestion, setSkillSuggestion] = useState<{
     skillId: string;
@@ -208,6 +214,14 @@ export function App() {
           // New Chat always lands on a usable composer, even if a turnEnd was missed.
           setBusy(false);
           setPendingPermissions([]);
+          setQueued("");
+          break;
+        case "queued":
+          setQueued(m.text);
+          break;
+        case "returnToComposer":
+          setQueued("");
+          setPendingRestore(m.text);
           break;
         case "timeline":
           dispatchTimeline({ type: "append", event: m.event });
@@ -305,12 +319,12 @@ export function App() {
           setBusy(false);
           setPendingPermissions([]);
           break;
+        case "sessionMeta":
+          setSessionMeta({ title: m.title, status: m.status });
+          break;
         case "conventionsStatus":
-          setConventions({
-            source: m.source,
-            path: m.path,
-            relativePath: m.relativePath
-          });
+          // The banner is what acts on this now; the header stopped naming the
+          // conventions file when it stopped being news after the first read.
           break;
         case "conventionsBanner":
           setBannerVisible(true);
@@ -370,7 +384,20 @@ export function App() {
         skills={skills}
         composerFocusKey={composerFocusKey}
         pendingInsert={pendingInsert}
-        conventions={conventions}
+        queued={queued}
+        onQueuedEdit={(text) => {
+          send({ type: "dropQueued" });
+          setQueued("");
+          setPendingRestore(text);
+        }}
+        onQueuedDrop={() => {
+          send({ type: "dropQueued" });
+          setQueued("");
+        }}
+        pendingRestore={pendingRestore}
+        onRestored={() => setPendingRestore(null)}
+        sessionTitle={sessionMeta.title}
+        sessionStatus={sessionMeta.status}
         bannerVisible={bannerVisible}
         onHideBanner={() => setBannerVisible(false)}
         skillSuggestion={skillSuggestion}

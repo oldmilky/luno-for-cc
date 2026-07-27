@@ -12,7 +12,8 @@ vi.mock("node:child_process", async (orig) => {
 
 import { spawn } from "node:child_process";
 import { ClaudeCliProvider } from "../../src/providers/claude-cli.js";
-import { ProviderRequest, StreamDelta } from "../../src/core/types.js";
+import type { StreamDelta } from "../../src/core/types.js";
+import type { ProviderRequest } from "../../src/providers/base.js";
 
 /** A minimal stand-in for the spawned `claude` process: real streams for
  *  stdout/stderr/stdin plus EventEmitter exit/error and a kill() that records

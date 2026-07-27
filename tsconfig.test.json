@@ -1,0 +1,26 @@
+// Tests were outside every type gate: the root tsconfig excludes `test/`, and
+// nothing else looked at them. Drift there stays invisible until a test fails
+// for a reason unrelated to what it asserts — removing a field from a
+// production type left dead properties in fixtures with the build green.
+//
+// These options differ from the root config because vitest is what runs these
+// files: ESM with bundler resolution, plus JSX and DOM for the tests that reach
+// into `webview/src`. Checking them as Node16 CommonJS reported 25 errors about
+// the module system alone.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM"],
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "test/**/*",
+    "src/types/**/*.d.ts",
+    "webview/src/vite-env.d.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

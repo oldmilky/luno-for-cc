@@ -17,6 +17,10 @@ import { HistoryService } from "../services/history.js";
 import { PlanDecorationService } from "../services/plan-decorations.js";
 import { disposeConventionsWatchers } from "../services/conventions.js";
 import { RateLimitTracker } from "../services/rate-limit.js";
+import {
+  CheckpointService,
+  checkpointStoreDir
+} from "../services/checkpoint.js";
 import type { RateLimitStatus } from "../core/types.js";
 import { AuthManager } from "./domains/auth.js";
 import { ModelResolver } from "./domains/models.js";
@@ -204,6 +208,13 @@ export class ConversationRegistry {
     this.usageTimer = setInterval(() => {
       void broadcastUsage(this.broadcast, rateLimits);
     }, USAGE_POLL_MS);
+
+    // Snapshots hold file contents, so they are the one store here that grows
+    // without bound. Swept once per activation rather than on a timer: nothing
+    // ages fast enough to need more.
+    void CheckpointService.prune(
+      checkpointStoreDir(ctx.globalStorageUri.fsPath)
+    );
 
     ctx.subscriptions.push({ dispose: () => this.dispose() });
   }

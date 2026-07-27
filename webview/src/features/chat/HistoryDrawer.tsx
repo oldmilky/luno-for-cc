@@ -23,6 +23,7 @@ import {
   stagger
 } from "../../design/motion";
 import { send, onMessage, ChatStatus, HistoryEntry } from "../../lib/rpc";
+import { STATUS_LABEL } from "./chat-status";
 import s from "./HistoryDrawer.module.scss";
 
 interface HistoryDrawerProps {
@@ -264,21 +265,21 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
 // ─────────────────── Sub-components ───────────────────
 
 /**
- * What each state is called and which tone carries it. One table so the six
- * stay consistent as a set — six colours invented at six call sites is how a
- * list stops meaning anything.
+ * Which tone carries each state; the names come from `chat-status.ts`, which
+ * the header reads too. One table so the six stay consistent as a set — six
+ * colours invented at six call sites is how a list stops meaning anything.
  *
  * `done` is deliberately quiet and deliberately last: it is the resting state
  * of most rows, and a list where everything shouts says nothing. What earns
  * colour is what wants the user.
  */
 const STATUS: Record<ChatStatus, { label: string; tone: string }> = {
-  "needs-you": { label: "needs you", tone: "toneWarn" },
-  working: { label: "working", tone: "toneWorking" },
-  failed: { label: "failed", tone: "toneErr" },
-  interrupted: { label: "interrupted", tone: "toneErr" },
-  "no-reply": { label: "no reply", tone: "toneWarn" },
-  done: { label: "done", tone: "toneQuiet" }
+  "needs-you": { label: STATUS_LABEL["needs-you"], tone: "toneWarn" },
+  working: { label: STATUS_LABEL.working, tone: "toneWorking" },
+  failed: { label: STATUS_LABEL.failed, tone: "toneErr" },
+  interrupted: { label: STATUS_LABEL.interrupted, tone: "toneErr" },
+  "no-reply": { label: STATUS_LABEL["no-reply"], tone: "toneWarn" },
+  done: { label: STATUS_LABEL.done, tone: "toneQuiet" }
 };
 
 function HistoryItem({

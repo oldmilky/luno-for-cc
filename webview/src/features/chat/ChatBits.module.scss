@@ -285,6 +285,88 @@
   }
 }
 
+// ── Queued follow-up ─────────────────────────────────────────
+// Typed while a turn was running and waiting for it to end. Deliberately not
+// the accent chip the pinned row uses: pinned context is in force, this is
+// still on its way, and the two must not read as the same state.
+
+.queued {
+  overflow: hidden;
+}
+
+.queuedRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px 0;
+}
+
+.queuedLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--t3);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+// The text is the click target — it takes the message back into the composer,
+// so it has to look editable rather than decorative.
+.queuedText {
+  display: -webkit-box;
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round-sm);
+  background: var(--s2);
+  color: var(--t2);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: text;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b2);
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+.queuedDrop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--t4);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--err-soft);
+    color: var(--err);
+  }
+}
+
 // ── Thinking indicator ───────────────────────────────────────
 // The two loops below keep their own timing on purpose: the `--motion-*`
 // scale names one-shot transitions and stops at 220ms, which is not a

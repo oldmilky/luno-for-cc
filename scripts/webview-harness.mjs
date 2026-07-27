@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Serve the built webview outside VS Code so it can be driven in a real
 // browser — screenshots, computed styles, frame-by-frame measurement.
 //
@@ -12,6 +12,10 @@
 // handshake the extension host does (`refreshAuth` → `auth`). Seeding on a
 // timer instead would race the mount effect that registers the listener.
 //
+// Run under **bun**, not node: the reply table is TypeScript, typed against
+// the protocol in `webview/src/lib/rpc.ts`, so that a renamed field fails
+// `bun run lint` instead of failing silently in the page.
+//
 //   bun run harness                 build, serve, print the URL
 //   bun run harness --no-build      reuse webview/dist as-is
 //   bun run harness --mode artifact mount the plan-artifact shell
@@ -22,12 +26,14 @@
 //   __luno.send(msg)     push a host → webview message
 //   __luno.clear()       reset the recording
 //   __luno.replies       the fake host's reply table, editable at runtime
+//   __luno.resetState()  drop the persisted webview state, then reload
 
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { harnessReplies } from "../webview/src/lib/harness-host.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = path.join(ROOT, "webview", "dist");
@@ -57,25 +63,6 @@ if (!fs.existsSync(path.join(DIST, "main.js"))) {
   process.exit(1);
 }
 
-// Replies the real host would send. Enough to get past `loading` and render
-// the chat shell; a driver overrides or extends this table in the page.
-const REPLIES = {
-  refreshAuth: {
-    type: "auth",
-    authed: true,
-    model: "claude-opus-5",
-    permissionMode: "default",
-    effort: "high",
-    thinking: true
-  },
-  refreshEditorContext: { type: "editorContext", file: null, selection: null },
-  requestModels: { type: "models", models: [] },
-  requestSkills: { type: "skills", skills: [] },
-  requestHistory: { type: "historyList", entries: [] },
-  requestConnectors: { type: "connectorsList", connectors: [] },
-  refreshUsage: null
-};
-
 const shim = (revisionId) => `<!doctype html>
 <html>
 <head>
@@ -87,7 +74,22 @@ const shim = (revisionId) => `<!doctype html>
   ${revisionId ? `window.LUNO_REVISION_ID = ${JSON.stringify(revisionId)};` : ""}
 
   const sent = [];
-  const replies = ${JSON.stringify(REPLIES, null, 2)};
+  const replies = ${JSON.stringify(harnessReplies(Date.now()), null, 2)};
+
+  // A real webview's state outlives a reload and dies with the view, which is
+  // sessionStorage exactly. Keeping it on \`window\` made every reload look
+  // like a fresh chat, so the timeline, input and theme the app persists could
+  // not be verified in here at all.
+  const STATE_KEY = "luno.harness.state";
+  const readState = () => {
+    const raw = sessionStorage.getItem(STATE_KEY);
+    if (!raw) return undefined;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return undefined;
+    }
+  };
 
   window.__luno = {
     sent,
@@ -95,7 +97,9 @@ const shim = (revisionId) => `<!doctype html>
     send: (msg) => window.postMessage(msg, "*"),
     clear: () => { sent.length = 0; },
     // Messages of one type that the webview has posted — the usual assertion.
-    sentOf: (type) => sent.filter((m) => m && m.type === type)
+    sentOf: (type) => sent.filter((m) => m && m.type === type),
+    get state() { return readState(); },
+    resetState: () => sessionStorage.removeItem(STATE_KEY)
   };
 
   // The bundle calls this at module scope, so it has to exist before main.js.
@@ -107,8 +111,8 @@ const shim = (revisionId) => `<!doctype html>
       // synchronously inside postMessage would re-enter React's render.
       if (reply) setTimeout(() => window.postMessage(reply, "*"), 0);
     },
-    getState: () => window.__luno.state,
-    setState: (s) => { window.__luno.state = s; }
+    getState: readState,
+    setState: (s) => sessionStorage.setItem(STATE_KEY, JSON.stringify(s))
   });
 </script>
 </head>
@@ -135,10 +139,23 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // The browser asks unprompted and the 404 lands in the console, where it
+  // reads like a page error in every screenshot of the log.
+  if (url.pathname === "/favicon.ico") {
+    res.writeHead(204).end();
+    return;
+  }
+
   // Serve the bundle only. `path.normalize` then a prefix check, so a
-  // `..` segment cannot walk out of webview/dist.
+  // `..` segment cannot walk out of webview/dist. `isFile` because a stream
+  // opened on a directory throws EISDIR asynchronously, which is an unhandled
+  // error event — the server would die mid-session and take the page with it.
   const target = path.normalize(path.join(DIST, url.pathname));
-  if (!target.startsWith(DIST) || !fs.existsSync(target)) {
+  if (
+    !target.startsWith(DIST) ||
+    !fs.existsSync(target) ||
+    !fs.statSync(target).isFile()
+  ) {
     res.writeHead(404).end("not found");
     return;
   }
@@ -146,6 +163,17 @@ const server = http.createServer((req, res) => {
     "Content-Type": TYPES[path.extname(target)] ?? "application/octet-stream"
   });
   fs.createReadStream(target).pipe(res);
+});
+
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    process.stderr.write(
+      `\nport ${port} is busy — a harness is probably already running there.\n` +
+        `Reuse it at http://127.0.0.1:${port}/, or pass --port.\n\n`
+    );
+    process.exit(1);
+  }
+  throw err;
 });
 
 server.listen(port, "127.0.0.1", () => {

@@ -23,6 +23,7 @@ export type InboundType =
   | "prompt"
   | "cancel"
   | "newSession"
+  | "dropQueued"
   | "permissionResponse"
   | "rewindTo"
   | "editAt"

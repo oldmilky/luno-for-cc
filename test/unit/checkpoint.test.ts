@@ -174,3 +174,96 @@ describe("CheckpointService", () => {
     expect(svc.hasCheckpoint("t-24")).toBe(true);
   });
 });
+
+// Checkpoints used to live in a `Map` and nowhere else. The chat came back
+// after `Developer: Reload Window`, its Rewind buttons came back with it, and
+// every one of them was a no-op — the snapshots they pointed at died with the
+// old extension host.
+describe("CheckpointService persistence", () => {
+  let tmp: string;
+  let store: string;
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "iri-cp-p-"));
+    store = await fs.mkdtemp(path.join(os.tmpdir(), "iri-cp-store-"));
+    await pexec("git init", { cwd: tmp });
+    await pexec('git config user.email "t@t.com"', { cwd: tmp });
+    await pexec('git config user.name "t"', { cwd: tmp });
+    await fs.writeFile(path.join(tmp, "a.txt"), "original-a");
+    await pexec("git add -A && git commit -m init", { cwd: tmp });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+    await fs.rm(store, { recursive: true, force: true });
+  });
+
+  /** What a window reload does: same session, same storage, new process. */
+  const reopen = (session: string) =>
+    new CheckpointService(tmp, session, store);
+
+  it("restores a file from a checkpoint captured before a reload", async () => {
+    const before = reopen("sess-a");
+    await fs.writeFile(path.join(tmp, "a.txt"), "pre-turn");
+    await before.captureBefore("turn-1");
+    await fs.writeFile(path.join(tmp, "a.txt"), "the agent's edit");
+
+    const after = reopen("sess-a");
+    expect(after.hasCheckpoint("turn-1")).toBe(true);
+    const { restored } = await after.restore("turn-1");
+
+    expect(restored).toBe(1);
+    expect(await fs.readFile(path.join(tmp, "a.txt"), "utf8")).toBe("pre-turn");
+  });
+
+  // The webview asks this on mount to decide whether to offer per-file revert.
+  // An async load would answer "no" for the first render after a reload, so the
+  // button would be missing on files that can be reverted.
+  it("knows what it holds synchronously, before any await", () => {
+    return (async () => {
+      const before = reopen("sess-b");
+      await fs.writeFile(path.join(tmp, "a.txt"), "pre-turn");
+      await before.captureBefore("turn-1");
+
+      expect(reopen("sess-b").hasSnapshotFor("a.txt")).toBe(true);
+    })();
+  });
+
+  // Snapshots are keyed by session because a rewind that restored files another
+  // chat snapshotted is silent data loss.
+  it("never hands one conversation another's snapshots", async () => {
+    const first = reopen("sess-c");
+    await first.captureBefore("turn-1");
+
+    expect(reopen("sess-d").hasCheckpoint("turn-1")).toBe(false);
+  });
+
+  it("drops a deleted chat's snapshots", async () => {
+    const svc = reopen("sess-e");
+    await svc.captureBefore("turn-1");
+
+    await CheckpointService.forget(store, "sess-e");
+
+    expect(reopen("sess-e").hasCheckpoint("turn-1")).toBe(false);
+  });
+
+  it("sweeps snapshots too old to be rewound to", async () => {
+    const svc = reopen("sess-f");
+    await svc.captureBefore("turn-1");
+
+    // 31 days on: past the 30-day cutoff.
+    await CheckpointService.prune(store, Date.now() + 31 * 86_400_000);
+
+    expect(reopen("sess-f").hasCheckpoint("turn-1")).toBe(false);
+  });
+
+  it("keeps working with nowhere to persist to", async () => {
+    const svc = new CheckpointService(tmp);
+    await fs.writeFile(path.join(tmp, "a.txt"), "pre-turn");
+    await svc.captureBefore("turn-1");
+    await fs.writeFile(path.join(tmp, "a.txt"), "edited");
+
+    const { restored } = await svc.restore("turn-1");
+    expect(restored).toBe(1);
+  });
+});

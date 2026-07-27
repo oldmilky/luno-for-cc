@@ -339,8 +339,13 @@ export type Outbound =
    *  it — VS Code exposes no focus event for a webview — and turns it into the
    *  `luno.chatFocused` context key that chat keybindings are scoped to. */
   | { type: "chatFocus"; focused: boolean }
+  /** Sending during a turn is allowed: the host queues the text and sends it
+   *  when the turn ends. It never interrupts what is running. */
   | { type: "prompt"; text: string }
   | { type: "cancel" }
+  /** The user dismissed the queued follow-up. Distinct from `cancel`, which
+   *  hands the text back to the composer instead of discarding it. */
+  | { type: "dropQueued" }
   | {
       type: "permissionResponse";
       requestId: string;
@@ -465,10 +470,23 @@ export type Inbound =
   // contract just never said so, so no reader could reach it.
   | { type: "hello"; sessionId: string }
   | { type: "reset"; sessionId: string }
+  /** What this conversation is called and how the host reads its stored
+   *  timeline — the same pair its editor tab fuses into a prefixed label, sent
+   *  whenever either could have changed. `status` is the stored view only; the
+   *  live states (`working`, `needs-you`) are the webview's own to know, and it
+   *  knows them a message sooner than this could say. */
+  | { type: "sessionMeta"; title: string; status: ChatStatus }
   | { type: "timeline"; event: TimelineEvent }
   | { type: "delta"; delta: Delta }
   | { type: "turnStart" }
   | { type: "turnEnd" }
+  /** Everything typed while the turn runs, merged into the one message that
+   *  goes out when it ends. `""` means the queue is empty — it arrives on a
+   *  flush, a dismissal and a hand-back alike. */
+  | { type: "queued"; text: string }
+  /** The queue came back unsent — Stop, a rewind, an edit, or a turn that
+   *  failed. The composer takes the text so nothing typed is lost. */
+  | { type: "returnToComposer"; text: string }
   | { type: "permissionRequest"; request: PermissionRequestView }
   | { type: "error"; message: string }
   | { type: "editorContext"; context: EditorContext | null }

@@ -156,7 +156,7 @@ describe("stdio env keychain (security #5 — secrets, not plaintext globalState
     // The persisted connector record must not carry the secret value.
     const saved = loadCustomConnectors(ctx).find((c) => c.id === view.id)!;
     expect(JSON.stringify(saved)).not.toContain("sk-secret");
-    expect((saved as Record<string, unknown>).env).toBeUndefined();
+    expect((saved as unknown as Record<string, unknown>).env).toBeUndefined();
     // …but it must be retrievable from the keychain.
     expect(await loadStdioEnv(ctx, view.id)).toEqual({ API_KEY: "sk-secret" });
   });

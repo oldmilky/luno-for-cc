@@ -2,7 +2,7 @@
   "name": "luno-for-cc",
   "displayName": "LUNO for CC",
   "description": "LUNO for CC — personal Claude Code chat for Cursor / VS Code.",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "publisher": "lunoweb",
   "license": "MIT",
   "icon": "assets/luno-icon-500.png",
@@ -40,6 +40,16 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Luno spawns the Claude CLI against the open folder and lets an agent read and write its files, so it needs the same trust the folder's own code does. It also holds a Claude subscription credential."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "The CLI is a local process that works on a real checkout on disk, which a virtual filesystem does not provide."
+    }
+  },
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -93,6 +103,10 @@
       {
         "command": "luno.openConnectors",
         "title": "LUNO: Open Connectors"
+      },
+      {
+        "command": "luno.showLogs",
+        "title": "LUNO: Show Logs"
       }
     ],
     "keybindings": [
@@ -186,6 +200,21 @@
           "default": "default",
           "description": "Tool approval behavior. 'default' prompts before each action; 'plan' is read-only / no execution; 'auto' auto-approves reversible edits and bash commands matching allowedBashPatterns, while destructive and network commands still prompt. 'bypass' disables the approval gate entirely — the CLI runs every tool without asking, including deletes, arbitrary shell and force-push. Switching into 'bypass' from the panel requires an explicit confirmation, and Shift+Tab never cycles into it. Applies to new chats — each conversation then carries its own, so changing this never retargets a chat that is already open."
         },
+        "luno.autosave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Save modified editors before each turn. The CLI reads files from disk, so an unsaved buffer means the agent works from a version of the code you are not looking at. Untitled documents are never saved — that would open a Save As dialog."
+        },
+        "luno.respectGitIgnore": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use the repository's own ignore rules when listing files for @-mentions, instead of a fixed exclude list. Off falls back to excluding node_modules, dist, build, out, .next, .venv and __pycache__ only — which offers up gitignored files the project deliberately keeps out."
+        },
+        "luno.sendDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include the editor's Problems (errors and warnings from language servers) with each turn, so the agent can see what your IDE already knows instead of running a compiler through the shell to rediscover it. Errors are sent first and the list is capped."
+        },
         "luno.maxTokens": {
           "type": "number",
           "default": 0,
@@ -229,13 +258,13 @@
     "package": "bunx @vscode/vsce package --no-dependencies --allow-star-activation --skip-license",
     "test": "vitest run",
     "lint": "bun run lint:types && bun run lint:js && bun run lint:css",
-    "lint:types": "tsc --noEmit && bun run --cwd webview lint",
+    "lint:types": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && bun run --cwd webview lint",
     "lint:js": "eslint .",
     "lint:css": "stylelint \"webview/src/**/*.{scss,css}\"",
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,json,scss,css,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,scss,css,md}\"",
     "fix": "bun run format && eslint . --fix && stylelint \"webview/src/**/*.{scss,css}\" --fix",
-    "harness": "node scripts/webview-harness.mjs",
+    "harness": "bun scripts/webview-harness.mjs",
     "skills:verify": "node scripts/verify-skills.mjs"
   },
   "devDependencies": {

@@ -20,6 +20,7 @@
 import * as vscode from "vscode";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { log as logInfo, warn as logWarn } from "./services/logger.js";
 
 /** Coalesce the burst of writes esbuild emits for one rebuild. */
 const DEBOUNCE_MS = 250;
@@ -58,7 +59,7 @@ export function registerDevAutoRestart(ctx: vscode.ExtensionContext): void {
       }, DEBOUNCE_MS);
     });
   } catch (err) {
-    console.warn("[luno] dev auto-restart unavailable:", err);
+    logWarn("[luno] dev auto-restart unavailable:", err);
     return;
   }
 
@@ -70,5 +71,5 @@ export function registerDevAutoRestart(ctx: vscode.ExtensionContext): void {
     }
   });
 
-  console.log("[luno] dev auto-restart armed — watching", bundle);
+  logInfo("[luno] dev auto-restart armed — watching", bundle);
 }

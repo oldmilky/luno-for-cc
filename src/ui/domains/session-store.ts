@@ -129,10 +129,25 @@ export class SessionStore {
     this.attachListeners();
   }
 
-  /** Checkpoints need a workspace root, which does not exist until there is
-   *  one. Created on first use and kept for the session's lifetime. */
-  ensureCheckpoints(workspaceRoot: string): void {
-    this.checkpointService ??= new Checkpoints(workspaceRoot);
+  /**
+   * Checkpoints need a workspace root, which does not exist until there is
+   * one. Created on first use and kept for the session's lifetime.
+   *
+   * `storeDir` is what lets rewind outlive the window. Keyed by session id, so
+   * a conversation restored from history gets its own snapshots back and never
+   * another chat's.
+   */
+  ensureCheckpoints(workspaceRoot: string, storeDir?: string): void {
+    // Rebuilt rather than kept when the root moves: a conversation can be armed
+    // against the main checkout on restore and only later resolve its own
+    // worktree, and snapshots relative to the wrong tree restore into it.
+    // Cheap now that state lives on disk — the replacement reads it back.
+    if (this.checkpointService?.root === workspaceRoot) return;
+    this.checkpointService = new Checkpoints(
+      workspaceRoot,
+      this.session.id,
+      storeDir
+    );
   }
 
   /** Re-post the whole timeline — used when a webview (re)mounts. */
@@ -158,6 +173,36 @@ export class SessionStore {
         ...this.settingsFor()
       });
     }, SAVE_DEBOUNCE_MS);
+  }
+
+  /**
+   * Write the conversation as it stands right now under a new id, and answer
+   * with that id.
+   *
+   * Exists for rewind. Truncating drops every event after the target from the
+   * timeline *and* from the file, and clears the CLI resume id along with it —
+   * so the branch the user rewound away from was unreachable, by any route.
+   * The copy keeps its `resumeId`, which is what makes reopening it resume the
+   * real CLI conversation rather than a transcript of one.
+   *
+   * Returns undefined when there is nothing worth keeping: `history.save`
+   * refuses a session with no user content, so a fork of one would be a
+   * history row pointing at a file that was never written.
+   */
+  async forkCurrent(newId: string, name: string): Promise<string | undefined> {
+    if (!this.session.timeline.some((e) => e.kind === "user")) return undefined;
+    await this.history.save({
+      id: newId,
+      title: deriveTitle(this.session.timeline),
+      name,
+      createdAt: this.session.createdAt,
+      updatedAt: Date.now(),
+      messages: [...this.session.messages],
+      timeline: [...this.session.timeline],
+      resumeId: this.resumeId,
+      ...this.settingsFor()
+    });
+    return newId;
   }
 
   /**

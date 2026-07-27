@@ -2,8 +2,11 @@ import * as vscode from "vscode";
 import { ChatPanelProvider } from "./ui/panel.js";
 import { generateConventionsCommand } from "./commands/init-conventions.js";
 import { registerDevAutoRestart } from "./dev-reload.js";
+import { registerOutputChannel, showLogs } from "./ui/output-channel.js";
 
 export function activate(ctx: vscode.ExtensionContext) {
+  // First, so anything logged during the rest of activation is captured.
+  ctx.subscriptions.push(registerOutputChannel());
   registerDevAutoRestart(ctx);
 
   const panel = new ChatPanelProvider(ctx);
@@ -35,7 +38,8 @@ export function activate(ctx: vscode.ExtensionContext) {
     ),
     vscode.commands.registerCommand("luno.openConnectors", () =>
       panel.openConnectors()
-    )
+    ),
+    vscode.commands.registerCommand("luno.showLogs", () => showLogs())
   );
 }
 
