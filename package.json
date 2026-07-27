@@ -2,7 +2,7 @@
   "name": "luno-for-cc",
   "displayName": "LUNO for CC",
   "description": "LUNO for CC — personal Claude Code chat for Cursor / VS Code.",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "publisher": "lunoweb",
   "license": "MIT",
   "icon": "assets/luno-icon-500.png",
@@ -162,10 +162,17 @@
           "enum": [
             "default",
             "plan",
-            "auto"
+            "auto",
+            "bypass"
+          ],
+          "enumDescriptions": [
+            "Ask — prompts before every edit and command.",
+            "Plan — read-only; drafts a plan and executes nothing.",
+            "Agent — auto-applies reversible edits and allow-listed commands; destructive and network commands still prompt.",
+            "Bypass — DANGEROUS. No approval prompt for anything, including rm, curl | bash and force-push."
           ],
           "default": "default",
-          "description": "Tool approval behavior. 'default' prompts before each action; 'plan' is read-only / no execution; 'auto' auto-approves the Claude CLI's standard read/search tools and bash commands matching allowedBashPatterns."
+          "description": "Tool approval behavior. 'default' prompts before each action; 'plan' is read-only / no execution; 'auto' auto-approves reversible edits and bash commands matching allowedBashPatterns, while destructive and network commands still prompt. 'bypass' disables the approval gate entirely — the CLI runs every tool without asking, including deletes, arbitrary shell and force-push. Switching into 'bypass' from the panel requires an explicit confirmation, and Shift+Tab never cycles into it."
         },
         "luno.maxTokens": {
           "type": "number",

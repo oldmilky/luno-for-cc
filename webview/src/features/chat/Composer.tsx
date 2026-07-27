@@ -468,14 +468,19 @@ export function Composer({
               value: m.value,
               label: m.label,
               note: m.note,
-              icon: m.icon
+              icon: m.icon,
+              // Bypass renders in `--err`, never the accent — the picker is the
+              // last thing between a click and a mode with no approval gate.
+              danger: m.danger
             }))}
             value={permissionMode}
             onSelect={(v) => send({ type: "setPermissionMode", mode: v })}
             align="left"
             placement="above"
             ariaLabel="Permission mode"
-            triggerClassName={s.modeBtn}
+            triggerClassName={`${s.modeBtn}${
+              mode.danger ? ` ${s.modeBtnDanger}` : ""
+            }`}
             trigger={() => (
               <>
                 <Icon name={mode.icon} size={12} />

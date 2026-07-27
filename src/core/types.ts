@@ -32,7 +32,21 @@ export type ContentBlock =
       is_error?: boolean;
     };
 
-export type PermissionMode = "default" | "plan" | "auto";
+/**
+ * How tool calls get approved.
+ *
+ * These are LUNO's modes, not the CLI's — `auto` in particular has no CLI
+ * equivalent, being `default` plus an explicit allow-list. See
+ * `mapPermissionMode` in `providers/claude-cli.ts` for the translation.
+ *
+ * `bypass` is the one that turns the gate off entirely: the CLI approves
+ * everything itself and never asks, so no approval card appears for anything —
+ * including `rm`, `curl … | bash` and force-push. Enabling it requires an
+ * explicit confirmation, and it is deliberately absent from the Shift+Tab
+ * cycle: a mode that disables every safety check should not be two keystrokes
+ * away by accident.
+ */
+export type PermissionMode = "default" | "plan" | "auto" | "bypass";
 
 export type TaskType =
   | "backend"

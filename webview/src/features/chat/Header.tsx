@@ -75,7 +75,10 @@ export function Header({
           </Chip>
         </Tooltip>
         <Tooltip label={mode.note}>
-          <Chip tone="default">
+          {/* The header is the only mode indicator that survives a long scroll
+              and a streaming turn, so a gate-off posture has to be legible
+              here — not just on the composer's picker. */}
+          <Chip tone={mode.danger ? "danger" : "default"}>
             <Icon name={mode.icon} size={10} />
             {mode.short}
           </Chip>

@@ -33,6 +33,7 @@ import {
 import { broadcastUsage } from "./domains/usage.js";
 import { SessionStore } from "./domains/session-store.js";
 import { scopeForWrite } from "./domains/settings-scope.js";
+import { confirmBypassMode } from "./domains/permission-modes.js";
 import { AuthManager } from "./domains/auth.js";
 import { PlanHandlers } from "./domains/plan-handlers.js";
 import { runInSetupTerminal } from "./domains/terminal.js";
@@ -458,7 +459,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     },
     setPermissionMode: async (m) => {
       const mode = str(m, "mode");
-      if (mode) await this.updateSetting("permissionMode", mode);
+      if (!mode) return;
+      // The confirmation lives host-side rather than in the webview so no path
+      // into the mode can skip it — not the picker, not a command, not a future
+      // caller that has not been written yet.
+      if (mode === "bypass" && !(await confirmBypassMode())) {
+        // Re-publish so the picker snaps back off Bypass rather than showing a
+        // mode that was never applied.
+        await this.auth.broadcast();
+        return;
+      }
+      await this.updateSetting("permissionMode", mode);
     },
     setEffort: async (m) => {
       const effort = str(m, "effort");

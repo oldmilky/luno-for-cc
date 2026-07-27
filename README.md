@@ -26,7 +26,7 @@ LUNO brings the full Claude Code agent into a native editor side panel: streamin
 
 - 🔐 **Subscription-powered.** One-click browser sign-in; credentials live in the OS keychain. No API key file on disk.
 - 💬 **Native side-panel chat.** Streaming responses, slash commands, `@`-mention files, Cmd+U to send a selection, Cmd+Shift+I to toggle.
-- 🛡️ **Risk-aware approvals.** Three modes — `Ask`, `Agent`, `Plan`. Every gated action shows an inline card with a live diff / command preview before it runs. **Destructive** (`rm`, `sudo`, force-push) and **network** (`curl`, `ssh`, `git push`) commands always prompt — never auto-run, even in Agent mode.
+- 🛡️ **Risk-aware approvals.** Four modes — `Ask`, `Agent`, `Plan`, and `Bypass`. Every gated action shows an inline card with a live diff / command preview before it runs. In `Ask`, `Agent` and `Plan`, **destructive** (`rm`, `sudo`, force-push) and **network** (`curl`, `ssh`, `git push`) commands always prompt — never auto-run, not even in Agent mode. `Bypass` turns the gate off entirely; it asks for confirmation once and then colours the toolbar red for as long as it is on.
 - 📝 **Plan-mode review.** Pop the plan into its own editor tab, leave inline comments on individual steps, and ship the revised plan back to the agent in one click.
 - 🧠 **Project conventions.** Reads `CLAUDE.md` / `AGENTS.md` automatically; one-click "Generate CLAUDE.md" to bootstrap a new repo.
 - 🧩 **Skills marketplace.** Browse and install any skill from [claude-plugins.dev](https://claude-plugins.dev) directly from the panel.
@@ -96,13 +96,16 @@ Cycle modes with **Shift+Tab** (when chat is focused) or the **Luno: Cycle Permi
 | **Ask** _(default)_ | Read-only tools (`Read`, `Grep`, `Glob`)                                                             | Every edit, write, and command        |
 | **Agent**           | Reads **+** file edits (`Edit` / `Write` / `MultiEdit` / `NotebookEdit`) **+** allow-listed commands | Anything not pre-approved             |
 | **Plan**            | Read-only reasoning — nothing executes                                                               | — (review the plan, then **Proceed**) |
+| **Bypass**          | Everything, immediately — the gate is off                                                            | Nothing                               |
 
-**Always gated — in every mode, even Agent, even if allow-listed:**
+**Always gated in `Ask`, `Agent` and `Plan` — even if allow-listed:**
 
 - 🔴 **Destructive** — `rm`, `rmdir`, `sudo`, `dd`, `mkfs`, `git reset --hard`, `git push --force`, `chmod -R`, `kill -9`, fork bombs, and piping a remote script to a shell (`curl … | bash`).
 - 🌐 **Network / external** — `curl`, `wget`, `ssh`, `scp`, `rsync`, `nc`, `git push` / `pull` / `clone`, and web-fetch tools.
 
 > The agent is also instructed to avoid touching `.git`, `.env*`, `.ssh`, and shell rc files. Connected MCP-server tools are pre-approved (connecting is the consent step).
+
+> ⚠️ **`Bypass` is the one exception, and it is total.** Nothing in the table above applies: every tool call runs the moment the model emits it, including `rm -rf` and `git push --force`. Only the model's own judgement remains, so Luno makes it deliberate — the mode is absent from the `Shift+Tab` cycle, selecting it requires confirming a modal, and while it is active the composer's mode button stays red. Use it for a sandbox or a throwaway branch, not a repository you cannot restore.
 
 ### The approval card
 
@@ -194,7 +197,9 @@ Orchestrator (per-turn driver)
     │                      routes the CLI's `can_use_tool` requests back to you
     │                      via `--permission-prompt-tool stdio`
     ├─ decidePermission    pure allow/prompt policy: auto-allow reads (+ edits in
-    │                      Agent mode), ALWAYS prompt destructive + network
+    │                      Agent mode), always prompt destructive + network.
+    │                      Bypass skips this channel entirely — the CLI runs
+    │                      under --permission-mode bypassPermissions
     ├─ CheckpointService   per-turn snapshots of edited files (rewind / undo)
     └─ ConventionsLoader   CLAUDE.md / AGENTS.md injection
 ```
@@ -224,7 +229,7 @@ basis. Two things to know before you send one:
 
 - Your code is sent to Anthropic only when the agent requests a tool that reads it, or when you `@`-mention or paste it. The webview never autouploads workspace files.
 - Tokens live in the OS keychain via VS Code's SecretStorage API. Luno does not write credentials to disk under any path it controls.
-- Destructive and network commands always surface an approval prompt before they run — in every mode. In **Ask** mode every edit and command prompts too; **Agent** mode auto-applies edits (reversible via checkpoints) but still gates deletes, shell, and network calls.
+- Destructive and network commands always surface an approval prompt before they run in **Ask**, **Agent** and **Plan**. Ask prompts for every edit and command too; Agent auto-applies edits (reversible via checkpoints) but still gates deletes, shell, and network calls. **Bypass** removes the gate — you opt into that explicitly through a confirmation modal, and the toolbar stays red while it lasts.
 
 ---
 

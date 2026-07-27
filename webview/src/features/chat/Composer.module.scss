@@ -1,6 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-// Composer — converted from Tailwind to an SCSS module in Ф1.
-// Reads design tokens only; see docs/TOKENS.md.
+// Composer. Reads design tokens only; see docs/TOKENS.md.
 // ─────────────────────────────────────────────────────────────
 
 .wrapper {
@@ -213,6 +212,22 @@
     background: var(--s3);
     border-color: var(--b3);
     color: var(--t1);
+  }
+}
+
+// Bypass is the only mode with no approval gate, so it is the only one that
+// changes the toolbar's appearance rather than just its label. A posture this
+// consequential should be visible without reading — and stay visible, since the
+// mode persists across turns and across reloads.
+.modeBtnDanger {
+  border-color: var(--err);
+  background: var(--err-soft);
+  color: var(--err);
+
+  &:hover {
+    border-color: var(--err);
+    background: var(--err-soft);
+    color: var(--err);
   }
 }
 

@@ -14,7 +14,9 @@ const vscode = acquireVsCodeApi();
 
 // ── Domain types ──────────────────────────────────────────────
 
-export type PermissionMode = "default" | "auto" | "plan";
+// Mirrors PermissionMode in src/core/types.ts. "bypass" turns the approval gate
+// off entirely and is deliberately absent from the Shift+Tab cycle.
+export type PermissionMode = "default" | "auto" | "plan" | "bypass";
 
 /** Reasoning effort levels — mirror the CLI's `--effort` choices. */
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";

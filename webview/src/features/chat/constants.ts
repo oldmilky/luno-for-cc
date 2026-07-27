@@ -68,6 +68,9 @@ export interface ModeOption {
   short: string;
   note: string;
   icon: IconName;
+  /** Turns the approval gate off. Rendered in `--err`, never in the accent, so
+   *  it cannot be mistaken for one of the ordinary postures. */
+  danger?: boolean;
 }
 
 export const MODES: ReadonlyArray<ModeOption> = [
@@ -91,6 +94,16 @@ export const MODES: ReadonlyArray<ModeOption> = [
     short: "Plan",
     note: "Read-only · drafts a step-by-step plan",
     icon: "layers"
+  },
+  {
+    value: "bypass",
+    label: "Bypass",
+    short: "Bypass",
+    // Says what is lost, not what is gained — the gain is obvious from the name
+    // and the cost is the part worth reading before clicking.
+    note: "No approval for anything · including deletes & force-push",
+    icon: "shieldOff",
+    danger: true
   }
 ];
 

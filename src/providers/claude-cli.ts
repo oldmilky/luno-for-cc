@@ -161,7 +161,9 @@ function isReadOnlyMcpTool(toolName: string): boolean {
 /** The CLI only services interactive per-tool approval over the stream-json
  *  control channel; that's `default` and `auto`. `plan` stays read-only and
  *  keeps the simpler text-input invocation (the plan flow handles its own
- *  approval via ExitPlanMode). */
+ *  approval via ExitPlanMode). `bypass` needs no channel either — the CLI
+ *  approves everything itself and never asks, so keeping stdin open for
+ *  control responses that can never arrive would be dead weight. */
 function usesPermissionProtocol(mode: PermissionMode): boolean {
   return mode === "default" || mode === "auto";
 }
@@ -645,8 +647,9 @@ export function buildArgs(
   }
   // Only inject the `ask` routing in modes that actually service the approval
   // channel (default/auto, where `--permission-prompt-tool stdio` is wired up).
-  // Plan mode has no prompt tool, so an `ask` rule there would have nothing to
-  // answer it and could block even read-only git — so we leave it untouched.
+  // Plan and bypass have no prompt tool, so an `ask` rule there would have
+  // nothing to answer it: in plan it could block even read-only git, and in
+  // bypass it would reintroduce the very prompt the mode exists to remove.
   if (permissionProtocol) {
     settings.permissions = {
       ask: ROUTE_TO_CLASSIFIER_BASH.map((p) => `Bash(${p})`)
@@ -754,6 +757,13 @@ function mapPermissionMode(m: PermissionMode): string {
   switch (m) {
     case "plan":
       return "plan";
+    // The CLI approves every tool itself and never emits a `can_use_tool`
+    // request, so our permission policy is not consulted at all — not for
+    // edits, not for `rm`, not for the destructive/network gate. That is the
+    // mode's entire purpose; the guard against reaching it lives in the UI and
+    // in `setPermissionMode`, not here.
+    case "bypass":
+      return "bypassPermissions";
     // `auto` deliberately runs in the CLI's `default` mode rather than
     // `acceptEdits`. acceptEdits silently auto-runs *every* tool — including
     // destructive `Bash` like `rm` — without ever consulting our permission

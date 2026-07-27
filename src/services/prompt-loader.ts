@@ -10,6 +10,7 @@ import * as path from "node:path";
 import planModeMd from "../../prompts/plan-mode.md";
 import defaultModeMd from "../../prompts/default-mode.md";
 import autoModeMd from "../../prompts/auto-mode.md";
+import bypassModeMd from "../../prompts/bypass-mode.md";
 import backendMd from "../../prompts/task-types/backend.md";
 import frontendMd from "../../prompts/task-types/frontend.md";
 import fullstackMd from "../../prompts/task-types/fullstack.md";
@@ -26,7 +27,8 @@ import { PermissionMode, TaskType } from "../core/types.js";
 const BUNDLED_MODE: Record<PermissionMode, string> = {
   plan: planModeMd,
   default: defaultModeMd,
-  auto: autoModeMd
+  auto: autoModeMd,
+  bypass: bypassModeMd
 };
 
 const BUNDLED_TASK: Record<Exclude<TaskType, "generic">, string> = {
