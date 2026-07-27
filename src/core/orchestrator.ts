@@ -22,7 +22,6 @@ export interface OrchestratorOpts {
   provider: ChatProvider;
   model: string;
   maxTokens: number;
-  systemPrompt: string;
   onDelta?: (d: StreamDelta) => void;
 }
 
@@ -47,7 +46,6 @@ export class Orchestrator {
     const req: ProviderRequest = {
       model: this.o.model,
       maxTokens: this.o.maxTokens,
-      system: this.o.systemPrompt,
       messages: this.session.messages,
       tools: []
     };
@@ -59,13 +57,20 @@ export class Orchestrator {
     const planIntercept = new PlanInterceptor(this.session);
     let textBuf = "";
 
-    const flushText = () => {
+    /**
+     * @param meta stamped onto the emitted event. Only the cancel path uses it,
+     *   and only to say the answer was cut off: a flushed partial reply is
+     *   otherwise indistinguishable from a finished one, so anything reading
+     *   the tail of a timeline would call a stopped turn complete.
+     */
+    const flushText = (meta?: Record<string, unknown>) => {
       if (!textBuf) return;
       blocks.push({ type: "text", text: textBuf });
       this.session.emit({
         kind: "assistant",
         title: "Assistant",
-        body: textBuf
+        body: textBuf,
+        ...(meta ? { meta } : {})
       });
       textBuf = "";
     };
@@ -79,7 +84,7 @@ export class Orchestrator {
       // below does: a half-finished block sequence is not safe to feed back as
       // context for the next turn.
       if (this.cancelled) {
-        flushText();
+        flushText({ interrupted: true });
         return;
       }
       this.o.onDelta?.(delta);

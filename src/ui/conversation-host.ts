@@ -10,14 +10,12 @@ import {
   StreamDelta
 } from "../core/types.js";
 import type { ChatProvider } from "../providers/base.js";
-import { buildSystemPrompt } from "./system-prompt.js";
 import { createProvider } from "../providers/factory.js";
 import type { EffortLevel } from "../providers/claude-cli.js";
 import { CheckpointService } from "../services/checkpoint.js";
 import {
   deriveTitle,
   HistoryService,
-  type LiveStatus,
   type StoredSession
 } from "../services/history.js";
 import { PlanDecorationService } from "../services/plan-decorations.js";
@@ -53,7 +51,7 @@ import {
   revertFile,
   searchFiles
 } from "./domains/files.js";
-import { broadcastHistory } from "./domains/history.js";
+import { broadcastHistory, type LiveState } from "./domains/history.js";
 import { ModelResolver } from "./domains/models.js";
 import {
   broadcastSkills,
@@ -86,6 +84,7 @@ import {
   type Worktree
 } from "../services/worktree.js";
 import { classifyTask } from "../core/task-classifier.js";
+import type { RateLimitTracker } from "../services/rate-limit.js";
 import type { InstallTarget } from "../services/marketplace.js";
 // Only what the turn path still needs: the connector *handlers* live in
 // `domains/connectors.ts`, but a turn has to hand the CLI an MCP config file
@@ -138,10 +137,21 @@ export interface SharedServices {
   discardConversation(sessionId: string): void;
   /** Note which conversation the user is working in, so a keybinding lands on
    *  the chat in front of them rather than an arbitrary one. */
+  /** The account's quota verdicts as the CLI reports them. Shared because the
+   *  quota is per account: what one conversation learns applies to all. */
+  rateLimits: RateLimitTracker;
   markActive(host: ConversationHost): void;
   /** A conversation now wants — or no longer wants — the user. Lets the
    *  registry keep one badge for every chat that is off screen. */
   attentionChanged(): void;
+  /**
+   * A chat webview gained or lost keyboard focus.
+   *
+   * VS Code offers no focus event for a webview, so the webview reports its
+   * own. This is what backs the `luno.chatFocused` context key, and without it
+   * every keybinding scoped to the chat can never match.
+   */
+  focusChanged(host: ConversationHost, focused: boolean): void;
 }
 
 /**
@@ -435,16 +445,17 @@ export class ConversationHost {
   }
 
   /**
-   * What this conversation is doing, for the history list.
+   * What this conversation is doing right now, or nothing when it is merely
+   * sitting there — then the state derived from its timeline stands.
    *
    * Distinct from `attention`, which answers "does a surface need a glyph". A
    * chat the user is looking at is never *waiting* for their eye but can very
    * much be waiting for their answer, and the list has to say so either way.
    */
-  get live(): LiveStatus {
-    if (this.awaitingApproval) return "waiting";
-    if (this.busy) return "running";
-    return "open";
+  get live(): LiveState {
+    if (this.awaitingApproval) return { status: "needs-you" };
+    if (this.busy) return { status: "working" };
+    return {};
   }
 
   /** The name the user gave this conversation, or nothing. */
@@ -518,8 +529,6 @@ export class ConversationHost {
       if (kind === "assistant" || kind === "tool_call") this.streamed = "";
     } else if (m.type === "permissionRequest") {
       this.pendingRequest = (msg as { request?: unknown }).request;
-    } else if (m.type === "permissionResolved") {
-      this.pendingRequest = undefined;
     }
   }
 
@@ -685,7 +694,7 @@ export class ConversationHost {
       // replaces it with the one that conversation ran in. Without this the
       // composer shows the defaults while the turn would use something else.
       void this.publishAuthState();
-      void broadcastUsage(this.post);
+      void broadcastUsage(this.post, this.shared.rateLimits);
     });
   }
 
@@ -1035,6 +1044,11 @@ export class ConversationHost {
     },
     captureSelection: () => this.sendSelectionToChat(),
     refreshEditorContext: () => broadcastEditorContext(this.post),
+    chatFocus: (m) => {
+      const focused = bool(m, "focused");
+      if (focused === undefined) return;
+      this.shared.focusChanged(this, focused);
+    },
 
     // ── Models ─────────────────────────────────────────────────
     requestModels: () => this.models.broadcast(),
@@ -1108,7 +1122,7 @@ export class ConversationHost {
     },
 
     // ── Usage ──────────────────────────────────────────────────
-    refreshUsage: () => broadcastUsage(this.post),
+    refreshUsage: () => broadcastUsage(this.post, this.shared.rateLimits),
 
     // ── Conventions ────────────────────────────────────────────
     dismissConventionsBanner: async () => {
@@ -1546,7 +1560,7 @@ export class ConversationHost {
     // are only what a new one starts with.
     const { model, permissionMode: permMode, effort, thinking } = this.settings;
     const cfg = vscode.workspace.getConfiguration("luno");
-    const maxTokens = cfg.get<number>("maxTokens", 4096);
+    const maxTokens = cfg.get<number>("maxTokens", 0);
     const bashAllowlist = cfg.get<string[]>("allowedBashPatterns", []);
     // Skills the user toggled off in the picker. Passed through to the CLI
     // so it actually skips them at invocation time, not just visually.
@@ -1619,19 +1633,10 @@ export class ConversationHost {
 
     // In `default`/`auto` the provider routes each mutating tool call back to
     // us over the stream-json control channel; we surface it as an inline
-    // approval card (see onDelta's `permission_request` handling). Here we just
-    // compose the system prompt with the same per-mode / per-task / conventions
-    // content the user expects.
-    const systemPrompt = buildSystemPrompt({
-      workspaceRoot,
-      activeFile,
-      workspaceName: vscode.workspace.workspaceFolders?.[0]?.name,
-      permissionMode: permMode,
-      taskType,
-      conventions,
-      isClaudeCli: true
-    });
-
+    // approval card (see onDelta's `permission_request` handling). The mode,
+    // task-type and conventions prompts are not composed here — `buildArgs`
+    // pushes each as its own `--append-system-prompt`, on top of the base
+    // prompt the CLI already carries.
     this.maybeShowConventionsBanner(conventions);
     if (permMode === "plan") {
       void suggestSkill(this.post, this.ctx, taskType, workspaceRoot);
@@ -1642,7 +1647,6 @@ export class ConversationHost {
       provider: providerInstance,
       model,
       maxTokens,
-      systemPrompt,
       onDelta: (d: StreamDelta) => {
         // A pending tool-permission prompt: surface it as a dedicated typed
         // message (an inline approval card in the webview) rather than a raw
@@ -1675,9 +1679,14 @@ export class ConversationHost {
             cacheCreatedTokens: d.usage.cacheCreatedTokens,
             costUsd: d.usage.costUsd,
             sessionId: d.usage.sessionId,
-            source: "claude-cli",
-            rateLimit: d.usage.rateLimit
+            source: "claude-cli"
           });
+        }
+        // The CLI's own quota verdict — which window is binding and when it
+        // resets. It anchors the 5-hour aggregation, so record it before the
+        // post-turn refresh reads it back.
+        if (d.type === "rate_limit" && d.rateLimit) {
+          this.shared.rateLimits.record(d.rateLimit);
         }
       }
     });
@@ -1698,7 +1707,7 @@ export class ConversationHost {
         // Refresh authoritative usage after every turn — Claude Code writes
         // its session JSONL synchronously, so by this point the new tokens
         // are on disk and the aggregator will pick them up.
-        void broadcastUsage(this.post);
+        void broadcastUsage(this.post, this.shared.rateLimits);
         // Drop the per-turn MCP config so the bearer tokens it held don't
         // sit on disk between turns.
         void mcpConfig?.cleanup();

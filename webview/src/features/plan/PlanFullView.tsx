@@ -23,7 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../design/icons";
 import { Chip, IconButton, Tooltip } from "../../design/primitives";
-import { renderMarkdown } from "../chat/markdown";
+import { MarkdownBody } from "../chat/markdown";
 import { send } from "../../lib/rpc";
 import { AnimatePresence, motion } from "framer-motion";
 import { ENTER, ENTER_CARD, EXPAND, SWAP, enterAt } from "../../design/motion";
@@ -332,7 +332,7 @@ export function PlanFullView({
         ) : (
           <motion.div key="body" className={s.docStack} {...ENTER}>
             <div ref={docRef} className={`md ${s.docMd}`}>
-              {renderMarkdown(view.meta.body, { preserveHeadings: true })}
+              <MarkdownBody text={view.meta.body} preserveHeadings />
             </div>
             {/* Hydrate the rendered markdown with comment threads inline
                 at each highlight's containing block. Uses React portals

@@ -121,3 +121,64 @@ describe("aggregateClaudeCodeUsage windowing", () => {
     expect(out.total.inputTokens).toBe(100);
   });
 });
+
+// The inferred 5-hour window takes the oldest message inside [now-5h, now] as
+// the window start. When a window boundary falls inside that range, the tail of
+// the *previous* window is the oldest message — so the reset time is reported
+// hours early and the previous window's tokens are counted against the current
+// one. Measured against a live account the countdown was 2.5 hours out.
+describe("aggregateClaudeCodeUsage session anchoring", () => {
+  /** 17:10 — a window that runs to 22:10, with the one before it still inside
+   *  the five hours the inference scans. */
+  const windowStart = NOW.getTime() - 50 * 60 * 1000;
+
+  function twoWindows(): string {
+    const nowMs = NOW.getTime();
+    return [
+      // Previous window: 14:39, three hours before now but before the boundary.
+      line(nowMs - 3 * HOUR - 21 * 60_000, "claude-opus-4-8", 900, 100),
+      // Current window: after 17:10.
+      line(windowStart + 5 * 60_000, "claude-opus-4-8", 40, 10),
+      line(nowMs - 5 * 60_000, "claude-opus-4-8", 30, 20)
+    ].join("\n");
+  }
+
+  it("counts only the anchored window, and resets when the CLI says", async () => {
+    const proj = path.join(root, "proj-1");
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(path.join(proj, "fresh.jsonl"), twoWindows());
+
+    const out = await aggregateClaudeCodeUsage("/unused", NOW, {
+      scope: "all",
+      projectsRoot: root,
+      sessionWindowStart: windowStart
+    });
+
+    expect(out.session.startedAt).toBe(windowStart);
+    expect(out.session.resetsAt).toBe(windowStart + 5 * HOUR);
+    expect(out.session.authoritative).toBe(true);
+    // 40+10+30+20 — the 900 from the previous window stays out of it.
+    expect(out.session.usage.inputTokens + out.session.usage.outputTokens).toBe(
+      100
+    );
+  });
+
+  it("without an anchor, folds the previous window in and resets early", async () => {
+    const proj = path.join(root, "proj-1");
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(path.join(proj, "fresh.jsonl"), twoWindows());
+
+    const out = await aggregateClaudeCodeUsage("/unused", NOW, {
+      scope: "all",
+      projectsRoot: root
+    });
+
+    // This is the defect the anchor exists to remove, pinned so a future
+    // change to the fallback is a deliberate one.
+    expect(out.session.authoritative).toBeUndefined();
+    expect(out.session.resetsAt).toBeLessThan(windowStart + 5 * HOUR);
+    expect(out.session.usage.inputTokens + out.session.usage.outputTokens).toBe(
+      1100
+    );
+  });
+});

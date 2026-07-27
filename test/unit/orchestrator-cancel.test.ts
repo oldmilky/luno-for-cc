@@ -55,6 +55,24 @@ describe("cancelling a turn", () => {
     const assistant = session.timeline.filter((e) => e.kind === "assistant");
     expect(assistant).toHaveLength(1);
     expect(assistant[0].body).toBe("Partial answer.");
+    // And it says it was cut off. A flushed partial answer is otherwise the
+    // same shape as a finished one, so anything reading the end of a timeline —
+    // the history list does — would report a stopped turn as complete.
+    expect(assistant[0].meta?.interrupted).toBe(true);
+  });
+
+  it("marks only the cancelled flush, not an ordinary one", async () => {
+    const session = new Session();
+    const provider = providerOf([
+      { type: "text", text: "A complete " },
+      { type: "text", text: "answer." }
+    ]);
+    const orch = orchestratorFor(session, provider);
+    await orch.turn("go");
+
+    const assistant = session.timeline.filter((e) => e.kind === "assistant");
+    expect(assistant).toHaveLength(1);
+    expect(assistant[0].meta?.interrupted).toBeUndefined();
   });
 
   it("leaves messages untouched, so a half-finished turn is not sent back as context", async () => {

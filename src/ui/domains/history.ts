@@ -13,6 +13,13 @@
 import type { HistoryService, LiveStatus } from "../../services/history.js";
 import type { Post } from "../messages.js";
 
+/** What the registry can say about a session, when a conversation holds one. */
+export interface LiveState {
+  /** A turn in flight, or an approval nobody has answered. Undefined when the
+   *  conversation is merely sitting there — then the stored status stands. */
+  status?: LiveStatus;
+}
+
 /**
  * @param liveFor answers what a conversation on that session is doing, or
  *   nothing when none is open. Passed in because history is a file store and
@@ -21,11 +28,18 @@ import type { Post } from "../messages.js";
 export async function broadcastHistory(
   post: Post,
   history: HistoryService,
-  liveFor?: (id: string) => LiveStatus | undefined
+  liveFor?: (id: string) => LiveState | undefined
 ): Promise<void> {
   const stored = await history.list();
   const sessions = liveFor
-    ? stored.map((s) => ({ ...s, live: liveFor(s.id) }))
+    ? stored.map((s) => {
+        const live = liveFor(s.id);
+        if (!live) return s;
+        // A running turn outranks however the last one ended; an idle open
+        // conversation does not, because "you have this open" is not a state
+        // the conversation is in — that is what `open` carries.
+        return { ...s, open: true, status: live.status ?? s.status };
+      })
     : stored;
   post({ type: "historyList", sessions });
 }

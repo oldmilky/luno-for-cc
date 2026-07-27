@@ -1017,4 +1017,39 @@ describe("claude-cli stateful processor (stream_event partials)", () => {
     });
     expect(out).toEqual([]);
   });
+
+  // Verbatim from `claude -p --output-format stream-json` on 2.1.219. This is
+  // the only authoritative quota signal on the CLI path: the extension never
+  // sees the `anthropic-ratelimit-*` headers, so without this event the 5-hour
+  // window can only be inferred — and the inference was 2.5 hours out.
+  it("turns the CLI's rate_limit_event into a quota verdict", () => {
+    const p = makeProcessor();
+    const out = p({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "allowed",
+        resetsAt: 1785172200,
+        rateLimitType: "five_hour",
+        overageStatus: "rejected",
+        isUsingOverage: false
+      },
+      session_id: "3c54920c-369c-4d9c-b7e3-f46d02829884"
+    } as never);
+
+    expect(out).toHaveLength(1);
+    const [delta] = out;
+    expect(delta.type).toBe("rate_limit");
+    expect(delta.rateLimit?.bucket).toBe("five_hour");
+    expect(delta.rateLimit?.status).toBe("allowed");
+    expect(delta.rateLimit?.usingOverage).toBe(false);
+    // Seconds in the payload, milliseconds everywhere in this codebase.
+    expect(delta.rateLimit?.resetsAt).toBe(1785172200 * 1000);
+  });
+
+  it("ignores a rate_limit_event with no reset time to report", () => {
+    const p = makeProcessor();
+    expect(
+      p({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } })
+    ).toEqual([]);
+  });
 });

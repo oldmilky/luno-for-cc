@@ -261,29 +261,41 @@
   }
 }
 
-// ── Live status ──────────────────────────────────────────────
+// ── Status ───────────────────────────────────────────────────
 //
-// Three states a chat can be in while the list is open. Colour alone would
-// not carry it — the pill in the meta row says which, in words.
+// Six states, four tones. Colour alone cannot carry six meanings — the pill in
+// the meta row says which, in words — so colour only has to answer "does this
+// want me?". `done` is the resting state of most rows and stays grey on
+// purpose: a list where every row is coloured is a list with no signal in it.
 
 // Compound with `.dot` so these outrank the hover rule above: a chat that is
 // working must not read as merely hovered.
-.dot.dotOpen {
-  background: var(--accent);
-}
-
-.dot.dotWaiting {
+.dot.toneWarn {
   background: var(--warn);
 }
 
-.dot.dotRunning {
+.dot.toneErr {
+  background: var(--err);
+}
+
+.dot.toneQuiet {
+  background: var(--t4);
+}
+
+.dot.toneWorking {
   background: var(--accent);
   // The activity period, not the decorative one: this dot means a turn is in
   // flight right now.
   @include motion.halo-breathe(var(--motion-ambient));
 }
 
-.livePill {
+// A conversation is holding this chat right now. A ring rather than a colour,
+// because being open is orthogonal to the state — every tone has to survive it.
+.dot.dotOpen {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.statusPill {
   padding: 1px 5px;
   border-radius: 4px;
   font-family: var(--font-sans);
@@ -292,20 +304,37 @@
   letter-spacing: 0.2px;
   text-transform: uppercase;
 
-  &.dotOpen {
-    background: var(--accent-soft);
-    color: var(--accent-glow);
-  }
-
-  &.dotWaiting {
+  &.toneWarn {
     background: var(--warn-soft);
     color: var(--warn);
   }
 
-  &.dotRunning {
+  &.toneErr {
+    background: var(--err-soft);
+    color: var(--err);
+  }
+
+  &.toneWorking {
     background: var(--accent-soft);
     color: var(--accent-glow);
   }
+
+  // No background: "done" is the absence of a problem, and giving it a chip of
+  // its own would put a badge on nearly every row.
+  //
+  // `--t3`, not the `--t4` of the timestamp beside it. Measured: --t4 on this
+  // panel is 2.11:1, which the timestamp and the group headings have always
+  // been and can afford — a status cannot. --t3 is 4.36:1 here and still reads
+  // as the quiet one against the coloured pills.
+  &.toneQuiet {
+    padding-left: 0;
+    color: var(--t3);
+  }
+}
+
+.openMark {
+  color: var(--accent-glow);
+  font-weight: 700;
 }
 
 // ── Rename field ─────────────────────────────────────────────

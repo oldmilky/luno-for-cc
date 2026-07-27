@@ -391,9 +391,16 @@ export class ClaudeCliProvider implements ChatProvider {
     // prefers env-supplied keys over its own on-disk credentials, so this
     // is the cleanest way to make Luno's stored token authoritative
     // without touching ~/.claude/ files.
-    const childEnv = this.opts.token
-      ? { ...process.env, ANTHROPIC_API_KEY: this.opts.token }
-      : process.env;
+    const childEnv: NodeJS.ProcessEnv = { ...process.env };
+    if (this.opts.token) childEnv.ANTHROPIC_API_KEY = this.opts.token;
+    // There is no max-output-tokens flag — the CLI reads this env var per run.
+    // Anything at or below zero means "whatever the CLI decides", so the
+    // variable is left unset rather than pinned to a number we invented.
+    if (Number.isFinite(req.maxTokens) && req.maxTokens > 0) {
+      childEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(
+        Math.floor(req.maxTokens)
+      );
+    }
     const child = spawn(this.opts.binary, args, {
       cwd: this.opts.cwd,
       env: childEnv,
@@ -1016,6 +1023,14 @@ export interface CliEvent {
   total_cost_usd?: number;
   error?: string;
   result?: string;
+  /** Present on `rate_limit_event`. `resetsAt` is unix *seconds*, unlike
+   *  every other timestamp in this protocol. */
+  rate_limit_info?: {
+    status?: string;
+    resetsAt?: number;
+    rateLimitType?: string;
+    isUsingOverage?: boolean;
+  };
   /** Control-protocol fields — present on `control_request` events the CLI
    *  emits when `--permission-prompt-tool stdio` is active. */
   request_id?: string;
@@ -1175,6 +1190,28 @@ export function makeProcessor(setResume?: (id: string) => void): Processor {
             (ev.subtype === "error_max_turns"
               ? "Claude CLI hit max turns. Try a simpler prompt or increase turns."
               : ev.subtype)
+        });
+      }
+      return out;
+    }
+
+    // The only authoritative quota signal on this path. The CLI holds the HTTP
+    // exchange and never passes the `anthropic-ratelimit-*` headers through,
+    // so without this event the reset time can only be guessed from message
+    // timestamps on disk — and that guess is wrong by hours whenever a window
+    // boundary falls inside the range being scanned.
+    if (ev.type === "rate_limit_event" && ev.rate_limit_info) {
+      const info = ev.rate_limit_info;
+      if (typeof info.resetsAt === "number" && info.rateLimitType) {
+        out.push({
+          type: "rate_limit",
+          rateLimit: {
+            bucket: info.rateLimitType,
+            resetsAt: info.resetsAt * 1000,
+            status: info.status ?? "allowed",
+            usingOverage: info.isUsingOverage,
+            observedAt: Date.now()
+          }
         });
       }
       return out;

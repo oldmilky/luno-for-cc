@@ -22,7 +22,7 @@ import {
   enterAt,
   stagger
 } from "../../design/motion";
-import { send, onMessage, HistoryEntry } from "../../lib/rpc";
+import { send, onMessage, ChatStatus, HistoryEntry } from "../../lib/rpc";
 import s from "./HistoryDrawer.module.scss";
 
 interface HistoryDrawerProps {
@@ -263,15 +263,22 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
 
 // ─────────────────── Sub-components ───────────────────
 
-/** What each live state is called and which dot class carries it. Kept beside
- *  the row rather than inline so the three stay consistent as a set. */
-const LIVE: Record<
-  NonNullable<HistoryEntry["live"]>,
-  { label: string; dot: string }
-> = {
-  waiting: { label: "needs you", dot: "dotWaiting" },
-  running: { label: "working", dot: "dotRunning" },
-  open: { label: "open", dot: "dotOpen" }
+/**
+ * What each state is called and which tone carries it. One table so the six
+ * stay consistent as a set — six colours invented at six call sites is how a
+ * list stops meaning anything.
+ *
+ * `done` is deliberately quiet and deliberately last: it is the resting state
+ * of most rows, and a list where everything shouts says nothing. What earns
+ * colour is what wants the user.
+ */
+const STATUS: Record<ChatStatus, { label: string; tone: string }> = {
+  "needs-you": { label: "needs you", tone: "toneWarn" },
+  working: { label: "working", tone: "toneWorking" },
+  failed: { label: "failed", tone: "toneErr" },
+  interrupted: { label: "interrupted", tone: "toneErr" },
+  "no-reply": { label: "no reply", tone: "toneWarn" },
+  done: { label: "done", tone: "toneQuiet" }
 };
 
 function HistoryItem({
@@ -293,7 +300,7 @@ function HistoryItem({
   onRename: (name: string) => void;
   onCancelRename: () => void;
 }) {
-  const live = session.live ? LIVE[session.live] : null;
+  const status = STATUS[session.status] ?? STATUS.done;
   return (
     <div
       // A row being renamed is a text field, not a button: clicking into it,
@@ -310,8 +317,13 @@ function HistoryItem({
       }}
       className={s.item}
     >
+      {/* Two facts, two marks. The dot is the status; the ring around it says
+          a conversation is holding this chat right now, which is a different
+          question and used to compete for the same word. */}
       <span
-        className={[s.dot, live ? s[live.dot] : ""].join(" ").trim()}
+        className={[s.dot, s[status.tone], session.open ? s.dotOpen : ""]
+          .join(" ")
+          .trim()}
         aria-hidden
       />
       <div className={s.itemMain}>
@@ -335,12 +347,14 @@ function HistoryItem({
           <span>
             {session.eventCount} {session.eventCount === 1 ? "event" : "events"}
           </span>
-          {live && (
+          <span className={s.itemMetaDot}>·</span>
+          <span className={[s.statusPill, s[status.tone]].join(" ")}>
+            {status.label}
+          </span>
+          {session.open && (
             <>
               <span className={s.itemMetaDot}>·</span>
-              <span className={[s.livePill, s[live.dot]].join(" ")}>
-                {live.label}
-              </span>
+              <span className={s.openMark}>open</span>
             </>
           )}
         </span>

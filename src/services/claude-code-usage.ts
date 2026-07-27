@@ -47,10 +47,17 @@ export interface UsageTotals {
 export interface SessionWindow {
   /** Tokens used inside the current 5-hour window. */
   usage: UsageTotals;
-  /** Wall-clock start of the window (first message inside it). 0 if no recent activity. */
+  /** Wall-clock start of the window. 0 if no recent activity. */
   startedAt: number;
   /** When the window will reset (startedAt + 5h). 0 if no recent activity. */
   resetsAt: number;
+  /**
+   * True when the boundary came from the CLI's own `rate_limit_event` rather
+   * than being inferred from message timestamps. The UI says which it is
+   * showing — an inferred window can be hours off, and a countdown that does
+   * not admit it is a guess is worse than no countdown.
+   */
+  authoritative?: boolean;
 }
 
 export interface AggregatedUsage {
@@ -118,6 +125,17 @@ export interface AggregateOptions {
    * logic can be exercised against a fixture directory in tests.
    */
   projectsRoot?: string;
+  /**
+   * Authoritative start of the 5-hour window, from the CLI's own
+   * `rate_limit_event` (see `RateLimitTracker`). When given it replaces the
+   * inference below outright.
+   *
+   * The inference is only ever a guess, and a wrong one whenever the previous
+   * window's tail is still inside the last five hours: it then reports a start
+   * hours too early and sums two windows' tokens into one. Measured against
+   * the CLI on a live account it was off by 2.5 hours.
+   */
+  sessionWindowStart?: number;
 }
 
 /**
@@ -184,9 +202,11 @@ export async function aggregateClaudeCodeUsage(
   const nowMs = now.getTime();
   const dayCutoff = startOfLocalDay(now).getTime();
   const weekCutoff = startOfLocalWeek(now).getTime();
-  // Initial session lower bound; we refine it once we find the actual
-  // earliest message of the most recent burst.
-  const sessionLowerBound = nowMs - FIVE_HOURS_MS;
+  // With the CLI's anchor the boundary is known and nothing needs refining.
+  // Without it, this is a lower bound and the earliest message inside it is
+  // taken as the window start — see `sessionWindowStart` on the options.
+  const anchored = opts.sessionWindowStart;
+  const sessionLowerBound = anchored ?? nowMs - FIVE_HOURS_MS;
 
   // Gather every .jsonl file across the chosen scope, sorted newest-first
   // so the (rare) parser failure on an older file doesn't hide recent
@@ -236,10 +256,22 @@ export async function aggregateClaudeCodeUsage(
     );
   }
 
-  // Refine the session window: find the earliest message in the last 5h.
-  // The "session" Anthropic actually charges is 5 hours from the *first*
-  // message; subsequent messages don't extend the deadline. We approximate
-  // that by treating the oldest entry inside [now-5h, now] as the start.
+  // Anchored: the boundary came from the CLI, so every message collected above
+  // is inside the window by construction and the reset time is server truth.
+  if (anchored !== undefined) {
+    out.session.startedAt = anchored;
+    out.session.resetsAt = anchored + FIVE_HOURS_MS;
+    out.session.authoritative = true;
+    for (const e of sessionEntries)
+      addUsage(out.session.usage, e.line.message?.usage);
+    return out;
+  }
+
+  // Unanchored: the "session" Anthropic charges is 5 hours from the *first*
+  // message, and subsequent messages don't extend the deadline. Approximate it
+  // with the oldest entry inside [now-5h, now]. This is wrong whenever that
+  // entry belongs to the window before this one, which is why the anchor
+  // exists — the estimate stands only until the first turn reports one.
   if (sessionEntries.length > 0) {
     sessionEntries.sort((a, b) => a.ts - b.ts);
     const start = sessionEntries[0].ts;

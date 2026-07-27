@@ -37,7 +37,7 @@ import type {
   TimelineEvent,
   UsageTotals,
   SessionWindow,
-  RateLimitInfo
+  RateLimitStatus
 } from "../../lib/rpc";
 import s from "./TokenMeter.module.scss";
 
@@ -203,11 +203,10 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
     generatedAt: 0,
     available: false
   });
-  // Live rate-limit info from Anthropic's response headers, when API mode
-  // is in use. This is server-truth — the exact numbers Anthropic uses to
-  // enforce quota — so the meter prefers it over plan presets when present.
-  const [serverLimit, setServerLimit] = useState<RateLimitInfo | null>(null);
-  const [serverLimitAt, setServerLimitAt] = useState<number>(0);
+  // The CLI's own quota verdicts: which window is binding and when it resets.
+  // Server truth for the *boundaries* — it reports no amounts, so the bars
+  // still come from the aggregated session files.
+  const [limits, setLimits] = useState<RateLimitStatus[]>([]);
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!open) return;
@@ -227,9 +226,7 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
           generatedAt: m.generatedAt,
           available: m.available
         });
-      } else if (m.type === "tokenUsage" && m.rateLimit) {
-        setServerLimit(m.rateLimit);
-        setServerLimitAt(Date.now());
+        setLimits(m.limits ?? []);
       }
     });
   }, []);
@@ -239,7 +236,7 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
     [events, streaming]
   );
 
-  const limits = resolveLimits(settings);
+  const caps = resolveLimits(settings);
   const preset = PLAN_PRESETS[settings.plan];
 
   const sessionTotal = auth.available
@@ -248,9 +245,9 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
   const weekAllTotal = totalOf(auth.week);
   const weekSonnetTotal = totalOf(auth.weekSonnet);
 
-  const sessionPct = pctOf(sessionTotal, limits.session);
-  const weekAllPct = pctOf(weekAllTotal, limits.weekAll);
-  const weekSonnetPct = pctOf(weekSonnetTotal, limits.weekSonnet);
+  const sessionPct = pctOf(sessionTotal, caps.session);
+  const weekAllPct = pctOf(weekAllTotal, caps.weekAll);
+  const weekSonnetPct = pctOf(weekSonnetTotal, caps.weekSonnet);
 
   // For the chip: show whichever bucket has the highest pressure. If the
   // currently-active plan has no caps (API) just show session total.
@@ -334,7 +331,10 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
             <div className={s.head}>
               <div className={s.headLeft}>
                 <span className={s.headTitle}>Your usage limits</span>
-                <SourceBadge available={auth.available} />
+                <SourceBadge
+                  available={auth.available}
+                  anchored={auth.session.authoritative === true}
+                />
               </div>
               <button
                 type="button"
@@ -397,59 +397,29 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
             </div>
 
             <div className={s.body}>
-              {/* Server-truth rate limits, when present (API mode). These come
-                  from Anthropic's `anthropic-ratelimit-*` response headers and
-                  are the exact numbers Anthropic uses to enforce quota. */}
-              {serverLimit && hasAnyBucket(serverLimit) && (
-                <div className={s.serverBlock}>
-                  <div className={s.serverHead}>
-                    <span className={s.sectionTitle}>
-                      Server-reported limits
-                    </span>
-                    <Tooltip
-                      label={`Updated ${formatAgo(serverLimitAt, tick)} from anthropic-ratelimit-* response headers`}
-                    >
-                      <span className={s.badgeOk}>
-                        <Icon name="check" size={8} />
-                        Live
-                      </span>
-                    </Tooltip>
-                  </div>
-                  {serverLimit.tokens.limit !== undefined && (
-                    <ServerLimitBar
-                      label="Tokens"
-                      bucket={serverLimit.tokens}
-                      tick={tick}
-                    />
-                  )}
-                  {serverLimit.requests.limit !== undefined && (
-                    <ServerLimitBar
-                      label="Requests"
-                      bucket={serverLimit.requests}
-                      tick={tick}
-                    />
-                  )}
-                  <div className={s.serverNote}>
-                    Direct from Anthropic. Resets automatically; you'll see new
-                    numbers after every API call.
-                  </div>
-                </div>
-              )}
-
-              {/* Current session */}
+              {/* Current session. The countdown says where its boundary came
+                  from: the CLI's own verdict, or a guess from message
+                  timestamps that can be hours out. */}
               <UsageRow
                 label="Current session"
                 pct={sessionPct}
                 used={sessionTotal}
-                limit={limits.session}
+                limit={caps.session}
                 sub={
                   auth.available && auth.session.resetsAt > 0
-                    ? `Resets in ${formatCountdown(auth.session.resetsAt, tick)}`
+                    ? `Resets in ${formatCountdown(auth.session.resetsAt, tick)}${
+                        auth.session.authoritative ? "" : " (estimated)"
+                      }`
                     : auth.available
                       ? "No activity in the last 5 hours"
                       : "Estimated · resets per Anthropic's 5-hour window"
                 }
-                noCap={limits.session === 0}
+                tooltip={
+                  auth.session.authoritative
+                    ? "Window boundary reported by the Claude CLI itself. Tokens are summed from the session files inside that window."
+                    : "No quota verdict seen yet — the CLI reports one during a turn. Until then the window is inferred from message timestamps and can be hours out."
+                }
+                noCap={caps.session === 0}
                 onLimitChange={(v) => setLimitOverride("session", v)}
               />
 
@@ -463,9 +433,9 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                   label="All models"
                   pct={weekAllPct}
                   used={weekAllTotal}
-                  limit={limits.weekAll}
-                  sub={`Resets ${formatWeeklyReset()}`}
-                  noCap={limits.weekAll === 0}
+                  limit={caps.weekAll}
+                  sub={weeklyReset("seven_day", limits, tick)}
+                  noCap={caps.weekAll === 0}
                   onLimitChange={(v) => setLimitOverride("weekAll", v)}
                 />
 
@@ -473,10 +443,10 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                   label="Sonnet only"
                   pct={weekSonnetPct}
                   used={weekSonnetTotal}
-                  limit={limits.weekSonnet}
-                  sub={`Resets ${formatWeeklyReset()}`}
+                  limit={caps.weekSonnet}
+                  sub={weeklyReset("seven_day_sonnet", limits, tick)}
                   tooltip="Counts every assistant message produced by any Claude Sonnet model this week."
-                  noCap={limits.weekSonnet === 0}
+                  noCap={caps.weekSonnet === 0}
                   onLimitChange={(v) => setLimitOverride("weekSonnet", v)}
                 />
               </div>
@@ -616,15 +586,37 @@ function ChipGauge({ pct }: { pct: number }) {
   );
 }
 
-function SourceBadge({ available }: { available: boolean }) {
-  return available ? (
-    <Tooltip label="Aggregated from Claude Code session files on this machine">
-      <span className={s.badgeOk}>
-        <Icon name="check" size={8} />
-        Authoritative
-      </span>
-    </Tooltip>
-  ) : (
+/**
+ * Where the numbers came from. Two independent things have to be true to call
+ * the panel authoritative — the amounts and the window they are counted over —
+ * and claiming it on the amounts alone put the badge next to rows that said
+ * "(estimated)" on every line.
+ */
+function SourceBadge({
+  available,
+  anchored
+}: {
+  available: boolean;
+  anchored: boolean;
+}) {
+  if (available && anchored) {
+    return (
+      <Tooltip label="Amounts from Claude Code's session files, window boundaries reported by the CLI itself">
+        <span className={s.badgeOk}>
+          <Icon name="check" size={8} />
+          Authoritative
+        </span>
+      </Tooltip>
+    );
+  }
+  if (available) {
+    return (
+      <Tooltip label="Amounts from Claude Code's session files, but no quota verdict seen yet — the windows they are counted over are inferred until a turn runs">
+        <span className={s.badgeMuted}>Partial</span>
+      </Tooltip>
+    );
+  }
+  return (
     <Tooltip label="Client-side estimate (no Claude Code session files for this workspace)">
       <span className={s.badgeMuted}>Estimate</span>
     </Tooltip>
@@ -761,65 +753,6 @@ function UsageRow({
   );
 }
 
-function ServerLimitBar({
-  label,
-  bucket,
-  tick
-}: {
-  label: string;
-  bucket: { limit?: number; remaining?: number; resetsAt?: number };
-  tick: number;
-}) {
-  const limit = bucket.limit ?? 0;
-  const remaining = bucket.remaining ?? limit;
-  const used = Math.max(0, limit - remaining);
-  const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
-  const tone = toneFor(pct);
-  // These land in bursts — a whole response's worth of quota is spent between
-  // one header and the next — so they are the numbers that jumped hardest.
-  const pctCount = useCountSpring(pct);
-  const usedCount = useCountSpring(used);
-  const limitCount = useCountSpring(limit);
-  const remainingCount = useCountSpring(remaining);
-  const fillWidth = useTransform(pctCount, barWidth);
-  return (
-    <div className={s.serverRow}>
-      <div className={s.serverRowHead}>
-        <span className={s.serverRowLabel}>{label}</span>
-        <span className={s.serverRowNums}>
-          <CountText count={usedCount} format={formatNum} />{" "}
-          <CountText
-            className={s.serverRowLimit}
-            count={limitCount}
-            format={formatOutOf}
-          />
-        </span>
-      </div>
-      <div className={s.serverBar}>
-        <motion.div
-          className={`${s.barFill} ${TONE_CLASS[tone]}`}
-          style={{ width: fillWidth }}
-        />
-      </div>
-      {bucket.resetsAt && (
-        <div className={s.serverRowReset}>
-          <CountText count={remainingCount} format={formatNum} /> remaining ·
-          resets in {formatCountdown(bucket.resetsAt, tick)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function hasAnyBucket(r: RateLimitInfo): boolean {
-  return (
-    r.tokens.limit !== undefined ||
-    r.inputTokens.limit !== undefined ||
-    r.outputTokens.limit !== undefined ||
-    r.requests.limit !== undefined
-  );
-}
-
 // ─────────────────── Helpers ───────────────────
 
 function pctOf(used: number, limit: number): number {
@@ -947,14 +880,29 @@ function formatAgo(ts: number, _tick: number): string {
   return `${Math.floor(diff / 3_600_000)} hr ago`;
 }
 
-function formatWeeklyReset(): string {
+/**
+ * When a weekly window resets.
+ *
+ * Prefers the CLI's verdict for that exact bucket. The fallback assumes the
+ * week turns over at local Monday midnight, which is only ever a guess:
+ * Anthropic anchors each account's week to when it first hit the cap, not to
+ * a calendar boundary. Labelled as an estimate so nobody plans around it.
+ */
+function weeklyReset(
+  bucket: string,
+  limits: RateLimitStatus[],
+  tick: number
+): string {
+  const known = limits.find((l) => l.bucket === bucket);
+  if (known) return `Resets in ${formatCountdown(known.resetsAt, tick)}`;
+
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   const dow = d.getDay();
   const days = dow === 1 ? 7 : (8 - dow) % 7 || 7;
   d.setDate(d.getDate() + days);
   const day = d.toLocaleDateString(undefined, { weekday: "short" });
-  return `${day} 12:00 AM`;
+  return `Resets ${day} 12:00 AM (estimated)`;
 }
 
 function formatCompact(n: number): string {
@@ -980,10 +928,6 @@ function formatNum(n: number): string {
 // be outside it — and anything it should keep has to be inside.
 function formatPctUsed(n: number): string {
   return `${n}% used`;
-}
-
-function formatOutOf(n: number): string {
-  return `/ ${formatNum(n)}`;
 }
 
 function parseLimit(raw: string): number | null {

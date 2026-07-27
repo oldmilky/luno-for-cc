@@ -644,10 +644,14 @@ describe("naming a conversation", () => {
     await settle();
 
     const rows = lastList(sidebar.webview.sent);
-    expect(rows?.find((r) => r.id === "stored-1")?.live).toBe("open");
-    // Nobody holds this one, so it carries no status at all rather than a
-    // status meaning "not open".
-    expect(rows?.find((r) => r.id === "stored-2")?.live).toBeUndefined();
+    const held = rows?.find((r) => r.id === "stored-1");
+    const idle = rows?.find((r) => r.id === "stored-2");
+    expect(held?.open).toBe(true);
+    expect(idle?.open).toBe(false);
+    // Being open is not a state: both chats were left the same way, so both
+    // report the same status regardless of which one a conversation holds.
+    expect(held?.status).toBe("no-reply");
+    expect(idle?.status).toBe("no-reply");
   });
 });
 

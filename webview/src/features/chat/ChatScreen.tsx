@@ -50,7 +50,7 @@ import { CommandPalette } from "./CommandPalette";
 import { KeyboardHints } from "./KeyboardHints";
 import { PinnedContext, PinnedFile } from "./PinnedContext";
 import { classifyTool, ToolBucket } from "./tool-buckets";
-import { renderMarkdown } from "./markdown";
+import { MarkdownBody } from "./markdown";
 import { PlanCard, foldPlanState, looksLikePlanFile } from "../plan";
 import type { PlanRevisionView } from "../plan";
 import s from "./ChatScreen.module.scss";
@@ -930,7 +930,7 @@ function renderTurnBlock(
     }
     return (
       <div key={`n-${i}`} className={`md ${s.narrative}`}>
-        {renderMarkdown(b.text)}
+        <MarkdownBody text={b.text} />
       </div>
     );
   }

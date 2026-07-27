@@ -8,6 +8,7 @@
 
 import * as vscode from "vscode";
 import { aggregateClaudeCodeUsage } from "../../services/claude-code-usage.js";
+import type { RateLimitTracker } from "../../services/rate-limit.js";
 import type { Post } from "../messages.js";
 
 /**
@@ -16,13 +17,22 @@ import type { Post } from "../messages.js";
  * Best-effort by design: with no workspace open there is nothing to aggregate,
  * and a failed read leaves the chip on its local estimate rather than showing
  * an error for a number nobody asked for.
+ *
+ * `rateLimits` supplies the 5-hour window boundary the CLI reported. Without
+ * it the aggregation infers one, and the inference is wrong by hours whenever
+ * a window boundary sits inside the range it scans.
  */
-export async function broadcastUsage(post: Post): Promise<void> {
+export async function broadcastUsage(
+  post: Post,
+  rateLimits?: RateLimitTracker
+): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) return;
 
   try {
-    const agg = await aggregateClaudeCodeUsage(root);
+    const agg = await aggregateClaudeCodeUsage(root, new Date(), {
+      sessionWindowStart: rateLimits?.sessionWindowStart()
+    });
     post({
       type: "claudeCodeUsage",
       session: agg.session,
@@ -31,7 +41,8 @@ export async function broadcastUsage(post: Post): Promise<void> {
       weekSonnet: agg.weekSonnet,
       total: agg.total,
       generatedAt: agg.generatedAt,
-      available: agg.available
+      available: agg.available,
+      limits: rateLimits?.live() ?? []
     });
   } catch {
     // best-effort; the chip falls back to its estimate

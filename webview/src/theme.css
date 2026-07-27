@@ -240,7 +240,109 @@ body,
   margin-bottom: 0;
 }
 
-/* Nested lists swap marker style (disc → circle → square) and tighten. */
+/* Headings. The chat collapses `#` toward h3 (see markdown.tsx), so h3 is the
+   loudest a message can get; the document variant keeps the real levels and
+   PlanFullView restyles them on top of this. Sizes are em-scaled off the
+   container so the same rules serve the 13.5px chat and the 14px plan body. */
+.md-h {
+  margin: 1.4em 0 0.5em;
+  color: var(--t1);
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  line-height: 1.35;
+}
+h1.md-h {
+  font-size: 1.45em;
+}
+h2.md-h {
+  font-size: 1.28em;
+}
+h3.md-h {
+  font-size: 1.14em;
+}
+h4.md-h {
+  font-size: 1.03em;
+}
+h5.md-h,
+h6.md-h {
+  font-size: 0.95em;
+  color: var(--t2);
+}
+
+/* Lists. The UA's 40px indent is far too deep for a 400px panel — 1.35em keeps
+   the marker attached to its text. Nested lists swap marker style
+   (disc → circle → square) and tighten. */
+.md-ul,
+.md-ol {
+  margin: 0.5em 0 0.85em;
+  padding-left: 1.35em;
+  color: var(--t2);
+}
+.md-ul {
+  list-style: disc;
+}
+.md-ul .md-ul {
+  list-style: circle;
+}
+.md-ul .md-ul .md-ul {
+  list-style: square;
+}
+.md-ul li,
+.md-ol li {
+  margin: 0.2em 0;
+}
+.md-ul li::marker,
+.md-ol li::marker {
+  color: var(--t4);
+}
+/* A list item's own paragraphs must not carry block spacing, or every item in
+   a "loose" list (one with a blank line between items) gains a full paragraph
+   gap and the list falls apart. */
+.md-ul li > p,
+.md-ol li > p {
+  margin: 0;
+}
+.md-ul .md-ul,
+.md-ul .md-ol,
+.md-ol .md-ul,
+.md-ol .md-ol {
+  margin: 0.2em 0 0.3em;
+}
+/* GFM task lists: the checkbox replaces the marker, so the text still starts
+   where every other item's text does. */
+.md li.task-list-item {
+  list-style: none;
+}
+.md li.task-list-item input[type="checkbox"] {
+  width: 11px;
+  height: 11px;
+  margin-right: 0.45em;
+  accent-color: var(--accent);
+  vertical-align: baseline;
+}
+
+/* Inline code — the chip `.md kbd` calls its family. Rounder and with a
+   surface rather than a bottom edge, because it sits inside running prose and
+   a hard border would fence off every second word. */
+.md-ic {
+  padding: 0.1em 0.38em;
+  border: 1px solid var(--b1);
+  border-radius: 5px;
+  background: var(--s2);
+  color: var(--t1);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  font-feature-settings:
+    "calt" 1,
+    "ss01" 1;
+  /* `break-word`, not the `anywhere` prose paragraphs use: `anywhere` also
+     shrinks intrinsic min-content, which would let table layout hyphen a
+     `cmd+shift+escape` down the middle to avoid scrolling the cell. */
+  overflow-wrap: break-word;
+}
+.md-h .md-ic {
+  font-size: 0.9em;
+}
 
 /* Fenced code block — separate surface (--s0 is darker than the
    surrounding chat surface --s1 so the block "punches in"). Geist Mono
@@ -386,6 +488,50 @@ body,
 }
 
 /* ── Markdown tables ───────────────────────────────────── */
+
+/* The wrapper is the only thing keeping a wide table inside its message.
+   Without a scrollport here the table's own width propagates up untouched and
+   the first ancestor able to scroll is the chat column — whose `overflow-y:
+   auto` turns the horizontal axis into a scrollport too, so one wide table
+   drags the whole conversation sideways. */
+.md-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.7em 0 0.9em;
+  border: 1px solid var(--b1);
+  border-radius: var(--round-sm);
+  background: var(--s0);
+}
+
+/* `width: 100%` fills the wrapper whenever the columns can wrap into it. A
+   table whose min-content is wider — identifiers, paths, `when` clauses —
+   overruns it by table layout's own rules, and that overrun is what the
+   wrapper scrolls. */
+.md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.md-table th,
+.md-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--b1);
+  text-align: left;
+  vertical-align: top;
+}
+.md-table th {
+  background: var(--s2);
+  color: var(--t1);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.md-table td {
+  color: var(--t2);
+}
+.md-table tr:last-child td {
+  border-bottom: none;
+}
 
 /* ── Syntax highlighting (highlight.js) ──────────────────────
    A warm dark palette: brand copper for keywords, a calm green for

@@ -29,7 +29,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ENTER, SPRING_PRESS } from "../../design/motion";
 import { Icon } from "../../design/icons";
 import { Tooltip } from "../../design/primitives";
-import { renderMarkdown } from "./markdown";
+import { MarkdownBody } from "./markdown";
 import { newId, onMessage, send } from "../../lib/rpc";
 import { ImageLightbox } from "./ImageLightbox";
 import s from "./UserMessage.module.scss";
@@ -306,7 +306,7 @@ export function UserMessage({
 function renderTextPart(text: string, key: number): ReactNode {
   const trimmed = text.replace(/^\n+/, "").replace(/\n+$/, "");
   if (!trimmed) return null;
-  return <Fragment key={key}>{renderMarkdown(trimmed)}</Fragment>;
+  return <MarkdownBody key={key} text={trimmed} />;
 }
 
 /**

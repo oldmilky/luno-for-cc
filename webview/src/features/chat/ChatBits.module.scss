@@ -3,7 +3,6 @@
 // the error banner, the editor-context strip, pinned files, the
 // thinking indicator, and the accent banner shared by the
 // conventions prompt and the skill suggestion.
-// Converted from Tailwind + theme.css in Ф2а.
 // ─────────────────────────────────────────────────────────────
 
 // ── Error banner ─────────────────────────────────────────────
@@ -72,12 +71,15 @@
 
 // ── Editor context strip ─────────────────────────────────────
 
+// No bottom padding: the dock's own 10px gap is the whole separation from the
+// composer, so the file being talked about sits with the box you talk in
+// instead of floating between it and the log.
 .strip {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px 2px;
+  padding: 4px 12px 0;
 }
 
 .stripFile {
@@ -136,6 +138,47 @@
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 600;
+}
+
+// Quiet until hovered: pinning is an offer, not the reason the strip is there.
+// The file chip beside it is the primary target.
+.stripPin {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--round-sm);
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b1);
+    background: var(--s2);
+    color: var(--t1);
+  }
+}
+
+// Pinned reads as state, so it keeps the accent fill whether hovered or not —
+// the same chip the pinned-files row below uses.
+.stripPinned {
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+
+  &:hover {
+    border-color: var(--accent);
+    background: var(--accent-mid);
+    color: var(--t1);
+  }
 }
 
 // ── Pinned files ─────────────────────────────────────────────

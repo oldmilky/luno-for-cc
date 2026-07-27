@@ -23,6 +23,9 @@ const spawned = vi.hoisted(
  */
 const stream = vi.hoisted(() => ({ deltas: [] as unknown[], hang: false }));
 
+/** Every `setContext` the registry published, in order. */
+const contexts = vi.hoisted(() => [] as { key: string; value: unknown }[]);
+
 vi.mock("../../src/providers/factory.js", () => ({
   createProvider: (opts: { permissionMode: string; effort: string }) => {
     spawned.push(opts);
@@ -76,6 +79,11 @@ vi.mock("vscode", () => ({
       dispose: () => {}
     }),
     registerWebviewPanelSerializer: () => disposable
+  },
+  commands: {
+    executeCommand: async (cmd: string, key: string, value: unknown) => {
+      if (cmd === "setContext") contexts.push({ key, value });
+    }
   },
   ViewColumn: { Active: -1 },
   RelativePattern: class {
@@ -141,6 +149,7 @@ beforeEach(() => {
   spawned.length = 0;
   stream.deltas.length = 0;
   stream.hang = false;
+  contexts.length = 0;
   storage = fs.mkdtempSync(path.join(os.tmpdir(), "luno-settings-"));
   // A turn refuses to start without an open folder, and these tests are about
   // what it starts *with*. Deliberately not a git repository: isolation is a
@@ -325,6 +334,68 @@ describe("per-conversation settings", () => {
   });
 });
 
+// `package.json` binds Shift+Tab to `luno.cycleMode` under
+// `when: "luno.chatFocused"`. Nothing ever set that key, so the binding could
+// not match under any condition and the shortcut the hints overlay advertises
+// did nothing. These pin the key to the focus the webview reports.
+describe("chat focus context key", () => {
+  /** What VS Code was last told `luno.chatFocused` is. */
+  function chatFocused(): unknown {
+    return contexts.filter((c) => c.key === "luno.chatFocused").at(-1)?.value;
+  }
+
+  function focusableChat(registry: InstanceType<typeof ConversationRegistry>) {
+    const surface = fakeTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
+    return { surface, host };
+  }
+
+  it("raises the key while a chat holds the keyboard", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const { surface } = focusableChat(registry);
+
+    surface.webview.deliver({ type: "chatFocus", focused: true });
+    await settle();
+    expect(chatFocused()).toBe(true);
+
+    surface.webview.deliver({ type: "chatFocus", focused: false });
+    await settle();
+    expect(chatFocused()).toBe(false);
+  });
+
+  // Clicking from one chat straight into another delivers the second one's
+  // focus and the first one's blur in whichever order they arrive. A single
+  // boolean ends up false with a chat plainly focused, and Shift+Tab dies
+  // exactly when two chats are open — the case this project exists for.
+  it("stays raised when focus moves between two chats", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const first = focusableChat(registry);
+    const second = focusableChat(registry);
+
+    first.surface.webview.deliver({ type: "chatFocus", focused: true });
+    await settle();
+    second.surface.webview.deliver({ type: "chatFocus", focused: true });
+    first.surface.webview.deliver({ type: "chatFocus", focused: false });
+    await settle();
+
+    expect(chatFocused()).toBe(true);
+  });
+
+  it("lowers the key when the focused chat is closed", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const { surface, host } = focusableChat(registry);
+
+    surface.webview.deliver({ type: "chatFocus", focused: true });
+    await settle();
+    registry.close(host);
+
+    // A disposed surface sends no blur of its own.
+    expect(chatFocused()).toBe(false);
+  });
+});
+
 describe("conversation status", () => {
   /** A surface that records what it was named, the way a tab does. */
   function titledTarget() {
@@ -446,7 +517,7 @@ describe("conversation status", () => {
     await settle();
 
     // Waiting outranks running: this turn cannot continue until it is answered.
-    expect(host.live).toBe("waiting");
+    expect(host.live).toEqual({ status: "needs-you" });
   });
 
   it("reports a conversation mid-turn as running", async () => {
@@ -460,10 +531,10 @@ describe("conversation status", () => {
     surface.webview.deliver({ type: "prompt", text: "refactor the gate" });
     await settle();
 
-    expect(host.live).toBe("running");
+    expect(host.live).toEqual({ status: "working" });
   });
 
-  it("reports an idle conversation as merely open", async () => {
+  it("claims no live state for an idle conversation", async () => {
     const registry = new ConversationRegistry(fakeContext() as never);
     const surface = titledTarget();
     const host = registry.create();
@@ -473,6 +544,9 @@ describe("conversation status", () => {
     surface.webview.deliver({ type: "prompt", text: "hello" });
     await settle();
 
-    expect(host.live).toBe("open");
+    // Sitting there is not a state the conversation is *in* — the status the
+    // list shows then comes off its timeline, and being open is carried
+    // separately. Claiming one here is what made the two compete.
+    expect(host.live).toEqual({});
   });
 });

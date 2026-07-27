@@ -52,14 +52,32 @@ export interface StoredSession {
   thinking?: boolean;
 }
 
+/** What a stored conversation was left in the middle of. Read off its
+ *  timeline, so it holds for a chat nobody has open. */
+export type StoredStatus =
+  "done" | "interrupted" | "no-reply" | "failed" | "needs-you";
+
 /**
- * What a conversation is doing right now, for a list that shows several at once.
+ * What a conversation with a live process is doing. Only the registry knows
+ * this, and it outranks the stored state — a turn actually running now says
+ * more than however the last one ended.
  *
- * Absent when no conversation is open on that session — the ordinary case for
- * a stored chat. `waiting` outranks `running`: one needs an answer before it
- * can continue, the other is merely in flight.
+ * `needs-you` is in both sets on purpose: an unanswered plan question is
+ * readable off the timeline, while an unanswered tool approval exists only
+ * while the process that asked is still alive.
  */
-export type LiveStatus = "open" | "running" | "waiting";
+export type LiveStatus = "working" | "needs-you";
+
+/**
+ * One status per chat, whether or not anything has it open.
+ *
+ * Deliberately one field rather than two: the row shows one word, and deciding
+ * which word wins is domain logic that belongs where it can be tested, not in
+ * the webview. Whether a chat is *open* is a separate fact — see
+ * `HistoryEntry.open` — because "you are looking at it" and "it needs you" are
+ * different questions and sharing a slot made both unreadable.
+ */
+export type ChatStatus = StoredStatus | LiveStatus;
 
 export interface HistoryEntry {
   id: string;
@@ -74,9 +92,14 @@ export interface HistoryEntry {
   createdAt: number;
   updatedAt: number;
   eventCount: number;
-  /** Set by the caller, not by this service: only the registry knows which
-   *  conversations are open, and history is a file store. */
-  live?: LiveStatus;
+  /** What state this chat is in. Derived from the timeline here; the registry
+   *  overwrites it with a live state when a conversation is mid-turn or parked
+   *  on an approval, because those outrank however the last turn ended. */
+  status: ChatStatus;
+  /** Whether a conversation currently holds this session. Orthogonal to
+   *  `status`: a chat can be open and done, or closed and interrupted. Set by
+   *  the caller — only the registry knows, and history is a file store. */
+  open: boolean;
 }
 
 export class HistoryService {
@@ -151,7 +174,9 @@ export class HistoryService {
           snippet,
           createdAt: s.createdAt,
           updatedAt: s.updatedAt,
-          eventCount: s.timeline?.length ?? 0
+          eventCount: s.timeline?.length ?? 0,
+          status: deriveStatus(s.timeline ?? []),
+          open: false
         });
       } catch {
         // ignore corrupt files
@@ -177,6 +202,59 @@ export class HistoryService {
 
 function hasUserContent(s: StoredSession): boolean {
   return s.timeline.some((e) => e.kind === "user");
+}
+
+/**
+ * What state a conversation was left in, read off the end of its timeline.
+ *
+ * Pure, and deliberately not a method: it is the one part of a chat's status
+ * that survives the extension host, so a chat nobody has open still says
+ * whether it finished, stalled or failed. The live states — a turn actually in
+ * flight, an approval actually pending — are laid over this by the registry,
+ * which is the only thing that knows a conversation exists.
+ *
+ * `checkpoint` events are skipped: they are bookkeeping for rewind, not part of
+ * the conversation, and a chat whose last write happened to be one would
+ * otherwise report whatever `checkpoint` maps to.
+ */
+export function deriveStatus(timeline: TimelineEvent[]): StoredStatus {
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const e = timeline[i];
+    switch (e.kind) {
+      case "checkpoint":
+        continue;
+      case "error":
+        return "failed";
+      // The user spoke last and nothing came back — the turn never started, or
+      // died before it produced anything.
+      case "user":
+        return "no-reply";
+      // A question the agent asked and nobody answered. Unlike a tool
+      // permission, this one survives the process: reopening the chat shows the
+      // card again, so it is genuinely still waiting.
+      case "plan_question":
+        return "needs-you";
+      case "assistant":
+        // A cancelled turn flushes its partial answer as an ordinary assistant
+        // event, so without this marker Stop, rewind, edit and switching chats
+        // would every one of them read as "done". `orchestrator.ts` stamps it.
+        return e.meta?.interrupted === true ? "interrupted" : "done";
+      // Mid-turn when the timeline stops: the process died with a tool in
+      // flight, or right after one came back. Either way nobody answered.
+      case "tool_call":
+      case "tool_result":
+      case "approval":
+        return "interrupted";
+      default:
+        // plan_revision, plan_comment, plan_answer — the agent was working and
+        // the turn did not get to say anything after.
+        return "interrupted";
+    }
+  }
+  // Only reachable for a timeline of nothing but checkpoints, which `save`
+  // refuses to persist. Answering "done" would be a guess; "no-reply" is what
+  // an empty conversation actually is.
+  return "no-reply";
 }
 
 /** Cleaned, single-line text of the first user message — the basis for both

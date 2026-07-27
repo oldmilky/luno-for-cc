@@ -54,12 +54,7 @@ export function ContextStrip({
           type="button"
           onClick={pinned ? onUnpin : onPin}
           aria-label={pinned ? "Unpin file" : "Pin file"}
-          className={[
-            "inline-flex items-center gap-1 px-2 py-[3px] rounded-md text-[10.5px] font-semibold cursor-pointer transition-colors font-[inherit] border",
-            pinned
-              ? "bg-accent-soft border-accent-mid text-accent-glow hover:bg-accent-soft/80"
-              : "bg-transparent border-transparent text-t4 hover:text-t2 hover:bg-s2 hover:border-b1"
-          ].join(" ")}
+          className={`${bits.stripPin}${pinned ? ` ${bits.stripPinned}` : ""}`}
         >
           <Icon name="attach" size={10} />
           {pinned ? "Pinned" : "Pin"}

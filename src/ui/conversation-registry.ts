@@ -16,6 +16,8 @@ import * as vscode from "vscode";
 import { HistoryService } from "../services/history.js";
 import { PlanDecorationService } from "../services/plan-decorations.js";
 import { disposeConventionsWatchers } from "../services/conventions.js";
+import { RateLimitTracker } from "../services/rate-limit.js";
+import type { RateLimitStatus } from "../core/types.js";
 import { AuthManager } from "./domains/auth.js";
 import { ModelResolver } from "./domains/models.js";
 import { broadcastSkills } from "./domains/skills.js";
@@ -32,6 +34,9 @@ import type { Post } from "./messages.js";
  *  files per workspace) and it keeps the meter honest when the user also runs
  *  `claude` in a terminal. */
 const USAGE_POLL_MS = 60_000;
+
+/** Where the CLI's last quota verdicts are kept across a window reload. */
+const RATE_LIMIT_KEY = "luno.rateLimits.v1";
 
 /** Webview panel type for a conversation opened as an editor tab. VS Code keys
  *  serialization and `retainContextWhenHidden` off it. */
@@ -95,6 +100,10 @@ export class ConversationRegistry {
    */
   private active?: ConversationHost;
 
+  /** Conversations whose webview currently holds the keyboard. Backs the
+   *  `luno.chatFocused` context key — see `setChatFocus`. */
+  private readonly focused = new Set<ConversationHost>();
+
   /** The sidebar and whichever conversation currently occupies it. */
   private sidebarTarget?: HostTarget;
   private sidebarHost?: ConversationHost;
@@ -142,12 +151,20 @@ export class ConversationRegistry {
         for (const host of this.hosts) void host.publishAuthState();
       }
     });
+    // Quota verdicts outlive the panel: a window that resets at 22:10 still
+    // resets at 22:10 after a reload, and re-learning it would mean showing an
+    // inferred countdown until the next turn happens to report one.
+    const rateLimits = new RateLimitTracker({
+      get: () => ctx.globalState.get<RateLimitStatus[]>(RATE_LIMIT_KEY),
+      set: (v) => void ctx.globalState.update(RATE_LIMIT_KEY, v)
+    });
     this.shared = {
       ctx,
       history: new HistoryService(ctx),
       decorations,
       models,
       auth,
+      rateLimits,
       conversationFor: (sessionId) => this.conversationFor(sessionId),
       openConversationInTab: (sessionId) => void this.openInTab(sessionId),
       showConversation: (sessionId) => void this.showInSidebar(sessionId),
@@ -155,7 +172,8 @@ export class ConversationRegistry {
       markActive: (host) => {
         this.active = host;
       },
-      attentionChanged: () => this.onAttentionChanged?.()
+      attentionChanged: () => this.onAttentionChanged?.(),
+      focusChanged: (host, focused) => this.setChatFocus(host, focused)
     };
 
     // Pointing at a different `claude` binary changes which models the aliases
@@ -184,7 +202,7 @@ export class ConversationRegistry {
 
     this.wireEditorContext();
     this.usageTimer = setInterval(() => {
-      void broadcastUsage(this.broadcast);
+      void broadcastUsage(this.broadcast, rateLimits);
     }, USAGE_POLL_MS);
 
     ctx.subscriptions.push({ dispose: () => this.dispose() });
@@ -277,6 +295,24 @@ export class ConversationRegistry {
    *  falling back to the first opened. */
   activeConversation(): ConversationHost | undefined {
     return this.active ?? this.primary;
+  }
+
+  /**
+   * Publish `luno.chatFocused` — the `when` clause every chat-scoped keybinding
+   * is written against, Shift+Tab among them.
+   *
+   * Kept as a set rather than a boolean because focus arrives from several
+   * surfaces at once: clicking from one chat into another delivers the new
+   * focus and the old blur in whichever order they land, and a single flag
+   * would end up false with a chat plainly focused.
+   */
+  private setChatFocus(host: ConversationHost, focused: boolean): void {
+    const before = this.focused.size > 0;
+    if (focused) this.focused.add(host);
+    else this.focused.delete(host);
+    const now = this.focused.size > 0;
+    if (now === before) return;
+    void vscode.commands.executeCommand("setContext", "luno.chatFocused", now);
   }
 
   /** How many conversations are waiting on the user right now. */
@@ -393,6 +429,9 @@ export class ConversationRegistry {
     host.dispose();
     void host.releaseWorktree();
     this.hosts.delete(host);
+    // A surface torn down while focused sends no blur, so the key would stay
+    // true over a chat that no longer exists.
+    this.setChatFocus(host, false);
     if (this.primary === host) this.primary = this.hosts.values().next().value;
   }
 

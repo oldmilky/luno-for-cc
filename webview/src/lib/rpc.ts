@@ -244,9 +244,15 @@ export interface MarketplaceInstallTarget {
   directoryPath: string;
 }
 
-/** What a conversation on this session is doing; absent when none is open.
- *  `waiting` outranks `running` — one needs an answer to continue. */
-export type LiveStatus = "open" | "running" | "waiting";
+/**
+ * What state a chat is in. Mirrors `ChatStatus` in src/services/history.ts.
+ *
+ * The host picks exactly one — a running turn outranks however the last one
+ * ended — so nothing here decides precedence. Four of these are read off a
+ * stored timeline and hold for chats nobody has open.
+ */
+export type ChatStatus =
+  "working" | "needs-you" | "no-reply" | "interrupted" | "failed" | "done";
 
 export interface HistoryEntry {
   id: string;
@@ -259,7 +265,10 @@ export interface HistoryEntry {
   createdAt: number;
   updatedAt: number;
   eventCount: number;
-  live?: LiveStatus;
+  status: ChatStatus;
+  /** A conversation currently holds this session. Orthogonal to `status` — a
+   *  chat can be open and done, or closed and interrupted. */
+  open: boolean;
 }
 
 // ── MCP connectors ────────────────────────────────────────
@@ -326,6 +335,10 @@ export interface CustomConnectorDraft {
 export type Outbound =
   | { type: "refreshAuth" }
   | { type: "refreshEditorContext" }
+  /** Keyboard focus entered or left this chat. The host has no way to observe
+   *  it — VS Code exposes no focus event for a webview — and turns it into the
+   *  `luno.chatFocused` context key that chat keybindings are scoped to. */
+  | { type: "chatFocus"; focused: boolean }
   | { type: "prompt"; text: string }
   | { type: "cancel" }
   | {
@@ -457,9 +470,6 @@ export type Inbound =
   | { type: "turnStart" }
   | { type: "turnEnd" }
   | { type: "permissionRequest"; request: PermissionRequestView }
-  /** The host resolved/withdrew a pending prompt (e.g. turn cancelled) — clear
-   *  the card if it's the one currently shown. */
-  | { type: "permissionResolved"; requestId: string }
   | { type: "error"; message: string }
   | { type: "editorContext"; context: EditorContext | null }
   | { type: "rewind"; events: TimelineEvent[] }
@@ -557,8 +567,6 @@ export type Inbound =
       sessionId?: string;
       /** Provider that reported the usage — webview shows it in the meter tooltip. */
       source: "anthropic" | "claude-cli";
-      /** Authoritative limits from Anthropic's response headers, when available. */
-      rateLimit?: RateLimitInfo;
     }
   | { type: "revertResult"; path: string; ok: boolean; error?: string }
   | { type: "connectorsList"; connectors: ConnectorView[] }
@@ -584,6 +592,9 @@ export type Inbound =
       total: UsageTotals;
       generatedAt: number;
       available: boolean;
+      /** Live quota verdicts the CLI reported, newest per window. Empty until
+       *  a turn has run — the CLI is the only source for these. */
+      limits: RateLimitStatus[];
     };
 
 export interface UsageTotals {
@@ -596,24 +607,23 @@ export interface UsageTotals {
 
 export interface SessionWindow {
   usage: UsageTotals;
-  /** ms epoch when the 5-hour window began (first message of the burst). */
+  /** ms epoch when the 5-hour window began. */
   startedAt: number;
   /** ms epoch when the window will reset (startedAt + 5h). */
   resetsAt: number;
+  /** True when the boundary came from the CLI rather than being inferred from
+   *  message timestamps. Drives the Authoritative/Estimate badge. */
+  authoritative?: boolean;
 }
 
-export interface RateLimitBucket {
-  limit?: number;
-  remaining?: number;
-  /** ms epoch when this bucket resets. */
-  resetsAt?: number;
-}
-
-export interface RateLimitInfo {
-  tokens: RateLimitBucket;
-  inputTokens: RateLimitBucket;
-  outputTokens: RateLimitBucket;
-  requests: RateLimitBucket;
+/** Mirrors `RateLimitStatus` in src/core/types.ts — the CLI's own verdict on
+ *  which quota window is binding and when it resets. */
+export interface RateLimitStatus {
+  bucket: string;
+  resetsAt: number;
+  status: string;
+  usingOverage?: boolean;
+  observedAt: number;
 }
 
 export type ConventionsSource =

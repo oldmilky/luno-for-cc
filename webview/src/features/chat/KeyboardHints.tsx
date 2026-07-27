@@ -1,8 +1,11 @@
 // ─────────────────────────────────────────────────────────────
 // KeyboardHints — overlay listing the extension's shortcuts.
 // Triggered by pressing "?" (when not focused in an input). Esc to
-// dismiss. Useful for discoverability of Cmd+I / Cmd+U / Shift+Tab
-// and the in-webview shortcuts (Cmd+K palette, n new chat).
+// dismiss.
+//
+// Every row here is a promise: it must correspond to a keybinding in
+// package.json or a handler in the webview. Rows for Cmd+I and Cmd+/
+// were removed because neither was ever bound to anything.
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect } from "react";
@@ -21,7 +24,6 @@ const GROUPS: Group[] = [
   {
     label: "In editor",
     rows: [
-      { keys: ["⌘", "I"], desc: "Inline edit at cursor" },
       { keys: ["⌘", "U"], desc: "Send selection to chat" },
       { keys: ["⌘", "⇧", "I"], desc: "Toggle chat panel" }
     ]
@@ -39,10 +41,7 @@ const GROUPS: Group[] = [
   },
   {
     label: "Navigation",
-    rows: [
-      { keys: ["?"], desc: "Open this help" },
-      { keys: ["⌘", "/"], desc: "Toggle keyboard hints" }
-    ]
+    rows: [{ keys: ["?"], desc: "Open this help" }]
   }
 ];
 

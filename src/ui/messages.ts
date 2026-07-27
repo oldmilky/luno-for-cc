@@ -47,6 +47,7 @@ export type InboundType =
   | "requestFileSearch"
   | "captureSelection"
   | "refreshEditorContext"
+  | "chatFocus"
   // models
   | "requestModels"
   // skills + marketplace

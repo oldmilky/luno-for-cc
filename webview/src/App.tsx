@@ -155,6 +155,24 @@ export function App() {
     patchState<Persisted>({ events, input, pins });
   }, [events, input, pins]);
 
+  // Report keyboard focus so the host can scope keybindings to the chat.
+  // `document.hasFocus()` covers the mount: a webview revealed by a keybinding
+  // is already focused, and the browser fires no event for a state it was
+  // created in.
+  useEffect(() => {
+    const report = (focused: boolean) => send({ type: "chatFocus", focused });
+    const onFocus = () => report(true);
+    const onBlur = () => report(false);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    if (document.hasFocus()) report(true);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+      report(false);
+    };
+  }, []);
+
   // Single inbound message handler.
   useEffect(() => {
     const off = onMessage((m) => {
@@ -229,13 +247,6 @@ export function App() {
             q.some((p) => p.requestId === m.request.requestId)
               ? q
               : [...q, m.request]
-          );
-          break;
-        case "permissionResolved":
-          // The host resolved this prompt for us (e.g. auto-allow). Drop it
-          // from the queue wherever it sits, not just if it's the head.
-          setPendingPermissions((q) =>
-            q.filter((p) => p.requestId !== m.requestId)
           );
           break;
         case "error":

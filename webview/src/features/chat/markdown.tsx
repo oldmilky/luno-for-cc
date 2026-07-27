@@ -11,13 +11,18 @@
 // `.md` container (AssistantMessage, narrative blocks, thoughts, …).
 // ─────────────────────────────────────────────────────────────
 
-import { ReactNode, useMemo, useState } from "react";
+import { ReactNode, memo, useMemo, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import hljs from "highlight.js/lib/common";
 import { Icon } from "../../design/icons";
 
-interface RenderOptions {
+// Hoisted so react-markdown sees one stable plugin list and keeps its
+// processor instead of rebuilding it per render.
+const REMARK_PLUGINS = [remarkGfm];
+
+interface MarkdownBodyProps {
+  text: string;
   /**
    * Keep the source heading levels (`#` → h1, `##` → h2, …) instead of
    * collapsing them toward h3. Chat bubbles collapse so a stray top-level
@@ -27,14 +32,27 @@ interface RenderOptions {
   preserveHeadings?: boolean;
 }
 
-export function renderMarkdown(src: string, opts?: RenderOptions): ReactNode {
-  const components = opts?.preserveHeadings ? DOC_COMPONENTS : COMPONENTS;
+/**
+ * Every piece of rendered markdown in the app. Memoised on purpose, and it has
+ * to stay that way: react-markdown parses in its render body, so an unmemoised
+ * call re-parses the message on every parent render — and the parent re-renders
+ * on every streamed token. Measured at 40 messages / ~27 kB of transcript, that
+ * was 26 ms of work per token against 8 ms for the same burst on an empty chat.
+ */
+export const MarkdownBody = memo(function MarkdownBody({
+  text,
+  preserveHeadings
+}: MarkdownBodyProps) {
   return (
-    <Markdown remarkPlugins={[remarkGfm]} components={components} skipHtml>
-      {src}
+    <Markdown
+      remarkPlugins={REMARK_PLUGINS}
+      components={preserveHeadings ? DOC_COMPONENTS : COMPONENTS}
+      skipHtml
+    >
+      {text}
     </Markdown>
   );
-}
+});
 
 // ── Code block (syntax-highlighted) ──────────────────────────
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
@@ -105,15 +123,15 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
 // carry their `md-*` classes explicitly; strong/em/blockquote/hr/del
 // inherit from the `.md` container's element styles.
 const COMPONENTS: Components = {
-  h1: (p) => <h3 className="md-h" {...rest(p)} />,
-  h2: (p) => <h4 className="md-h" {...rest(p)} />,
-  h3: (p) => <h5 className="md-h" {...rest(p)} />,
-  h4: (p) => <h6 className="md-h" {...rest(p)} />,
-  h5: (p) => <h6 className="md-h" {...rest(p)} />,
-  h6: (p) => <h6 className="md-h" {...rest(p)} />,
-  p: (p) => <p className="md-p" {...rest(p)} />,
-  ul: (p) => <ul className="md-ul" {...rest(p)} />,
-  ol: (p) => <ol className="md-ol" {...rest(p)} />,
+  h1: (p) => <h3 {...tagged(p, "md-h")} />,
+  h2: (p) => <h4 {...tagged(p, "md-h")} />,
+  h3: (p) => <h5 {...tagged(p, "md-h")} />,
+  h4: (p) => <h6 {...tagged(p, "md-h")} />,
+  h5: (p) => <h6 {...tagged(p, "md-h")} />,
+  h6: (p) => <h6 {...tagged(p, "md-h")} />,
+  p: (p) => <p {...tagged(p, "md-p")} />,
+  ul: (p) => <ul {...tagged(p, "md-ul")} />,
+  ol: (p) => <ol {...tagged(p, "md-ol")} />,
   a: ({ children, href, ...p }) => (
     <a href={href} target="_blank" rel="noreferrer" {...rest(p)}>
       {children}
@@ -149,13 +167,31 @@ const COMPONENTS: Components = {
 // distinctly. Inherits every non-heading mapping from COMPONENTS.
 const DOC_COMPONENTS: Components = {
   ...COMPONENTS,
-  h1: (p) => <h1 className="md-h" {...rest(p)} />,
-  h2: (p) => <h2 className="md-h" {...rest(p)} />,
-  h3: (p) => <h3 className="md-h" {...rest(p)} />,
-  h4: (p) => <h4 className="md-h" {...rest(p)} />,
-  h5: (p) => <h5 className="md-h" {...rest(p)} />,
-  h6: (p) => <h6 className="md-h" {...rest(p)} />
+  h1: (p) => <h1 {...tagged(p, "md-h")} />,
+  h2: (p) => <h2 {...tagged(p, "md-h")} />,
+  h3: (p) => <h3 {...tagged(p, "md-h")} />,
+  h4: (p) => <h4 {...tagged(p, "md-h")} />,
+  h5: (p) => <h5 {...tagged(p, "md-h")} />,
+  h6: (p) => <h6 {...tagged(p, "md-h")} />
 };
+
+/**
+ * Props for a mapped element, with our theme class merged into whatever the
+ * pipeline already put there. Merged rather than assigned because remark-gfm
+ * classes its own nodes — `contains-task-list` on a checklist's `<ul>` — and a
+ * spread that lands after `className=` silently drops the `md-*` class, which
+ * costs the element every rule in theme.css and stays green in the build.
+ */
+function tagged<T extends { node?: unknown; className?: string }>(
+  props: T,
+  themeClass: string
+) {
+  const { className, ...r } = rest(props);
+  return {
+    ...r,
+    className: className ? `${themeClass} ${className}` : themeClass
+  };
+}
 
 // Strip react-markdown's internal `node` prop before spreading onto DOM
 // elements (React warns about unknown `node` attributes otherwise).

@@ -14,7 +14,11 @@ vi.mock("vscode", () => ({
   }
 }));
 
-import { HistoryService, StoredSession } from "../../src/services/history.js";
+import {
+  deriveStatus,
+  HistoryService,
+  StoredSession
+} from "../../src/services/history.js";
 import { TimelineEvent } from "../../src/core/types.js";
 
 function userEvent(text: string): TimelineEvent {
@@ -31,6 +35,60 @@ function makeSession(timeline: TimelineEvent[]): StoredSession {
     timeline
   };
 }
+
+// What state a chat was left in has to survive the extension host: the list is
+// mostly chats nobody has open, and before this every one of them looked alike.
+describe("deriveStatus", () => {
+  const ev = (
+    kind: TimelineEvent["kind"],
+    meta?: Record<string, unknown>
+  ): TimelineEvent => ({ id: `${kind}-1`, ts: 1, kind, title: kind, meta });
+
+  it("calls a chat done when the agent had the last word", () => {
+    expect(deriveStatus([ev("user"), ev("assistant")])).toBe("done");
+  });
+
+  it("does not call a cancelled turn done", () => {
+    // Stop, rewind, edit and switching chats all flush a partial answer as an
+    // ordinary assistant event. Without the marker every one of them reads as
+    // a finished turn, which is the whole reason the marker exists.
+    expect(
+      deriveStatus([ev("user"), ev("assistant", { interrupted: true })])
+    ).toBe("interrupted");
+  });
+
+  it("reports a turn that died mid-tool", () => {
+    expect(deriveStatus([ev("user"), ev("tool_call")])).toBe("interrupted");
+    expect(deriveStatus([ev("user"), ev("tool_result")])).toBe("interrupted");
+  });
+
+  it("reports a prompt that never got an answer", () => {
+    expect(deriveStatus([ev("assistant"), ev("user")])).toBe("no-reply");
+  });
+
+  it("reports a failed turn", () => {
+    expect(deriveStatus([ev("user"), ev("error")])).toBe("failed");
+  });
+
+  it("reports an unanswered question as needing the user", () => {
+    // Unlike a tool approval, this one outlives the process that asked: reopen
+    // the chat and the card is still there.
+    expect(deriveStatus([ev("user"), ev("plan_question")])).toBe("needs-you");
+  });
+
+  it("looks past checkpoints to the conversation underneath", () => {
+    // Checkpoints are rewind bookkeeping. A chat whose last write happened to
+    // be one is not in whatever state "checkpoint" would map to.
+    expect(deriveStatus([ev("user"), ev("assistant"), ev("checkpoint")])).toBe(
+      "done"
+    );
+  });
+
+  it("does not guess for a timeline with nothing in it", () => {
+    expect(deriveStatus([])).toBe("no-reply");
+    expect(deriveStatus([ev("checkpoint")])).toBe("no-reply");
+  });
+});
 
 describe("HistoryService save/delete on empty timeline", () => {
   let dir: string;

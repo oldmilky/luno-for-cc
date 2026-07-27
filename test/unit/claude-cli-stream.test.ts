@@ -40,7 +40,6 @@ function req(): ProviderRequest {
   return {
     model: "claude-sonnet-4-6",
     maxTokens: 1,
-    system: "",
     messages: [{ role: "user", content: "fetch the docs" }],
     tools: []
   };

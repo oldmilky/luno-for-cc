@@ -74,24 +74,36 @@ export interface TokenUsage {
   costUsd?: number;
   /** Free-form session identifier the provider associates with this usage. */
   sessionId?: string;
-  /**
-   * Authoritative quota info from Anthropic's `anthropic-ratelimit-*`
-   * response headers. Present on API-mode responses; absent for subscription
-   * mode (Claude CLI doesn't expose the underlying HTTP headers).
-   */
-  rateLimit?: {
-    tokens: RateLimitBucket;
-    inputTokens: RateLimitBucket;
-    outputTokens: RateLimitBucket;
-    requests: RateLimitBucket;
-  };
 }
 
-export interface RateLimitBucket {
-  limit?: number;
-  remaining?: number;
-  /** ms epoch when this bucket resets. */
-  resetsAt?: number;
+/**
+ * The quota verdict the CLI reports mid-turn, from its `rate_limit_event`.
+ *
+ * This is the only authoritative quota signal available on the subscription
+ * path — the CLI owns the HTTP exchange and does not pass the
+ * `anthropic-ratelimit-*` headers through. It says which window is currently
+ * binding and exactly when that window resets; it does not say how much of it
+ * is spent. Amounts still come from the session files on disk, anchored to
+ * this reset time.
+ */
+export interface RateLimitStatus {
+  /**
+   * Which quota is binding: `five_hour`, `seven_day`, `seven_day_sonnet`,
+   * `seven_day_opus`. Kept as a string — the CLI adds buckets (`extra_usage`,
+   * `cinder_cove`) between releases, and an unknown one must display, not
+   * crash.
+   */
+  bucket: string;
+  /** ms epoch when that window resets. */
+  resetsAt: number;
+  /** The CLI's own verdict: `allowed`, `allowed_warning`, `rejected`. */
+  status: string;
+  /** True while the account is spending purchased overage rather than plan
+   *  quota — the reset time then means something different to the user. */
+  usingOverage?: boolean;
+  /** When this verdict was observed (ms epoch). It ages: a window that has
+   *  already reset must not keep being reported as current. */
+  observedAt: number;
 }
 
 export interface StreamDelta {
@@ -102,6 +114,7 @@ export interface StreamDelta {
     | "tool_use_end"
     | "tool_result"
     | "usage"
+    | "rate_limit"
     | "model"
     | "permission_request"
     | "done"
@@ -114,6 +127,9 @@ export interface StreamDelta {
   resultContent?: string;
   resultIsError?: boolean;
   usage?: TokenUsage;
+  /** Carried on `type: "rate_limit"` — the CLI's own quota verdict for the
+   *  turn in flight. */
+  rateLimit?: RateLimitStatus;
   /** Resolved model id the CLI reports for the turn (e.g. an alias like
    *  `opus` resolving to `claude-opus-4-8`). Carried on `type: "model"`. */
   model?: string;

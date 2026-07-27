@@ -2,7 +2,7 @@
   "name": "luno-for-cc",
   "displayName": "LUNO for CC",
   "description": "LUNO for CC — personal Claude Code chat for Cursor / VS Code.",
-  "version": "0.18.2",
+  "version": "0.19.0",
   "publisher": "lunoweb",
   "license": "MIT",
   "icon": "assets/luno-icon-500.png",
@@ -188,8 +188,9 @@
         },
         "luno.maxTokens": {
           "type": "number",
-          "default": 4096,
-          "description": "Max output tokens per assistant turn. Lower = fewer rate-limit hits on subscription tokens."
+          "default": 0,
+          "minimum": 0,
+          "description": "Max output tokens per assistant turn, passed to the CLI as CLAUDE_CODE_MAX_OUTPUT_TOKENS. 0 leaves the CLI's own default in place. A low cap means fewer rate-limit hits and truncated answers on long edits."
         },
         "luno.allowedBashPatterns": {
           "type": "array",

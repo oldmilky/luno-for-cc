@@ -3,7 +3,7 @@ import { useState } from "react";
 import { EASE_SOFT, ENTER, SPRING_PRESS } from "../../design/motion";
 import { Icon } from "../../design/icons";
 import { Tooltip } from "../../design/primitives";
-import { renderMarkdown } from "./markdown";
+import { MarkdownBody } from "./markdown";
 import s from "./AssistantMessage.module.scss";
 
 // The one timing the motion language does not cover. Every role in motion.ts
@@ -66,7 +66,7 @@ export function AssistantMessage({
         </div>
       )}
       <div className={`md ${s.body}`}>
-        {renderMarkdown(text)}
+        <MarkdownBody text={text} />
         {streaming && <span className={s.caret} aria-hidden />}
       </div>
       {!streaming && text.length > 0 && (

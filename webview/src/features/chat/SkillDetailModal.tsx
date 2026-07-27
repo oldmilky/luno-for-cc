@@ -13,7 +13,7 @@ import { send, onMessage, MarketplaceSkill } from "../../lib/rpc";
 import { Icon } from "../../design/icons";
 import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
 import { Tooltip } from "../../design/primitives";
-import { renderMarkdown } from "./markdown";
+import { MarkdownBody } from "./markdown";
 import s from "./SkillDetailModal.module.scss";
 // The loading ring is the marketplace's, not ToolCard's — same modal family.
 import mk from "./SkillsMarketplace.module.scss";
@@ -167,7 +167,7 @@ export function SkillDetailModal({
               )}
               {state.content ? (
                 <div className={`md ${s.markdown}`}>
-                  {renderMarkdown(state.content, { preserveHeadings: true })}
+                  <MarkdownBody text={state.content} preserveHeadings />
                 </div>
               ) : (
                 <p className={s.empty}>
