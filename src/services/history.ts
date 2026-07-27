@@ -50,6 +50,10 @@ export interface StoredSession {
   permissionMode?: PermissionMode;
   effort?: EffortLevel;
   thinking?: boolean;
+  /** The CLI's `ultracode` flag — xhigh plus standing workflow orchestration.
+   *  Stored beside `effort` because the picker offers it as one more choice on
+   *  the same control, even though the CLI keeps them apart. */
+  ultracode?: boolean;
 }
 
 /** What a stored conversation was left in the middle of. Read off its

@@ -53,6 +53,8 @@ export interface ComposerProps {
    *  them; they fall back to the same defaults as luno config. */
   effort?: EffortLevel;
   thinking?: boolean;
+  /** The sixth effort choice — see ULTRACODE_OPTION. */
+  ultracode?: boolean;
   models: ReadonlyArray<ModelInfo>;
   skills: ReadonlyArray<SkillInfo>;
   /** External signal (from Cmd+U etc.) to focus the editor. */
@@ -100,6 +102,7 @@ export function Composer({
   permissionMode,
   effort = "high",
   thinking = true,
+  ultracode = false,
   models,
   skills,
   focusKey,
@@ -579,7 +582,10 @@ export function Composer({
             resolvedModels={resolvedModels}
             onSelect={(v) => send({ type: "setModel", model: v })}
             effort={effort}
-            onEffort={(level) => send({ type: "setEffort", effort: level })}
+            ultracode={ultracode}
+            onEffort={(level, ultra) =>
+              send({ type: "setEffort", effort: level, ultracode: ultra })
+            }
             thinking={thinking}
             onThinking={(on) => send({ type: "setThinking", thinking: on })}
           />

@@ -50,6 +50,10 @@ export interface ProviderContext {
   effort?: EffortLevel;
   /** Extended-thinking toggle (`alwaysThinkingEnabled` via `--settings`). */
   thinking?: boolean;
+  /** Ultracode (`ultracode` via `--settings`): xhigh plus standing workflow
+   *  orchestration. Pins the effort it runs at, so it travels with `effort`
+   *  rather than replacing it. */
+  ultracode?: boolean;
 }
 
 // Binary paths we've already made executable this session. The resolution

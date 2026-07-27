@@ -45,6 +45,12 @@ export interface ConversationSettings {
   permissionMode: PermissionMode;
   effort: EffortLevel;
   thinking: boolean;
+  /**
+   * The CLI's `ultracode` setting: xhigh effort plus standing workflow
+   * orchestration. Not a sixth `--effort` value — the flag has five and always
+   * will — which is why it rides alongside `effort` rather than inside it.
+   */
+  ultracode: boolean;
 }
 
 export class SessionStore {

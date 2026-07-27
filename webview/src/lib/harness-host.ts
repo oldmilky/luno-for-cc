@@ -48,6 +48,35 @@ export function harnessReplies(
     },
     refreshEditorContext: { type: "editorContext", context: null },
     requestModels: { type: "models", models: [] },
+    // Two entries, not the whole catalogue: enough to drive the panel's three
+    // states — offered, still being checked, and refused by the CLI.
+    requestLegacyModels: {
+      type: "legacyModels",
+      models: [
+        {
+          value: "claude-opus-4-6",
+          label: "Opus 4.6",
+          note: "The last Opus on the old tokenizer",
+          plus: "Older tokenizer, so the same text spends less of your quota",
+          minus: "No xhigh, and it writes maths as LaTeX unless told otherwise",
+          supportsTools: true,
+          group: "version",
+          effort: ["low", "medium", "high", "max"],
+          available: true
+        },
+        {
+          value: "claude-sonnet-4-5",
+          label: "Sonnet 4.5",
+          note: "The most written-about Sonnet",
+          plus: "Most published prompts and recipes still target this one",
+          minus: "Rejects --effort outright, so the effort control goes dark",
+          supportsTools: true,
+          group: "version",
+          effort: [],
+          available: false
+        }
+      ]
+    },
     requestSkills: { type: "skills", skills: [] },
     requestHistory: { type: "historyList", sessions: [] },
     requestConnectors: { type: "connectorsList", connectors: [] },

@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   mapEvent,
   makeProcessor,
+  contextSize,
+  contextWindowOf,
   buildArgs,
   isDestructiveBash,
   isDestructiveRequest,
@@ -1051,5 +1053,63 @@ describe("claude-cli stateful processor (stream_event partials)", () => {
     expect(
       p({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } })
     ).toEqual([]);
+  });
+});
+
+// The CLI folds earlier messages into a summary when the context fills. It was
+// silent here before: the chat simply stopped remembering its own start, which
+// reads as the product losing the user's work rather than the window doing its
+// job. Shape verified against 2.1.219.
+describe("compaction and context size", () => {
+  it("turns compact_boundary into a delta the timeline can show", () => {
+    const p = makeProcessor();
+    const out = p({
+      type: "system",
+      subtype: "compact_boundary",
+      compactMetadata: { trigger: "auto", preTokens: 812_000, postTokens: 94_000 }
+    } as never);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe("compact");
+    expect(out[0].compaction).toEqual({
+      trigger: "auto",
+      preTokens: 812_000,
+      postTokens: 94_000
+    });
+  });
+
+  it("still reports the fold when the CLI attaches no detail", () => {
+    const p = makeProcessor();
+    const out = p({ type: "system", subtype: "compact_boundary" } as never);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe("compact");
+  });
+
+  // Cached tokens are most of a long conversation's prompt. Counting only
+  // `input_tokens` would report a nearly-full window as nearly empty.
+  it("counts cache reads and writes as context, the way the CLI does", () => {
+    expect(
+      contextSize({
+        input_tokens: 2,
+        output_tokens: 5,
+        cache_creation_input_tokens: 17_240,
+        cache_read_input_tokens: 24_004
+      })
+    ).toBe(41_246);
+  });
+
+  it("takes the main loop's window, not a side-call's smaller one", () => {
+    expect(
+      contextWindowOf({
+        "claude-opus-5[1m]": { contextWindow: 1_000_000 },
+        "claude-haiku-4-5": { contextWindow: 200_000 }
+      })
+    ).toBe(1_000_000);
+  });
+
+  it("has no opinion on the window when the CLI reports none", () => {
+    expect(contextWindowOf(undefined)).toBeUndefined();
+    expect(contextWindowOf({ "some-model": {} })).toBeUndefined();
   });
 });

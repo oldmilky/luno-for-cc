@@ -10,6 +10,7 @@ import * as crypto from "node:crypto";
 import { Session } from "../core/session.js";
 import { Orchestrator } from "../core/orchestrator.js";
 import {
+  CompactionInfo,
   PermissionMode,
   PermissionBehavior,
   StreamDelta
@@ -869,7 +870,8 @@ export class ConversationHost {
       model: stored.model ?? fallback.model,
       permissionMode: stored.permissionMode ?? fallback.permissionMode,
       effort: stored.effort ?? fallback.effort,
-      thinking: stored.thinking ?? fallback.thinking
+      thinking: stored.thinking ?? fallback.thinking,
+      ultracode: stored.ultracode ?? fallback.ultracode
     };
   }
 
@@ -1080,7 +1082,18 @@ export class ConversationHost {
     },
     setEffort: async (m) => {
       const effort = str(m, "effort");
-      if (effort) await this.applySetting("effort", effort as EffortLevel);
+      if (!effort) return;
+      // Both in one message on purpose: ultracode *is* an effort choice from
+      // the picker's side, and sending them separately would let a turn start
+      // between the two halves under a posture nobody picked.
+      const ultracode = bool(m, "ultracode");
+      this.settings = {
+        ...this.settings,
+        effort: effort as EffortLevel,
+        ultracode: ultracode ?? false
+      };
+      await this.publishAuthState();
+      this.scheduleSave();
     },
     setThinking: async (m) => {
       const thinking = bool(m, "thinking");
@@ -1135,6 +1148,7 @@ export class ConversationHost {
 
     // ── Models ─────────────────────────────────────────────────
     requestModels: () => this.models.broadcast(),
+    requestLegacyModels: (m) => this.models.broadcastLegacy(m.probe !== false),
 
     // ── Skills + marketplace ───────────────────────────────────
     requestSkills: () => broadcastSkills(this.post, this.ctx),
@@ -1728,7 +1742,13 @@ export class ConversationHost {
     // Posture comes from the conversation, not the workspace: another chat may
     // be running under a different mode right now, and the `luno.*` settings
     // are only what a new one starts with.
-    const { model, permissionMode: permMode, effort, thinking } = this.settings;
+    const {
+      model,
+      permissionMode: permMode,
+      effort,
+      thinking,
+      ultracode
+    } = this.settings;
     const cfg = vscode.workspace.getConfiguration("luno");
     const maxTokens = cfg.get<number>("maxTokens", 0);
     const bashAllowlist = cfg.get<string[]>("allowedBashPatterns", []);
@@ -1795,17 +1815,14 @@ export class ConversationHost {
         },
         onSlashCommands: (names) => {
           rememberCliCommands(this.ctx, names);
-          void broadcastSlashCommands(
-            this.post,
-            this.ctx,
-            this.workingRoot
-          );
+          void broadcastSlashCommands(this.post, this.ctx, this.workingRoot);
         },
         token,
         mcpConfigPath: mcpConfig?.path,
         mcpServerNames: mcpConfig?.serverNames,
         effort,
-        thinking
+        thinking,
+        ultracode
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1862,8 +1879,23 @@ export class ConversationHost {
             cacheCreatedTokens: d.usage.cacheCreatedTokens,
             costUsd: d.usage.costUsd,
             sessionId: d.usage.sessionId,
-            source: "claude-cli"
+            source: "claude-cli",
+            contextTokens: d.usage.contextTokens,
+            contextWindow: d.usage.contextWindow
           });
+        }
+        // Compaction is the one thing that changes what the model remembers
+        // without the user doing anything, so it goes on the timeline rather
+        // than into a transient message: reopening the chat tomorrow, the gap
+        // still needs explaining.
+        if (d.type === "compact") {
+          this.session.emit({
+            kind: "compact",
+            title: "Context compacted",
+            body: compactionSummary(d.compaction),
+            meta: { ...d.compaction }
+          });
+          this.scheduleSave();
         }
         // The CLI's own quota verdict — which window is binding and when it
         // resets. It anchors the 5-hour aggregation, so record it before the
@@ -1945,12 +1977,42 @@ function defaultSettings(): ConversationSettings {
     model: cfg.get<string>("model", "default"),
     permissionMode: cfg.get<PermissionMode>("permissionMode", "default"),
     effort: cfg.get<EffortLevel>("effort", "high"),
-    thinking: cfg.get<boolean>("thinking", true)
+    thinking: cfg.get<boolean>("thinking", true),
+    // Deliberately not a `luno.*` setting: ultracode makes the model stand up
+    // fleets of agents, and something that spends the quota that fast is a
+    // choice per conversation rather than the shape every new one is born in.
+    ultracode: false
   };
 }
 
 function worktreeName(sessionId: string): string {
   return `luno-${sessionId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8)}`;
+}
+
+/**
+ * One line explaining what the fold cost.
+ *
+ * Says which way it was triggered because the two mean different things to the
+ * user: one they asked for, the other happened to them and explains why the
+ * agent no longer remembers the start of the conversation.
+ */
+function compactionSummary(info: CompactionInfo | undefined): string {
+  const how =
+    info?.trigger === "auto"
+      ? "The context filled up, so earlier messages were folded into a summary."
+      : "Earlier messages were folded into a summary.";
+
+  const { preTokens, postTokens } = info ?? {};
+  if (typeof preTokens === "number" && typeof postTokens === "number") {
+    return `${how} ${fmtTokens(preTokens)} → ${fmtTokens(postTokens)} tokens.`;
+  }
+  return how;
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1000)}k`;
+  return String(n);
 }
 
 /**

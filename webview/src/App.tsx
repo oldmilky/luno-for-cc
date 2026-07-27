@@ -45,6 +45,7 @@ type AuthState =
       permissionMode: PermissionMode;
       effort: EffortLevel;
       thinking: boolean;
+      ultracode: boolean;
     };
 
 interface Persisted {
@@ -193,7 +194,8 @@ export function App() {
             model: m.model ?? "default",
             permissionMode: m.permissionMode ?? "default",
             effort: m.effort ?? "high",
-            thinking: m.thinking ?? true
+            thinking: m.thinking ?? true,
+            ultracode: m.ultracode ?? false
           });
           send({ type: "requestModels" });
           send({ type: "requestSkills" });
@@ -374,6 +376,7 @@ export function App() {
         permissionMode={auth.permissionMode}
         effort={auth.effort}
         thinking={auth.thinking}
+        ultracode={auth.ultracode}
         events={events}
         streaming={streaming}
         busy={busy}

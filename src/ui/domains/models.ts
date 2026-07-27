@@ -24,6 +24,8 @@ import * as readline from "node:readline";
 import { spawn, ChildProcess } from "node:child_process";
 import { resolveClaudeBinary } from "../../providers/factory.js";
 import { getToken } from "../../secrets.js";
+import { EFFORT_LADDERS } from "../../providers/claude-cli.js";
+import type { EffortLevel } from "../../providers/claude-cli.js";
 import type { Post } from "../messages.js";
 
 export type ModelGroup = "alias" | "version";
@@ -34,6 +36,22 @@ export interface ModelInfo {
   note: string;
   supportsTools: boolean;
   group: ModelGroup;
+  /** One reason to reach for a pinned version, and one reason not to. Both or
+   *  neither — a row that argues only one side is an advertisement. */
+  plus?: string;
+  minus?: string;
+  /**
+   * Levels this model accepts from `--effort`, in order. An empty array means
+   * it rejects the flag entirely.
+   *
+   * We push `--effort` on every spawn next to `--model`, so a level the model
+   * never had is not a missing feature — it is a CLI error the user cannot
+   * read. Absent on aliases: those always resolve to something current.
+   */
+  effort?: ReadonlyArray<EffortLevel>;
+  /** Whether the user's own CLI served this id when asked. `undefined` until
+   *  the probe has answered for it. */
+  available?: boolean;
 }
 
 /**
@@ -81,6 +99,82 @@ export function availableModels(): ModelInfo[] {
   ];
 }
 
+/**
+ * Pinned versions, offered behind their own door.
+ *
+ * The aliases above exist so the picker never carries a version number that can
+ * go stale. This list is the deliberate opposite: pinning is the whole point,
+ * so the ids are literal and they *will* rot. Two things keep that honest —
+ * every entry is probed against the user's own CLI before it is offered, and a
+ * model with a published retirement date is left out rather than shipped to die
+ * in the user's picker (which is why Opus 4.1, retiring 2026-08-05, is absent).
+ *
+ * Each row argues both sides. A list of older models with only upsides is a
+ * list that talks people into a worse model.
+ */
+export function legacyModels(): ModelInfo[] {
+  // The ladder is looked up by id rather than written per row, so the picker
+  // and the spawn read the same table and cannot disagree about a version.
+  return LEGACY.map((m) => ({ ...m, effort: EFFORT_LADDERS[m.value] }));
+}
+
+const LEGACY: ReadonlyArray<ModelInfo> = [
+  {
+    value: "claude-opus-4-8",
+    label: "Opus 4.8",
+    note: "The Opus before the current one",
+    plus: "Warmer, less hedged prose; holds a long autonomous run together",
+    minus: "Narrates more between tool calls, and asks before small decisions",
+    supportsTools: true,
+    group: "version"
+  },
+  {
+    value: "claude-opus-4-7",
+    label: "Opus 4.7",
+    note: "More literal, less eager to reach for a tool",
+    plus: "First with high-resolution vision — 2576px on the long edge",
+    minus: "New tokenizer: the same text costs up to 1.35× more of your quota",
+    supportsTools: true,
+    group: "version"
+  },
+  {
+    value: "claude-opus-4-6",
+    label: "Opus 4.6",
+    note: "The last Opus on the old tokenizer",
+    plus: "Older tokenizer, so the same text spends less of your quota",
+    minus: "No xhigh, and it writes maths as LaTeX unless told otherwise",
+    supportsTools: true,
+    group: "version"
+  },
+  {
+    value: "claude-opus-4-5",
+    label: "Opus 4.5",
+    note: "The settled one",
+    plus: "Older prompts were tuned against it and still land as written",
+    minus: "Its effort ladder stops at high",
+    supportsTools: true,
+    group: "version"
+  },
+  {
+    value: "claude-sonnet-4-6",
+    label: "Sonnet 4.6",
+    note: "The Sonnet before the current one",
+    plus: "A 1M window and adaptive thinking at Sonnet's speed",
+    minus: "Clearly behind Sonnet 5 on agentic and coding work",
+    supportsTools: true,
+    group: "version"
+  },
+  {
+    value: "claude-sonnet-4-5",
+    label: "Sonnet 4.5",
+    note: "The most written-about Sonnet",
+    plus: "Most published prompts and recipes still target this one",
+    minus: "Rejects --effort outright, so the effort control goes dark",
+    supportsTools: true,
+    group: "version"
+  }
+];
+
 /** A probe that has not answered in this long is never going to. */
 const PROBE_TIMEOUT_MS = 10_000;
 
@@ -90,6 +184,9 @@ export class ModelResolver {
   /** Guards against a second sweep starting while the first is mid-flight. */
   private resolving = false;
   private probe?: ChildProcess;
+  /** Pinned id → whether this CLI served it. Empty until the panel is opened. */
+  private readonly legacyAvailable = new Map<string, boolean>();
+  private legacyProbed = false;
 
   constructor(
     private readonly post: Post,
@@ -112,11 +209,73 @@ export class ModelResolver {
   }
 
   /**
+   * Answer the picker's older-models panel, and find out on the first ask which
+   * of those ids this user's CLI will actually serve.
+   *
+   * Lazy on purpose: the list costs one CLI spawn per entry, and most sessions
+   * never open the panel at all. The answer is cached, so opening it twice
+   * costs nothing the second time.
+   */
+  async broadcastLegacy(probe: boolean): Promise<void> {
+    this.post({ type: "legacyModels", models: this.legacyWithAvailability() });
+    if (!probe || this.legacyProbed) return;
+    await this.probeLegacy();
+    this.post({ type: "legacyModels", models: this.legacyWithAvailability() });
+  }
+
+  private legacyWithAvailability(): ModelInfo[] {
+    return legacyModels().map((m) => ({
+      ...m,
+      available: this.legacyAvailable.get(m.value)
+    }));
+  }
+
+  /**
+   * Ask the CLI for each pinned id in turn. A model the plan does not carry —
+   * or one that was retired out from under this list — never reaches the `init`
+   * event, so `probeAlias` answers `null` and the row is offered as unavailable
+   * rather than as a button that fails on the first turn.
+   */
+  private async probeLegacy(): Promise<void> {
+    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!cwd) return;
+    const binary = resolveClaudeBinary();
+    if (!fs.existsSync(binary)) return;
+    const token = await getToken(this.ctx);
+
+    // Wait out an alias sweep rather than racing it: this class keeps exactly
+    // one child in `this.probe`, and a second sweep would overwrite the handle
+    // `dispose()` needs to kill.
+    while (this.resolving) await new Promise((r) => setTimeout(r, 120));
+
+    this.resolving = true;
+    try {
+      for (const model of legacyModels()) {
+        const served = await this.probeAlias(model.value, binary, cwd, token);
+        this.legacyAvailable.set(model.value, served !== null);
+        // Post per model, not once at the end: a spawn that goes the full
+        // 10s timeout would otherwise hold every other row at "checking".
+        this.post({
+          type: "legacyModels",
+          models: this.legacyWithAvailability()
+        });
+      }
+      this.legacyProbed = true;
+    } finally {
+      this.resolving = false;
+    }
+  }
+
+  /**
    * Drop every mapping. Pointing at a different `claude` binary changes what
    * the aliases resolve to, so a cached version is worse than none.
    */
   clear(): void {
     this.resolved.clear();
+    // A different binary is a different set of models, not just a different
+    // mapping — what it refused yesterday it may serve today.
+    this.legacyAvailable.clear();
+    this.legacyProbed = false;
   }
 
   /** Kill an in-flight probe. Called on extension teardown. */

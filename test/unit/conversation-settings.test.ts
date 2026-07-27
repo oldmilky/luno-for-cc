@@ -10,7 +10,13 @@ import * as path from "node:path";
 const disposable = { dispose: () => {} };
 const folder = vi.hoisted(() => ({ root: "" }));
 const spawned = vi.hoisted(
-  () => [] as { permissionMode: string; effort: string; model?: string }[]
+  () =>
+    [] as {
+      permissionMode: string;
+      effort: string;
+      model?: string;
+      ultracode?: boolean;
+    }[]
 );
 
 /**
@@ -253,6 +259,77 @@ describe("per-conversation settings", () => {
     // The failure this guards is silent: one shared setting would have sent
     // both turns out under whichever mode was written last.
     expect(spawned.map((s) => s.permissionMode)).toEqual(["plan", "auto"]);
+  });
+
+  it("carries ultracode down to the spawn", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = fakeTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
+
+    surface.webview.deliver({
+      type: "setEffort",
+      effort: "xhigh",
+      ultracode: true
+    });
+    surface.webview.deliver({ type: "prompt", text: "hello" });
+    await settle();
+
+    expect(spawned[0].ultracode).toBe(true);
+    expect(lastAuth(surface.webview.sent).ultracode).toBe(true);
+  });
+
+  it("drops ultracode the moment a plain level is picked", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = fakeTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
+
+    surface.webview.deliver({
+      type: "setEffort",
+      effort: "xhigh",
+      ultracode: true
+    });
+    await settle();
+    // The picker is one radiogroup: choosing a rung on the ramp *is* choosing
+    // not to be in ultracode, and nothing else says so.
+    surface.webview.deliver({ type: "setEffort", effort: "high" });
+    surface.webview.deliver({ type: "prompt", text: "hello" });
+    await settle();
+
+    expect(lastAuth(surface.webview.sent).ultracode).toBe(false);
+    expect(spawned[0].ultracode).toBe(false);
+    expect(spawned[0].effort).toBe("high");
+  });
+
+  it("brings ultracode back with the conversation", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const first = fakeTarget();
+    const host = registry.create();
+    host.attach(first.target as never);
+    first.webview.route(() => host as never);
+
+    first.webview.deliver({ type: "prompt", text: "hello" });
+    await settle();
+    first.webview.deliver({
+      type: "setEffort",
+      effort: "xhigh",
+      ultracode: true
+    });
+    await settle();
+    const sessionId = host.sessionId;
+    await new Promise((r) => setTimeout(r, 700));
+
+    const reopened = registry.openInTab(sessionId);
+    await settle();
+
+    const panelSent = (
+      reopened as unknown as { target: { webview: FakeWebview } }
+    ).target.webview.sent;
+    expect(lastAuth(panelSent).ultracode).toBe(true);
+    expect(lastAuth(panelSent).effort).toBe("xhigh");
   });
 
   it("brings a conversation back in the posture it ran in", async () => {

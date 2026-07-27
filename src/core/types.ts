@@ -74,6 +74,31 @@ export interface TokenUsage {
   costUsd?: number;
   /** Free-form session identifier the provider associates with this usage. */
   sessionId?: string;
+  /**
+   * How much of the model's context the last request occupied, and how much
+   * there is. Both come from the CLI's own numbers: the size is
+   * `input + cache_creation + cache_read`, which is the sum the CLI itself
+   * uses, and the window is what it reports for the model that ran.
+   *
+   * Unlike the plan caps in the meter, these are not estimates.
+   */
+  contextTokens?: number;
+  contextWindow?: number;
+}
+
+/**
+ * The CLI folded earlier messages into a summary to make room.
+ *
+ * Worth surfacing because the alternative is a chat that appears to forget its
+ * own beginning for no stated reason — the user reads that as the product
+ * losing their work rather than as the context window doing its job.
+ */
+export interface CompactionInfo {
+  /** `auto` when the CLI did it to make room; otherwise the user asked. */
+  trigger?: string;
+  /** Context size either side of the fold, when the CLI reports them. */
+  preTokens?: number;
+  postTokens?: number;
 }
 
 /**
@@ -117,6 +142,7 @@ export interface StreamDelta {
     | "rate_limit"
     | "model"
     | "permission_request"
+    | "compact"
     | "done"
     | "error";
   text?: string;
@@ -127,6 +153,8 @@ export interface StreamDelta {
   resultContent?: string;
   resultIsError?: boolean;
   usage?: TokenUsage;
+  /** Carried on `type: "compact"` — the CLI folded earlier messages away. */
+  compaction?: CompactionInfo;
   /** Carried on `type: "rate_limit"` — the CLI's own quota verdict for the
    *  turn in flight. */
   rateLimit?: RateLimitStatus;
@@ -190,6 +218,7 @@ export interface TimelineEvent {
     | "approval"
     | "error"
     | "checkpoint"
+    | "compact"
     | "plan_revision"
     | "plan_question"
     | "plan_comment"

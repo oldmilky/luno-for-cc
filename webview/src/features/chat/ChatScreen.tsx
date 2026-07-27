@@ -64,6 +64,8 @@ export interface ChatScreenProps {
   permissionMode: PermissionMode;
   effort: EffortLevel;
   thinking: boolean;
+  /** The sixth effort choice, carried beside the level the CLI knows. */
+  ultracode: boolean;
   events: TimelineEvent[];
   streaming: string;
   busy: boolean;
@@ -117,6 +119,7 @@ export function ChatScreen({
   permissionMode,
   effort,
   thinking,
+  ultracode,
   events,
   streaming,
   busy,
@@ -567,6 +570,7 @@ export function ChatScreen({
           permissionMode={permissionMode}
           effort={effort}
           thinking={thinking}
+          ultracode={ultracode}
           models={models}
           skills={skills}
           focusKey={composerFocusKey}
@@ -615,7 +619,8 @@ type Group =
 type TurnBlock =
   | { kind: "narrative"; text: string }
   | { kind: "toolGroup"; bucket: ToolBucket; items: ToolGroupItem[] }
-  | { kind: "plan"; revisionId: string };
+  | { kind: "plan"; revisionId: string }
+  | { kind: "compact"; text: string };
 
 /**
  * Tool names whose tool_use blocks are rendered via PlanCard rather than
@@ -836,6 +841,14 @@ function groupEvents(events: TimelineEvent[]): GroupingResult {
       continue;
     }
 
+    // Its own block rather than narrative text: this is the one event that
+    // changes what the model remembers without the user asking, so it reads as
+    // a boundary in the conversation, not as something the assistant said.
+    if (e.kind === "compact") {
+      turn.blocks.push({ kind: "compact", text: e.body ?? e.title });
+      continue;
+    }
+
     if (e.kind === "plan_revision") {
       const meta = e.meta as { revisionId?: string } | undefined;
       if (meta?.revisionId) {
@@ -958,6 +971,14 @@ function renderTurnBlock(
     return (
       <div key={`n-${i}`} className={`md ${s.narrative}`}>
         <MarkdownBody text={b.text} />
+      </div>
+    );
+  }
+  if (b.kind === "compact") {
+    return (
+      <div key={`c-${i}`} className={s.compactBoundary}>
+        <Icon name="layers" size={11} />
+        <span>{b.text}</span>
       </div>
     );
   }

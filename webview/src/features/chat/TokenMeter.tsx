@@ -217,6 +217,12 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
   // Server truth for the *boundaries* — it reports no amounts, so the bars
   // still come from the aggregated session files.
   const [limits, setLimits] = useState<RateLimitStatus[]>([]);
+  // How full the model's context was on the last request. The CLI reports both
+  // halves, so this is the one row in this panel that is not an estimate.
+  const [context, setContext] = useState<{
+    used: number;
+    window: number;
+  } | null>(null);
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!open) return;
@@ -237,6 +243,12 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
           available: m.available
         });
         setLimits(m.limits ?? []);
+      } else if (
+        m.type === "tokenUsage" &&
+        m.contextTokens !== undefined &&
+        m.contextWindow
+      ) {
+        setContext({ used: m.contextTokens, window: m.contextWindow });
       }
     });
   }, []);
@@ -438,6 +450,27 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                 noCap={caps.session === 0}
                 onLimitChange={(v) => setLimitOverride("session", v)}
               />
+
+              {/* The model's context, as opposed to the account's quota. The
+                  two are unrelated and users conflate them: a full context is
+                  why the agent forgot the start of the chat, a spent quota is
+                  why it stopped answering. */}
+              {context && (
+                <UsageRow
+                  label="Context window"
+                  pct={pctOf(context.used, context.window)}
+                  used={context.used}
+                  limit={context.window}
+                  sub={
+                    pctOf(context.used, context.window) >= 70
+                      ? "Filling up — the CLI will fold earlier messages into a summary before it runs out"
+                      : "Last request, reported by the CLI"
+                  }
+                  tooltip="Exact, unlike the plan caps below: both numbers come from the CLI rather than being inferred."
+                  noCap={false}
+                  onLimitChange={() => undefined}
+                />
+              )}
 
               {/* Weekly limits group */}
               <div className={s.weekly}>

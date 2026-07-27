@@ -56,10 +56,39 @@ export const EFFORT_LEVELS: ReadonlyArray<EffortOption> = [
   { value: "max", label: "Max", short: "Max" }
 ];
 
+/**
+ * The sixth choice on the effort control, and the reason it sits on its own
+ * row rather than at the end of the ramp: it runs at `xhigh`, which is one
+ * step *below* Max, so a sixth cell would make the ramp claim something untrue.
+ */
+export const ULTRACODE_OPTION = {
+  effort: "xhigh" as EffortLevel,
+  label: "Ultracode",
+  note: "X-high + workflow orchestration"
+} as const;
+
 export function findEffort(
   value: EffortLevel | string | undefined
 ): EffortOption {
   return EFFORT_LEVELS.find((e) => e.value === value) ?? EFFORT_LEVELS[2];
+}
+
+/**
+ * The nearest level a model will actually accept.
+ *
+ * Steps **down**, never up: a pinned model that never had `xhigh` should cost
+ * less than the user asked for, not more. Falls back to the ladder's floor when
+ * the whole ladder sits above the chosen level.
+ */
+export function clampEffort(
+  level: EffortLevel,
+  ladder: ReadonlyArray<EffortLevel>
+): EffortLevel {
+  if (ladder.length === 0 || ladder.includes(level)) return level;
+  const rank = (l: EffortLevel) =>
+    EFFORT_LEVELS.findIndex((e) => e.value === l);
+  const below = ladder.filter((l) => rank(l) < rank(level));
+  return below.length > 0 ? below[below.length - 1] : ladder[0];
 }
 
 export interface ModeOption {

@@ -219,7 +219,7 @@ project — it is built primarily as a personal tool, and features are chosen on
 basis. Two things to know before you send one:
 
 - `bun run lint` typechecks **both** projects and `bun run test` must stay green
-  (558 pass / 6 skipped; the skips are filesystem-gated, not broken).
+  (572 pass / 6 skipped; the skips are filesystem-gated, not broken).
 - The webview reads design tokens only — every color, radius, shadow and glow is a
   CSS custom property declared per palette. No hard-coded values in components.
 

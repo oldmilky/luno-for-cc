@@ -213,6 +213,13 @@ export interface ClaudeCliOpts {
    *  `--settings '{"alwaysThinkingEnabled": <bool>}'` so the session
    *  setting is authoritative regardless of the user's settings.json. */
   thinking?: boolean;
+  /**
+   * The CLI's `ultracode` setting: xhigh effort plus standing dynamic-workflow
+   * orchestration, delivered the same way `--settings` delivers everything
+   * else. Not an effort level — the flag has five and this is not a sixth —
+   * so it pins `--effort xhigh` rather than replacing it.
+   */
+  ultracode?: boolean;
   /** Stall budget (ms) for latency-bounded tools (WebFetch/WebSearch). If one
    *  doesn't return a result within this window the turn is stopped cleanly.
    *  Defaults to WEB_TOOL_STALL_MS. */
@@ -221,6 +228,28 @@ export interface ClaudeCliOpts {
 
 /** Effort levels accepted by `claude --effort`. */
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+
+/**
+ * What each pinned version accepts from `--effort`, in order.
+ *
+ * `xhigh` arrived with Opus 4.7 and `max` with the 4.6 family, so a pinned
+ * model predates part of the ladder — Sonnet 4.5 predates the flag entirely.
+ * Aliases are deliberately absent: they always resolve to something current,
+ * and a model missing from this map is assumed to take every level.
+ *
+ * Read by the spawn below *and* by the picker's catalogue, so the two cannot
+ * disagree about what a version will accept.
+ */
+export const EFFORT_LADDERS: Readonly<
+  Record<string, ReadonlyArray<EffortLevel>>
+> = {
+  "claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
+  "claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
+  "claude-opus-4-6": ["low", "medium", "high", "max"],
+  "claude-opus-4-5": ["low", "medium", "high"],
+  "claude-sonnet-4-6": ["low", "medium", "high", "max"],
+  "claude-sonnet-4-5": []
+};
 
 const EFFORT_LEVELS: ReadonlyArray<EffortLevel> = [
   "low",
@@ -649,9 +678,18 @@ export function buildArgs(
   if (model) args.push("--model", model);
 
   // Reasoning effort — the CLI validates the level itself, but we guard
-  // against a stale/unknown config value reaching argv.
-  if (opts.effort && EFFORT_LEVELS.includes(opts.effort)) {
-    args.push("--effort", opts.effort);
+  // against a stale/unknown config value reaching argv. Ultracode outranks
+  // whatever level came with it: the setting is defined as xhigh + workflows,
+  // and a stored posture pairing it with `max` would ask for a combination the
+  // CLI does not offer.
+  const effort = opts.ultracode ? "xhigh" : opts.effort;
+  // A pinned version that predates this level would reject the flag, and the
+  // failure would arrive as a CLI error with nothing pointing back at the
+  // picker. Dropping it runs the turn at the model's own default instead.
+  const ladder = model ? EFFORT_LADDERS[model] : undefined;
+  const takesEffort = !ladder || ladder.includes(effort as EffortLevel);
+  if (effort && EFFORT_LEVELS.includes(effort) && takesEffort) {
+    args.push("--effort", effort);
   }
 
   // `--settings` layers a JSON blob on top of the resolved settings sources
@@ -665,6 +703,11 @@ export function buildArgs(
   if (typeof opts.thinking === "boolean") {
     settings.alwaysThinkingEnabled = opts.thinking;
   }
+  //   • ultracode — session-scoped by the CLI's own definition, which is why it
+  //     travels here per run rather than being written to a settings file. Sent
+  //     only when on: the key's absence is its off state, and writing `false`
+  //     would override a settings file that deliberately turned it on.
+  if (opts.ultracode) settings.ultracode = true;
   // Only inject the `ask` routing in modes that actually service the approval
   // channel (default/auto, where `--permission-prompt-tool stdio` is wired up).
   // Plan and bypass have no prompt tool, so an `ask` rule there would have
@@ -1049,6 +1092,15 @@ export interface CliEvent {
   total_cost_usd?: number;
   error?: string;
   result?: string;
+  /** Present on `system`/`compact_boundary`. */
+  compactMetadata?: {
+    trigger?: string;
+    preTokens?: number;
+    postTokens?: number;
+  };
+  /** Present on the end-of-turn `result` event: per-model totals, including
+   *  the context window the model actually ran with. */
+  modelUsage?: Record<string, { contextWindow?: number }>;
   /** Present on `rate_limit_event`. `resetsAt` is unix *seconds*, unlike
    *  every other timestamp in this protocol. */
   rate_limit_info?: {
@@ -1093,6 +1145,21 @@ export function makeProcessor(
 
   return (ev) => {
     const out: StreamDelta[] = [];
+
+    // The CLI folded earlier messages into a summary to make room. Silent
+    // until now: a long chat simply stopped remembering its own beginning,
+    // which reads as the product losing the user's work.
+    if (ev.type === "system" && ev.subtype === "compact_boundary") {
+      out.push({
+        type: "compact",
+        compaction: {
+          trigger: ev.compactMetadata?.trigger,
+          preTokens: ev.compactMetadata?.preTokens,
+          postTokens: ev.compactMetadata?.postTokens
+        }
+      });
+      return out;
+    }
 
     if (ev.type === "system" && ev.subtype === "init") {
       if (ev.session_id) setResume?.(ev.session_id);
@@ -1212,6 +1279,10 @@ export function makeProcessor(
         const u = makeUsageDelta(ev.usage, ev.session_id);
         if (u.usage && typeof ev.total_cost_usd === "number") {
           u.usage.costUsd = ev.total_cost_usd;
+        }
+        if (u.usage) {
+          u.usage.contextTokens = contextSize(ev.usage);
+          u.usage.contextWindow = contextWindowOf(ev.modelUsage);
         }
         out.push(u);
       }
@@ -1353,6 +1424,51 @@ function makeUsageDelta(u: CliUsage, sessionId?: string): StreamDelta {
       sessionId
     }
   };
+}
+
+/**
+ * How much context the request that just ran occupied.
+ *
+ * Cached tokens count: they are part of the prompt the model read, and leaving
+ * them out reports a nearly-full window as nearly empty — cache reads are most
+ * of a long conversation. This is the same sum the CLI uses internally to
+ * decide when to compact.
+ */
+export function contextSize(u: CliUsage): number {
+  return (
+    (u.input_tokens ?? 0) +
+    (u.cache_creation_input_tokens ?? 0) +
+    (u.cache_read_input_tokens ?? 0)
+  );
+}
+
+/**
+ * The window the model actually ran with.
+ *
+ * Read from the CLI's per-model totals rather than assumed from the model name:
+ * the same alias resolves to a different window depending on the `[1m]` variant
+ * and the account, and guessing 200k for a million-token run would put the
+ * meter at 5× the truth.
+ */
+export function contextWindowOf(
+  modelUsage: Record<string, { contextWindow?: number }> | undefined
+): number | undefined {
+  if (!modelUsage) return undefined;
+  // Several models can appear in one turn (a haiku side-call alongside the main
+  // model). The largest window is the main loop's; a side-call's smaller one
+  // would understate the room left.
+  let largest: number | undefined;
+  for (const entry of Object.values(modelUsage)) {
+    const w = entry?.contextWindow;
+    if (
+      typeof w === "number" &&
+      w > 0 &&
+      (largest === undefined || w > largest)
+    ) {
+      largest = w;
+    }
+  }
+  return largest;
 }
 
 function lastUserText(messages: Message[]): string {

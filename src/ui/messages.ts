@@ -51,6 +51,7 @@ export type InboundType =
   | "chatFocus"
   // models
   | "requestModels"
+  | "requestLegacyModels"
   // skills + marketplace
   | "requestSkills"
   | "requestSlashCommands"

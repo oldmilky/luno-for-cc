@@ -5,7 +5,7 @@
 //
 // The popover surface (glass, shadow, entry animation, placement)
 // comes from Dropdown.module.scss; this module only reshapes it and
-// styles what goes inside. Converted from theme.css in Ф2а.
+// styles what goes inside.
 // ─────────────────────────────────────────────────────────────
 
 // ── Trigger chip ─────────────────────────────────────────────
@@ -199,6 +199,117 @@
   color: var(--accent);
 }
 
+// ── Older-models panel ───────────────────────────────────────
+
+// The door into the second screen. Sits with the rows but reads as a way out
+// of the list rather than another thing in it — hence the rule above it.
+.legacyEntry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 9px 11px;
+  border: 0;
+  border-top: 1px solid var(--b1);
+  border-radius: 0 0 var(--round-sm) var(--round-sm);
+  background: transparent;
+  color: var(--t2);
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+.legacyEntryBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--t3);
+  font-family: inherit;
+  cursor: pointer;
+  transition: color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    color: var(--t1);
+  }
+}
+
+.legacyEmpty {
+  padding: 14px 11px;
+  color: var(--t4);
+  font-size: 11.5px;
+}
+
+// Taller than an alias row: it carries a note and both sides of the argument.
+.legacyRow {
+  align-items: flex-start;
+}
+
+// Still readable, still explains itself — it just cannot be chosen. Dimming it
+// to the point of illegibility would hide the reason it is there.
+.rowGone {
+  cursor: not-allowed;
+  filter: opacity(0.55);
+}
+
+.rowTagGone {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--err) 40%, transparent);
+  border-radius: 4px;
+  background: var(--err-soft);
+  color: var(--err);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.factPlus,
+.factMinus {
+  display: flex;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.factPlus {
+  color: var(--ok);
+}
+
+.factMinus {
+  color: var(--warn);
+}
+
+// Fixed width so the two lines' text starts on the same column — a plus and a
+// minus glyph are not the same width in this face.
+.factSign {
+  flex-shrink: 0;
+  width: 8px;
+  font-weight: 700;
+  text-align: center;
+}
+
 // ── Effort + Thinking controls ───────────────────────────────
 
 .controls {
@@ -307,8 +418,74 @@
 }
 
 // The label swallows clicks otherwise — the handler lives on the cell.
+// A level the pinned model never had. `filter: opacity()` rather than the
+// property, because the cell sits under framer's inline styles on the panel.
+.cellOff {
+  cursor: not-allowed;
+  filter: opacity(0.4);
+}
+
 .cellLabel {
   pointer-events: none;
+}
+
+// The sixth effort choice, on its own row under the ramp. Full width and
+// left-aligned rather than a sixth cell: it runs at X-high, one step below
+// Max, so a cell at the end of the ramp would read as "more than Max".
+.ultra {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 9px;
+  border: 1px solid var(--b2);
+  border-radius: 5px;
+  background: var(--s1);
+  color: var(--t4);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover:not(:disabled) {
+    border-color: var(--b3);
+    color: var(--t2);
+  }
+
+  > * {
+    pointer-events: none;
+  }
+}
+
+.ultra.ultraOn {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 1px 8px var(--accent-shadow);
+}
+
+.ultraLabel {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+
+// A step quieter than the name, and first to be cut: the name is the choice,
+// this is what it costs.
+.ultraNote {
+  min-width: 0;
+  overflow: hidden;
+  color: currentcolor;
+  font-size: 9.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0.72;
 }
 
 // Pill toggle (Thinking).

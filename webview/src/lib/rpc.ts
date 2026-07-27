@@ -163,6 +163,16 @@ export interface ModelInfo {
    * `version` = explicit Messages API model IDs. See model-config docs.
    */
   group: ModelGroup;
+  /** `version` rows only: one reason to pin it, one reason not to. */
+  plus?: string;
+  minus?: string;
+  /** Levels this model accepts from `--effort`, in order; empty means it
+   *  rejects the flag. Absent on aliases, which always resolve to something
+   *  current. Mirrors `ModelInfo` in src/ui/domains/models.ts. */
+  effort?: ReadonlyArray<EffortLevel>;
+  /** Whether the user's own CLI served this id when asked. `undefined` while
+   *  the probe is still working through the list. */
+  available?: boolean;
 }
 
 export interface SkillInfo {
@@ -364,7 +374,10 @@ export type Outbound =
   | { type: "newSession" }
   | { type: "setModel"; model: string }
   | { type: "setPermissionMode"; mode: PermissionMode }
-  | { type: "setEffort"; effort: EffortLevel }
+  /** Both halves of one choice. The picker offers ultracode as a sixth option
+   *  on the effort control, so it must not be possible for a turn to start
+   *  between the level landing and the flag landing. */
+  | { type: "setEffort"; effort: EffortLevel; ultracode: boolean }
   | { type: "setThinking"; thinking: boolean }
   | { type: "rewindTo"; turnId: string }
   | { type: "editAt"; turnId: string; text: string; revertFiles: boolean }
@@ -380,6 +393,11 @@ export type Outbound =
   | { type: "cancelClaudeSetup" }
   | { type: "confirmClaudeSetup" }
   | { type: "requestModels" }
+  /** `probe: false` asks for the catalogue alone — used on boot when the
+   *  conversation is already pinned to a version and the picker needs its
+   *  effort ladder. Opening the panel asks with the probe, which costs one CLI
+   *  spawn per entry and is why it is not the default on boot. */
+  | { type: "requestLegacyModels"; probe?: boolean }
   | { type: "requestSkills" }
   | { type: "requestSlashCommands" }
   | { type: "requestFileSearch"; id: string; query: string }
@@ -472,6 +490,9 @@ export type Inbound =
       permissionMode?: PermissionMode;
       effort?: EffortLevel;
       thinking?: boolean;
+      /** xhigh + standing workflow orchestration. Travels with the posture
+       *  rather than inside `effort`, which mirrors the CLI's five levels. */
+      ultracode?: boolean;
     }
   // `sessionId` on all three: the webview persists it, and it is the only thing
   // VS Code hands back when it restores a conversation's editor tab after a
@@ -501,6 +522,10 @@ export type Inbound =
   | { type: "editorContext"; context: EditorContext | null }
   | { type: "rewind"; events: TimelineEvent[] }
   | { type: "models"; models: ModelInfo[] }
+  /** The pinned-version catalogue. Arrives twice per open: once immediately
+   *  with whatever availability is already cached, once more when the probes
+   *  have finished — so the panel paints before the CLI has been asked. */
+  | { type: "legacyModels"; models: ModelInfo[] }
   /** Resolved model the CLI reported for the last turn, plus the alias/value
    *  that was selected when it ran (so the UI only shows it while that
    *  selection is still active). */
@@ -595,6 +620,10 @@ export type Inbound =
       sessionId?: string;
       /** Provider that reported the usage — webview shows it in the meter tooltip. */
       source: "anthropic" | "claude-cli";
+      /** How full the model's context was on the last request, and how big it
+       *  is. Reported by the CLI, so unlike the plan caps these are exact. */
+      contextTokens?: number;
+      contextWindow?: number;
     }
   | { type: "revertResult"; path: string; ok: boolean; error?: string }
   | { type: "connectorsList"; connectors: ConnectorView[] }
