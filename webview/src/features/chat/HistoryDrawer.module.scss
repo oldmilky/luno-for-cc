@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────
 // History drawer — slide-in panel listing prior chat sessions.
-// Converted from Tailwind in Ф2а. Reads design tokens only.
+// Reads design tokens only; see docs/TOKENS.md.
 //
 // The `.drawer-*` / `.history-*` block in theme.css is a different,
 // older drawer: this component never referenced it. Nothing here was
@@ -9,6 +9,8 @@
 // Enter/exit motion (slide, fade, backdrop blur, row stagger) stays
 // in Framer Motion; only the resting look lives here.
 // ─────────────────────────────────────────────────────────────
+
+@use "../../themes/motion" as motion;
 
 .backdrop {
   position: fixed;
@@ -256,6 +258,105 @@
 
   .item:hover & {
     background: var(--accent);
+  }
+}
+
+// ── Live status ──────────────────────────────────────────────
+//
+// Three states a chat can be in while the list is open. Colour alone would
+// not carry it — the pill in the meta row says which, in words.
+
+// Compound with `.dot` so these outrank the hover rule above: a chat that is
+// working must not read as merely hovered.
+.dot.dotOpen {
+  background: var(--accent);
+}
+
+.dot.dotWaiting {
+  background: var(--warn);
+}
+
+.dot.dotRunning {
+  background: var(--accent);
+  // The activity period, not the decorative one: this dot means a turn is in
+  // flight right now.
+  @include motion.halo-breathe(var(--motion-ambient));
+}
+
+.livePill {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-sans);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+
+  &.dotOpen {
+    background: var(--accent-soft);
+    color: var(--accent-glow);
+  }
+
+  &.dotWaiting {
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+
+  &.dotRunning {
+    background: var(--accent-soft);
+    color: var(--accent-glow);
+  }
+}
+
+// ── Rename field ─────────────────────────────────────────────
+
+.renameInput {
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--s0);
+  color: var(--t1);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+
+  &::placeholder {
+    color: var(--t4);
+    font-weight: 400;
+  }
+}
+
+.itemRename {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: var(--round);
+  background: transparent;
+  color: var(--t4);
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--motion-hover) var(--ease-out),
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  .item:hover & {
+    opacity: 1;
+  }
+
+  &:hover {
+    border-color: var(--accent-mid);
+    background: var(--accent-soft);
+    color: var(--accent-glow);
   }
 }
 

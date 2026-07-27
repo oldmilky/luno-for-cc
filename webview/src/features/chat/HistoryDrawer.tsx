@@ -9,7 +9,7 @@
 //   • Delete-with-undo via inline two-step confirm.
 // ─────────────────────────────────────────────────────────────
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Icon } from "../../design/icons";
 import { Tooltip } from "../../design/primitives";
@@ -35,6 +35,7 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
   const [sessions, setSessions] = useState<HistoryEntry[] | null>(null);
   const [query, setQuery] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
 
   useEffect(() => {
     return onMessage((m) => {
@@ -50,6 +51,7 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
     if (!open) {
       setQuery("");
       setConfirmId(null);
+      setRenamingId(null);
       return;
     }
     setSessions(null);
@@ -59,11 +61,16 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // Escape backs out one step at a time: a rename in progress is what the
+      // user is looking at, so closing the whole drawer would answer a question
+      // they did not ask.
+      if (renamingId) setRenamingId(null);
+      else onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, renamingId]);
 
   const filtered = useMemo(() => {
     if (!sessions) return null;
@@ -88,6 +95,11 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
         setConfirmId((curr) => (curr === id ? null : curr));
       }, 2400);
     }
+  };
+
+  const handleRename = (id: string, name: string) => {
+    send({ type: "renameSession", id, name });
+    setRenamingId(null);
   };
 
   return (
@@ -219,6 +231,10 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
                           onSelect={() => onSelect(session.id)}
                           onDelete={() => handleDelete(session.id)}
                           confirming={confirmId === session.id}
+                          renaming={renamingId === session.id}
+                          onStartRename={() => setRenamingId(session.id)}
+                          onRename={(name) => handleRename(session.id, name)}
+                          onCancelRename={() => setRenamingId(null)}
                         />
                       </motion.li>
                     ))}
@@ -247,23 +263,46 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
 
 // ─────────────────── Sub-components ───────────────────
 
+/** What each live state is called and which dot class carries it. Kept beside
+ *  the row rather than inline so the three stay consistent as a set. */
+const LIVE: Record<
+  NonNullable<HistoryEntry["live"]>,
+  { label: string; dot: string }
+> = {
+  waiting: { label: "needs you", dot: "dotWaiting" },
+  running: { label: "working", dot: "dotRunning" },
+  open: { label: "open", dot: "dotOpen" }
+};
+
 function HistoryItem({
   session,
   onSelect,
   onDelete,
-  confirming
+  confirming,
+  renaming,
+  onStartRename,
+  onRename,
+  onCancelRename
 }: {
   session: HistoryEntry;
   onSelect: () => void;
   onDelete: () => void;
   confirming: boolean;
+  renaming: boolean;
+  onStartRename: () => void;
+  onRename: (name: string) => void;
+  onCancelRename: () => void;
 }) {
+  const live = session.live ? LIVE[session.live] : null;
   return (
     <div
-      onClick={onSelect}
-      role="button"
-      tabIndex={0}
+      // A row being renamed is a text field, not a button: clicking into it,
+      // or pressing space in it, must not load the chat underneath.
+      onClick={renaming ? undefined : onSelect}
+      role={renaming ? "presentation" : "button"}
+      tabIndex={renaming ? -1 : 0}
       onKeyDown={(e) => {
+        if (renaming) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onSelect();
@@ -271,9 +310,22 @@ function HistoryItem({
       }}
       className={s.item}
     >
-      <span className={s.dot} aria-hidden />
+      <span
+        className={[s.dot, live ? s[live.dot] : ""].join(" ").trim()}
+        aria-hidden
+      />
       <div className={s.itemMain}>
-        <span className={s.itemTitle}>{session.title || "Untitled chat"}</span>
+        {renaming ? (
+          <RenameField
+            initial={session.named ? session.title : ""}
+            onCommit={onRename}
+            onCancel={onCancelRename}
+          />
+        ) : (
+          <span className={s.itemTitle}>
+            {session.title || "Untitled chat"}
+          </span>
+        )}
         {session.snippet && (
           <span className={s.itemSnippet}>{session.snippet}</span>
         )}
@@ -283,22 +335,94 @@ function HistoryItem({
           <span>
             {session.eventCount} {session.eventCount === 1 ? "event" : "events"}
           </span>
+          {live && (
+            <>
+              <span className={s.itemMetaDot}>·</span>
+              <span className={[s.livePill, s[live.dot]].join(" ")}>
+                {live.label}
+              </span>
+            </>
+          )}
         </span>
       </div>
-      <Tooltip label={confirming ? "Click again to confirm" : "Delete chat"}>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          className={[s.itemDelete, confirming ? s.armed : ""].join(" ").trim()}
-          aria-label={confirming ? "Confirm delete" : "Delete chat"}
-        >
-          <Icon name={confirming ? "check" : "x"} size={10} />
-        </button>
-      </Tooltip>
+      {!renaming && (
+        <Tooltip label={session.named ? "Rename or clear name" : "Name chat"}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onStartRename();
+            }}
+            className={s.itemRename}
+            aria-label={session.named ? "Rename chat" : "Name chat"}
+          >
+            <Icon name="edit" size={10} />
+          </button>
+        </Tooltip>
+      )}
+      {!renaming && (
+        <Tooltip label={confirming ? "Click again to confirm" : "Delete chat"}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className={[s.itemDelete, confirming ? s.armed : ""]
+              .join(" ")
+              .trim()}
+            aria-label={confirming ? "Confirm delete" : "Delete chat"}
+          >
+            <Icon name={confirming ? "check" : "x"} size={10} />
+          </button>
+        </Tooltip>
+      )}
     </div>
+  );
+}
+
+/**
+ * The inline name field.
+ *
+ * Its own component so the draft dies with it: a field keyed to the row would
+ * carry one row's half-typed name onto the next one the user opens.
+ */
+function RenameField({
+  initial,
+  onCommit,
+  onCancel
+}: {
+  initial: string;
+  onCommit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState(initial);
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    ref.current?.select();
+  }, []);
+
+  return (
+    <input
+      ref={ref}
+      autoFocus
+      type="text"
+      value={draft}
+      placeholder="Name this chat…"
+      className={s.renameInput}
+      onChange={(e) => setDraft(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") onCommit(draft.trim());
+        if (e.key === "Escape") onCancel();
+      }}
+      // Clicking away commits what was typed. Discarding it would be the
+      // surprising half of the two, and an empty field is already the
+      // documented way to clear a name.
+      onBlur={() => onCommit(draft.trim())}
+    />
   );
 }
 

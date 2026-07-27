@@ -13,14 +13,24 @@ const spawned = vi.hoisted(
   () => [] as { permissionMode: string; effort: string; model?: string }[]
 );
 
+/**
+ * What the fake CLI does for the next turn. Empty deltas and `hang: false` is
+ * a turn that runs and ends, which is what most of these want.
+ *
+ * `hang` matters for the approval state: the real CLI blocks on a permission
+ * request until someone answers, and a turn that returns instead clears
+ * `awaitingApproval` in its own `finally` before anything can observe it.
+ */
+const stream = vi.hoisted(() => ({ deltas: [] as unknown[], hang: false }));
+
 vi.mock("../../src/providers/factory.js", () => ({
   createProvider: (opts: { permissionMode: string; effort: string }) => {
     spawned.push(opts);
     return {
       id: "fake",
-      // eslint-disable-next-line require-yield
       async *stream() {
-        return;
+        for (const d of stream.deltas) yield d;
+        if (stream.hang) await new Promise(() => {});
       }
     };
   },
@@ -64,7 +74,8 @@ vi.mock("vscode", () => ({
       onDidChangeViewState: () => disposable,
       onDidDispose: () => disposable,
       dispose: () => {}
-    })
+    }),
+    registerWebviewPanelSerializer: () => disposable
   },
   ViewColumn: { Active: -1 },
   RelativePattern: class {
@@ -128,6 +139,8 @@ let storage: string;
 
 beforeEach(() => {
   spawned.length = 0;
+  stream.deltas.length = 0;
+  stream.hang = false;
   storage = fs.mkdtempSync(path.join(os.tmpdir(), "luno-settings-"));
   // A turn refuses to start without an open folder, and these tests are about
   // what it starts *with*. Deliberately not a git repository: isolation is a
@@ -412,5 +425,54 @@ describe("conversation status", () => {
 
     // The sidebar badge is the only thing a user with five hidden tabs sees.
     expect(registry.attentionCount()).toBe(2);
+  });
+
+  // The badge says *how many* chats want the user; the history list is the only
+  // place that can say which. Without it, running several conversations means
+  // opening each one to find out what it is doing.
+  it("reports a conversation parked on an approval as waiting", async () => {
+    stream.deltas.push({
+      type: "permission_request",
+      permission: { id: "p1", tool: "Edit", input: {} }
+    });
+    stream.hang = true;
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = titledTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
+
+    surface.webview.deliver({ type: "prompt", text: "edit the gate" });
+    await settle();
+
+    // Waiting outranks running: this turn cannot continue until it is answered.
+    expect(host.live).toBe("waiting");
+  });
+
+  it("reports a conversation mid-turn as running", async () => {
+    stream.hang = true;
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = titledTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
+
+    surface.webview.deliver({ type: "prompt", text: "refactor the gate" });
+    await settle();
+
+    expect(host.live).toBe("running");
+  });
+
+  it("reports an idle conversation as merely open", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = titledTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
+
+    surface.webview.deliver({ type: "prompt", text: "hello" });
+    await settle();
+
+    expect(host.live).toBe("open");
   });
 });

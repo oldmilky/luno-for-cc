@@ -244,14 +244,22 @@ export interface MarketplaceInstallTarget {
   directoryPath: string;
 }
 
+/** What a conversation on this session is doing; absent when none is open.
+ *  `waiting` outranks `running` — one needs an answer to continue. */
+export type LiveStatus = "open" | "running" | "waiting";
+
 export interface HistoryEntry {
   id: string;
   title: string;
+  /** Whether `title` is a name the user typed rather than one derived from the
+   *  first prompt. Lets a row offer to clear it instead of guessing. */
+  named?: boolean;
   /** Longer cleaned preview of the first user message; "" when redundant. */
   snippet?: string;
   createdAt: number;
   updatedAt: number;
   eventCount: number;
+  live?: LiveStatus;
 }
 
 // ── MCP connectors ────────────────────────────────────────
@@ -352,6 +360,8 @@ export type Outbound =
   | { type: "requestHistory" }
   | { type: "loadSession"; id: string }
   | { type: "deleteHistoryEntry"; id: string }
+  /** An empty `name` clears the name and falls back to the derived title. */
+  | { type: "renameSession"; id: string; name: string }
   | { type: "setSkillEnabled"; id: string; enabled: boolean }
   | {
       type: "requestMarketplace";
@@ -436,8 +446,12 @@ export type Inbound =
       effort?: EffortLevel;
       thinking?: boolean;
     }
-  | { type: "hello" }
-  | { type: "reset" }
+  // `sessionId` on all three: the webview persists it, and it is the only thing
+  // VS Code hands back when it restores a conversation's editor tab after a
+  // window reload. The host declared it on `hello` and `reset` all along — the
+  // contract just never said so, so no reader could reach it.
+  | { type: "hello"; sessionId: string }
+  | { type: "reset"; sessionId: string }
   | { type: "timeline"; event: TimelineEvent }
   | { type: "delta"; delta: Delta }
   | { type: "turnStart" }
@@ -485,7 +499,12 @@ export type Inbound =
       text: string;
     }
   | { type: "historyList"; sessions: HistoryEntry[] }
-  | { type: "loadedSession"; events: TimelineEvent[]; title: string }
+  | {
+      type: "loadedSession";
+      events: TimelineEvent[];
+      title: string;
+      sessionId: string;
+    }
   | {
       type: "marketplaceList";
       skills: MarketplaceSkill[];

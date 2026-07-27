@@ -61,6 +61,7 @@ export type InboundType =
   | "requestHistory"
   | "loadSession"
   | "deleteHistoryEntry"
+  | "renameSession"
   // usage
   | "refreshUsage"
   // conventions

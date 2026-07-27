@@ -10,13 +10,22 @@
 // exists to remove. It belongs with session lifecycle when that is extracted.
 // ─────────────────────────────────────────────────────────────
 
-import type { HistoryService } from "../../services/history.js";
+import type { HistoryService, LiveStatus } from "../../services/history.js";
 import type { Post } from "../messages.js";
 
+/**
+ * @param liveFor answers what a conversation on that session is doing, or
+ *   nothing when none is open. Passed in because history is a file store and
+ *   has no idea which chats are running — only the registry does.
+ */
 export async function broadcastHistory(
   post: Post,
-  history: HistoryService
+  history: HistoryService,
+  liveFor?: (id: string) => LiveStatus | undefined
 ): Promise<void> {
-  const sessions = await history.list();
+  const stored = await history.list();
+  const sessions = liveFor
+    ? stored.map((s) => ({ ...s, live: liveFor(s.id) }))
+    : stored;
   post({ type: "historyList", sessions });
 }

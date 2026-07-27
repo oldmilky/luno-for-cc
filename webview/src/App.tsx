@@ -51,6 +51,17 @@ interface Persisted {
   events?: TimelineEvent[];
   input?: string;
   pins?: { path: string; label: string }[];
+  /**
+   * Which conversation this surface was showing.
+   *
+   * Written for the extension host to read back, not for this app: a webview's
+   * persisted state is the only thing VS Code returns when it restores an
+   * editor tab after a window reload, so without it the tab comes back with no
+   * conversation behind it. Kept current from every message that carries an id
+   * — the host changes sessions under a surface on New Chat, on adoption and on
+   * a switch.
+   */
+  sessionId?: string;
 }
 
 // ── Timeline reducer ─────────────────────────────────────────
@@ -165,12 +176,14 @@ export function App() {
           break;
         }
         case "hello":
+          patchState<Persisted>({ sessionId: m.sessionId });
           setStreaming("");
           setError(null);
           setBusy(false);
           setPendingPermissions([]);
           break;
         case "reset":
+          patchState<Persisted>({ sessionId: m.sessionId });
           dispatchTimeline({ type: "reset" });
           setStreaming("");
           setError(null);
@@ -274,6 +287,7 @@ export function App() {
           // Consumed by HistoryDrawer via its own subscription.
           break;
         case "loadedSession":
+          patchState<Persisted>({ sessionId: m.sessionId });
           dispatchTimeline({ type: "replace", events: m.events });
           setStreaming("");
           setError(null);

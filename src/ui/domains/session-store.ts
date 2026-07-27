@@ -56,6 +56,11 @@ export class SessionStore {
    *  restored with the session, and cleared when the session is. */
   resumeId?: string;
 
+  /** The name the user gave this conversation, if any. Here for the same
+   *  reason as `resumeId`: saved with the session, restored with it, and gone
+   *  when the session is. */
+  name?: string;
+
   constructor(
     private readonly post: Post,
     private readonly history: HistoryService,
@@ -81,6 +86,7 @@ export class SessionStore {
     this.session = new Session();
     this.attachListeners();
     this.resumeId = undefined;
+    this.name = undefined;
     this.checkpointService?.clear();
     this.checkpointService = undefined;
   }
@@ -116,6 +122,7 @@ export class SessionStore {
     this.session.timeline = stored.timeline;
     this.session.title = stored.title;
     this.resumeId = stored.resumeId;
+    this.name = stored.name;
 
     // The previous listener closure now points at a dead Session, so it has to
     // be re-attached rather than left alone.
@@ -142,6 +149,7 @@ export class SessionStore {
       void this.history.save({
         id: this.session.id,
         title: deriveTitle(this.session.timeline),
+        name: this.name,
         createdAt: this.session.createdAt,
         updatedAt: Date.now(),
         messages: this.session.messages,

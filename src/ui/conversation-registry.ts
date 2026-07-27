@@ -54,13 +54,26 @@ function isolationWanted(surface: "sidebar" | "tab"): boolean {
   return false;
 }
 
+/**
+ * The conversation a restored tab was showing.
+ *
+ * Comes from the webview's own persisted state, which is all VS Code keeps
+ * across a window reload — and it is written by a program we ship but do not
+ * re-verify here, so it is read defensively rather than cast.
+ */
+function restoredSessionId(state: unknown): string | undefined {
+  const id = (state as { sessionId?: unknown } | undefined)?.sessionId;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
 export class ConversationRegistry {
   private readonly hosts = new Set<ConversationHost>();
   private readonly shared: SharedServices;
   private readonly disposables: vscode.Disposable[] = [];
   private usageTimer?: NodeJS.Timeout;
-  /** Tabs are numbered so five of them are tellable apart. Real conversation
-   *  titles land with the rest of the tab status work. */
+  /** Tabs open with a number so several of them are tellable apart before
+   *  their conversations have titles; `refreshSurface` renames each one as
+   *  soon as it has something to say. */
   private nextTabNumber = 1;
 
   /**
@@ -138,6 +151,7 @@ export class ConversationRegistry {
       conversationFor: (sessionId) => this.conversationFor(sessionId),
       openConversationInTab: (sessionId) => void this.openInTab(sessionId),
       showConversation: (sessionId) => void this.showInSidebar(sessionId),
+      discardConversation: (sessionId) => this.discardConversation(sessionId),
       markActive: (host) => {
         this.active = host;
       },
@@ -151,6 +165,19 @@ export class ConversationRegistry {
         if (e.affectsConfiguration("luno.claudeBinaryPath")) {
           models.clear();
           void models.broadcast();
+        }
+      })
+    );
+
+    // Without this a window reload loses every conversation that was open as a
+    // tab: VS Code brings the tab back and has nobody to hand it to. The
+    // sidebar restores exactly one chat, so parallel work — the whole point of
+    // tabs — did not survive a reload at all.
+    this.disposables.push(
+      vscode.window.registerWebviewPanelSerializer(TAB_VIEW_TYPE, {
+        deserializeWebviewPanel: (panel, state) => {
+          this.restoreTab(panel, restoredSessionId(state));
+          return Promise.resolve();
         }
       })
     );
@@ -233,7 +260,10 @@ export class ConversationRegistry {
     // Editor decorations follow the sidebar: it is the conversation the user is
     // reading source alongside.
     this.primary = host;
-    host.show(this.sidebarTarget);
+    // The surface decides isolation, and this conversation may never have been
+    // attached to one — a chat picked from history is created here and shown,
+    // never attached, so it used to arrive with isolation simply off.
+    host.show(this.sidebarTarget, { isolate: isolationWanted("sidebar") });
   }
 
   /** Whether the sidebar conversation runs in its own checkout. Only under
@@ -272,13 +302,43 @@ export class ConversationRegistry {
    * looked at another file.
    */
   openInTab(sessionId?: string): ConversationHost {
-    const host = this.create();
     const panel = vscode.window.createWebviewPanel(
       TAB_VIEW_TYPE,
       `Luno ${this.nextTabNumber++}`,
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true }
     );
+    return this.adoptTabPanel(panel, sessionId);
+  }
+
+  /**
+   * Give a tab back the conversation it was showing before a window reload.
+   *
+   * The session id survives in the webview's persisted state and nowhere else.
+   * When it names a conversation that is already open — the sidebar restores
+   * the most recent chat, which can be this one — the tab goes rather than the
+   * conversation being opened twice: two hosts on one session resume the same
+   * CLI session from two processes. Missing or stale ids simply come back as a
+   * new chat, which is what `adoptStored` does with a session it cannot find.
+   */
+  private restoreTab(panel: vscode.WebviewPanel, sessionId?: string): void {
+    const open = sessionId ? this.conversationFor(sessionId) : undefined;
+    if (open) {
+      open.reveal();
+      panel.dispose();
+      return;
+    }
+    this.adoptTabPanel(panel, sessionId);
+  }
+
+  /** Put a conversation behind an editor-tab panel — one we just created, or
+   *  one VS Code handed back. Everything a tab needs wiring is here, so a
+   *  restored tab cannot quietly get less of it than a fresh one. */
+  private adoptTabPanel(
+    panel: vscode.WebviewPanel,
+    sessionId?: string
+  ): ConversationHost {
+    const host = this.create();
     panel.iconPath = vscode.Uri.joinPath(
       this.shared.ctx.extensionUri,
       "assets",
@@ -290,7 +350,8 @@ export class ConversationRegistry {
         reveal: () => panel.reveal(),
         setTitle: (title) => {
           panel.title = title;
-        }
+        },
+        close: () => panel.dispose()
       },
       { adoptSessionId: sessionId, isolate: isolationWanted("tab") }
     );
@@ -305,6 +366,24 @@ export class ConversationRegistry {
     // rather than keep streaming into a webview nobody can see.
     panel.onDidDispose(() => this.close(host));
     return host;
+  }
+
+  /**
+   * End the conversation on `sessionId`, because its history entry is going.
+   *
+   * A tab closes — its own dispose handler retires the conversation, kills the
+   * CLI process and gives the checkout back. The sidebar cannot close itself,
+   * so its occupant becomes a new chat instead; that also aborts the turn and
+   * drops the session, which is what deleting it has to mean.
+   */
+  discardConversation(sessionId: string): void {
+    const host = this.conversationFor(sessionId);
+    if (!host) return;
+    if (host === this.sidebarHost) {
+      host.newSession();
+      return;
+    }
+    if (!host.closeSurface()) this.close(host);
   }
 
   /** Retire a conversation, release its CLI process, and give back its

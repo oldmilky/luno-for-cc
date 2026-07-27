@@ -17,6 +17,7 @@ import { CheckpointService } from "../services/checkpoint.js";
 import {
   deriveTitle,
   HistoryService,
+  type LiveStatus,
   type StoredSession
 } from "../services/history.js";
 import { PlanDecorationService } from "../services/plan-decorations.js";
@@ -127,6 +128,14 @@ export interface SharedServices {
    * editor tab moved the work somewhere the user had not asked for.
    */
   showConversation(sessionId: string): void;
+  /**
+   * End the conversation showing `sessionId`, if one is open.
+   *
+   * Its history entry is being deleted. Left running it would rewrite that file
+   * on its next debounced save — the delete would simply undo itself — and it
+   * would keep a CLI process alive for a chat the user believes is gone.
+   */
+  discardConversation(sessionId: string): void;
   /** Note which conversation the user is working in, so a keybinding lands on
    *  the chat in front of them rather than an arbitrary one. */
   markActive(host: ConversationHost): void;
@@ -148,6 +157,9 @@ export interface HostTarget {
   /** Rename the surface. Only an editor tab can — the sidebar's title is the
    *  view's, and VS Code owns it. */
   setTitle?(title: string): void;
+  /** Close the surface. Again only a tab: the sidebar is a fixed surface whose
+   *  occupant changes, and it has no way to close itself. */
+  close?(): void;
 }
 
 export interface AttachOptions {
@@ -211,6 +223,10 @@ export class ConversationHost {
   /** Whether this conversation gets its own checkout. Cleared when isolation
    *  turns out to be impossible, so it is asked for once rather than per turn. */
   private isolate = false;
+  /** Isolation was asked for and could not be given — no repository, or `git
+   *  worktree add` failed. Remembered so moving between surfaces cannot retry
+   *  it, and re-report it, every time the user switches chats. */
+  private isolationImpossible = false;
   /** Whether the user can currently see this conversation. A hidden one still
    *  runs — that is the whole point — so it has to be able to say it needs
    *  attention without being on screen. */
@@ -306,6 +322,11 @@ export class ConversationHost {
     this.abortTurn();
     this.artifacts.closeAll();
     this.sessions.dispose();
+    // Nothing may be posted after this: the webview behind a closed tab is
+    // gone, and a retired conversation that still holds its surface would post
+    // into it — which is reachable now that deleting a chat retires the
+    // conversation showing it and then refreshes the list.
+    this.target = undefined;
   }
 
   /**
@@ -349,6 +370,7 @@ export class ConversationHost {
     const root = await repoRoot(folder);
     if (!root) {
       this.isolate = false;
+      this.isolationImpossible = true;
       this.post({
         type: "error",
         message:
@@ -367,6 +389,7 @@ export class ConversationHost {
       // anyway beats refusing to answer, but it must not be silent — the whole
       // point of the mode is that the user believes their chats cannot collide.
       this.isolate = false;
+      this.isolationImpossible = true;
       const message = err instanceof Error ? err.message : String(err);
       this.post({
         type: "error",
@@ -409,6 +432,60 @@ export class ConversationHost {
     if (this.awaitingApproval) return "approval";
     if (this.finishedWhileHidden) return "finished";
     return "none";
+  }
+
+  /**
+   * What this conversation is doing, for the history list.
+   *
+   * Distinct from `attention`, which answers "does a surface need a glyph". A
+   * chat the user is looking at is never *waiting* for their eye but can very
+   * much be waiting for their answer, and the list has to say so either way.
+   */
+  get live(): LiveStatus {
+    if (this.awaitingApproval) return "waiting";
+    if (this.busy) return "running";
+    return "open";
+  }
+
+  /** The name the user gave this conversation, or nothing. */
+  get name(): string | undefined {
+    return this.sessions.name;
+  }
+
+  /**
+   * Name this conversation, or clear the name back to the derived title.
+   *
+   * Persisted immediately rather than on the next turn: a chat named and then
+   * left alone is the normal case — the user names it precisely so they can
+   * walk away from it.
+   */
+  setName(name: string | undefined): void {
+    this.sessions.name = name && name.length > 0 ? name : undefined;
+    this.refreshSurface();
+    this.scheduleSave();
+  }
+
+  /**
+   * What to call this conversation on a surface and in the list.
+   *
+   * A user-given name wins over the derived one; nothing derivable yet reads
+   * as a new chat rather than as an empty title.
+   */
+  private conversationTitle(): string {
+    return this.name || deriveTitle(this.session.timeline) || "New chat";
+  }
+
+  /**
+   * Close the surface this conversation is on, if it can be closed.
+   *
+   * A tab can; the sidebar cannot close itself — it is a fixed surface whose
+   * occupant changes. Returns whether anything happened so the caller can pick
+   * the other ending.
+   */
+  closeSurface(): boolean {
+    if (!this.target?.close) return false;
+    this.target.close();
+    return true;
   }
 
   /**
@@ -457,6 +534,24 @@ export class ConversationHost {
     return this.target !== undefined;
   }
 
+  /**
+   * Ask for — or drop — an isolated checkout, before the conversation resolves
+   * where its files live.
+   *
+   * The surface decides, so both `attach` and `show` go through here. `attach`
+   * alone used to set it, which meant a conversation switched onto the sidebar
+   * was never asked: under `luno.worktree: "always"` a chat picked from history
+   * quietly ran in the folder the editor has open, which is the one thing that
+   * mode exists to prevent.
+   *
+   * A conversation that already has a checkout keeps it — dropping isolation
+   * underneath it would leave its files somewhere nothing else resolves against.
+   */
+  private setIsolation(isolate: boolean): void {
+    if (this.worktree || this.isolationImpossible) return;
+    this.isolate = isolate;
+  }
+
   /** Stop rendering: the surface is about to show a different conversation.
    *  The turn, if any, carries on. */
   hide(): void {
@@ -474,15 +569,17 @@ export class ConversationHost {
    * *record* this state — replaying it through there would fold the restore
    * back into the buffer it came from.
    */
-  show(target: HostTarget): void {
+  show(target: HostTarget, opts: { isolate?: boolean } = {}): void {
     this.target = target;
+    this.setIsolation(opts.isolate === true);
     this.visible = true;
     this.finishedWhileHidden = false;
     const webview = target.webview;
     void webview.postMessage({
       type: "loadedSession",
       events: this.session.timeline,
-      title: this.session.title
+      title: this.session.title,
+      sessionId: this.session.id
     });
     void this.publishAuthState();
     if (this.busy) void webview.postMessage({ type: "turnStart" });
@@ -519,7 +616,7 @@ export class ConversationHost {
    * a tab will render on demand.
    */
   private refreshSurface(): void {
-    const title = deriveTitle(this.session.timeline) || "New chat";
+    const title = this.conversationTitle();
     const prefix =
       this.attention === "approval"
         ? "⚠ "
@@ -556,7 +653,7 @@ export class ConversationHost {
    */
   attach(target: HostTarget, opts: AttachOptions = {}) {
     this.target = target;
-    this.isolate = opts.isolate === true;
+    this.setIsolation(opts.isolate === true);
     const view = target;
     view.webview.options = {
       enableScripts: true,
@@ -573,6 +670,12 @@ export class ConversationHost {
         ? this.restoreLatestSession()
         : Promise.resolve();
     void booted.then(() => {
+      // Again, and only now with the id this conversation settled on: the
+      // `hello` above went out before adoption, carrying the empty session this
+      // host was born with. The webview persists whatever id it last heard, and
+      // that is what VS Code hands back when it restores this surface — so the
+      // stale one would restore a session that was never saved.
+      this.post({ type: "hello", sessionId: this.session.id });
       this.replayTimeline();
       // A reopened conversation has a title the moment it is adopted, so the
       // surface should not sit on its placeholder until the next turn.
@@ -611,7 +714,13 @@ export class ConversationHost {
     try {
       const list = await this.history.list();
       if (list.length === 0) return;
-      const latest = list[0]; // already sorted by updatedAt desc
+      // Sorted by updatedAt desc — but a restored editor tab picks its own
+      // conversation back up during the same startup, and that may well be the
+      // most recent one. Adopting it here too would put two hosts on one
+      // session, which resumes the same CLI session from two processes. So the
+      // sidebar takes the newest chat nobody else is already holding.
+      const latest = list.find((e) => !this.shared.conversationFor(e.id));
+      if (!latest) return;
       const stored = await this.history.load(latest.id);
       // Require real user content — never re-adopt an empty / placeholder
       // session (e.g. one rewound down to empty), which would resurrect a
@@ -974,7 +1083,7 @@ export class ConversationHost {
     },
 
     // ── History ────────────────────────────────────────────────
-    requestHistory: () => broadcastHistory(this.post, this.history),
+    requestHistory: () => this.publishHistory(),
     loadSession: async (m) => {
       const id = str(m, "id");
       if (id) await this.loadHistorySession(id);
@@ -982,8 +1091,20 @@ export class ConversationHost {
     deleteHistoryEntry: async (m) => {
       const id = str(m, "id");
       if (!id) return;
+      // Before the file, not after: a conversation still holding this session
+      // would rewrite it on its next debounced save.
+      this.shared.discardConversation(id);
       await this.history.delete(id);
-      await broadcastHistory(this.post, this.history);
+      await this.publishHistory();
+    },
+    renameSession: async (m) => {
+      const id = str(m, "id");
+      if (!id) return;
+      // An empty name is how the row clears one — the title falls back to the
+      // first prompt, which is where it came from.
+      const name = str(m, "name")?.trim() ?? "";
+      await this.renameConversation(id, name);
+      await this.publishHistory();
     },
 
     // ── Usage ──────────────────────────────────────────────────
@@ -1107,7 +1228,8 @@ export class ConversationHost {
         this.artifacts.postToPanel(revisionId, {
           type: "loadedSession",
           events: this.session.timeline,
-          title: ""
+          title: "",
+          sessionId: this.session.id
         });
       }
     },
@@ -1231,6 +1353,40 @@ export class ConversationHost {
     }
   }
 
+  /** The stored chats, each told whether a conversation is open on it. Only
+   *  the registry knows that, so the annotation happens here rather than in the
+   *  file store. */
+  private publishHistory(): Promise<void> {
+    return broadcastHistory(
+      this.post,
+      this.history,
+      (id) => this.shared.conversationFor(id)?.live
+    );
+  }
+
+  /**
+   * Name a stored conversation, whether or not it is open.
+   *
+   * A live conversation owns its own name — writing the file underneath it
+   * would be overwritten by its next save — so it is asked to rename itself.
+   * Only a chat nobody holds is patched on disk, and `updatedAt` is left alone
+   * there: naming a chat is not working in it, and bumping it would reorder the
+   * list under the user's cursor.
+   */
+  private async renameConversation(id: string, name: string): Promise<void> {
+    const live = this.shared.conversationFor(id);
+    if (live) {
+      live.setName(name);
+      return;
+    }
+    const stored = await this.history.load(id);
+    if (!stored) return;
+    await this.history.save({
+      ...stored,
+      name: name.length > 0 ? name : undefined
+    });
+  }
+
   private async loadHistorySession(id: string) {
     // Two reasons not to adopt this session here, and both end the same way:
     // another conversation already owns it — two hosts on one session would
@@ -1263,7 +1419,8 @@ export class ConversationHost {
     this.post({
       type: "loadedSession",
       events: stored.timeline,
-      title: stored.title
+      title: stored.title,
+      sessionId: this.session.id
     });
   }
 

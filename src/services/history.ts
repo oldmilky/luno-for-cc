@@ -13,6 +13,15 @@ import type { EffortLevel } from "../providers/claude-cli.js";
 export interface StoredSession {
   id: string;
   title: string;
+  /**
+   * A name the user gave this conversation, which wins over the derived title.
+   *
+   * `title` is re-derived from the first prompt on every read, so it cannot
+   * hold one: the derivation would overwrite it. Running several chats at once
+   * is what makes this worth having — "Bugs" and "Refactoring" are how the user
+   * thinks about them, and the opening sentence of each is not.
+   */
+  name?: string;
   createdAt: number;
   updatedAt: number;
   messages: Message[];
@@ -43,9 +52,21 @@ export interface StoredSession {
   thinking?: boolean;
 }
 
+/**
+ * What a conversation is doing right now, for a list that shows several at once.
+ *
+ * Absent when no conversation is open on that session — the ordinary case for
+ * a stored chat. `waiting` outranks `running`: one needs an answer before it
+ * can continue, the other is merely in flight.
+ */
+export type LiveStatus = "open" | "running" | "waiting";
+
 export interface HistoryEntry {
   id: string;
   title: string;
+  /** Whether the user named this chat, so the UI can offer to reset it back to
+   *  the derived title rather than guessing whether it ever had one. */
+  named: boolean;
   /** A longer, cleaned preview of the first user message — shown dimmer
    *  beneath the title so a chat is recognizable at a glance. Empty when it
    *  would just repeat the title. */
@@ -53,6 +74,9 @@ export interface HistoryEntry {
   createdAt: number;
   updatedAt: number;
   eventCount: number;
+  /** Set by the caller, not by this service: only the registry knows which
+   *  conversations are open, and history is a file store. */
+  live?: LiveStatus;
 }
 
 export class HistoryService {
@@ -111,12 +135,19 @@ export class HistoryService {
         const s = JSON.parse(raw) as StoredSession;
         if (!this.belongsHere(s)) continue;
         // Derive title/snippet fresh from the timeline so the cleaning rules
-        // below apply retroactively to sessions saved with older logic.
-        const title = deriveTitle(s.timeline) || s.title || "New chat";
-        const snippet = deriveSnippet(s.timeline, title);
+        // below apply retroactively to sessions saved with older logic. A name
+        // the user typed is not derived and outranks all of it.
+        const derived = deriveTitle(s.timeline) || s.title || "New chat";
+        const named = typeof s.name === "string" && s.name.length > 0;
+        // The snippet exists to avoid repeating the title. Under a name the
+        // title no longer says anything about the conversation, so there is
+        // nothing to repeat and the preview is the only thing left that says
+        // what "Bugs" was about.
+        const snippet = deriveSnippet(s.timeline, named ? "" : derived);
         entries.push({
           id: s.id,
-          title,
+          title: named ? (s.name as string) : derived,
+          named,
           snippet,
           createdAt: s.createdAt,
           updatedAt: s.updatedAt,

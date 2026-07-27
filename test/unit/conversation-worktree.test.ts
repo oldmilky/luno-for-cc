@@ -11,6 +11,9 @@ import { execFileSync } from "node:child_process";
 const disposable = { dispose: () => {} };
 const repo = vi.hoisted(() => ({ root: "" }));
 const spawned = vi.hoisted(() => [] as { cwd: string }[]);
+/** `luno.*` settings for one test. Isolation is a setting-driven decision, so
+ *  a stub that always answers with the default cannot exercise it. */
+const settings = vi.hoisted(() => ({}) as Record<string, unknown>);
 
 vi.mock("../../src/providers/factory.js", () => ({
   createProvider: (opts: { cwd: string }) => {
@@ -34,7 +37,7 @@ vi.mock("vscode", () => ({
         : undefined;
     },
     getConfiguration: () => ({
-      get: (_key: string, fallback?: unknown) => fallback,
+      get: (key: string, fallback?: unknown) => settings[key] ?? fallback,
       inspect: () => undefined,
       update: async () => {}
     }),
@@ -63,7 +66,8 @@ vi.mock("vscode", () => ({
       onDidChangeViewState: () => disposable,
       onDidDispose: () => disposable,
       dispose: () => {}
-    })
+    }),
+    registerWebviewPanelSerializer: () => disposable
   },
   ViewColumn: { Active: -1 },
   OverviewRulerLane: { Right: 2 },
@@ -122,6 +126,7 @@ let storage: string;
 
 beforeEach(() => {
   spawned.length = 0;
+  for (const key of Object.keys(settings)) delete settings[key];
   storage = fs.mkdtempSync(path.join(os.tmpdir(), "luno-wt-storage-"));
   repo.root = fs.realpathSync(
     fs.mkdtempSync(path.join(os.tmpdir(), "luno-wt-repo-"))
@@ -169,6 +174,24 @@ function fakeContext() {
 function fakeTarget() {
   const webview = makeWebview();
   return { webview, target: { webview, reveal: () => {} } };
+}
+
+/** A stored conversation on disk, the way HistoryService writes one. */
+function writeStoredSession(id: string): void {
+  const dir = path.join(storage, "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, `${id}.json`),
+    JSON.stringify({
+      id,
+      title: "Stored chat",
+      createdAt: 1,
+      updatedAt: 2,
+      workspaceRoot: repo.root,
+      messages: [{ role: "user", content: "hi" }],
+      timeline: [{ id: "e1", ts: 1, kind: "user", title: "user", body: "hi" }]
+    })
+  );
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 400));
@@ -258,5 +281,55 @@ describe("worktree isolation", () => {
 
     // Closing a tab must not throw away what the agent did in it.
     expect(fs.existsSync(cwd)).toBe(true);
+  });
+
+  // The surface decides isolation, and a conversation picked from history is
+  // created by the registry and *shown* — never attached. `isolate` was set in
+  // `attach` alone, so under `always` that chat ran in the folder the editor
+  // has open: the exact collision the mode is turned on to prevent, and silent.
+  it("isolates a chat switched onto the sidebar, not only one attached to it", async () => {
+    settings.worktree = "always";
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const first = registry.create();
+    const surface = fakeTarget();
+    registry.useSidebar(surface.target as never, first);
+    first.attach(surface.target as never, {
+      isolate: registry.isolateSidebar()
+    });
+    // The sidebar's listener routes to whoever occupies it, as in the real one.
+    surface.webview.route(() => registry.sidebarConversation() as never);
+
+    writeStoredSession("picked-from-history");
+    await registry.showInSidebar("picked-from-history");
+    await settle();
+
+    surface.webview.deliver({ type: "prompt", text: "hello" });
+    await settle();
+
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].cwd).toContain(WORKTREE_DIR);
+    expect(spawned[0].cwd).not.toBe(repo.root);
+  });
+
+  it("leaves a switched-in chat in the open folder under the default", async () => {
+    settings.worktree = "tabs";
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const first = registry.create();
+    const surface = fakeTarget();
+    registry.useSidebar(surface.target as never, first);
+    first.attach(surface.target as never, {
+      isolate: registry.isolateSidebar()
+    });
+    surface.webview.route(() => registry.sidebarConversation() as never);
+
+    writeStoredSession("picked-from-history");
+    await registry.showInSidebar("picked-from-history");
+    await settle();
+
+    surface.webview.deliver({ type: "prompt", text: "hello" });
+    await settle();
+
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].cwd).toBe(repo.root);
   });
 });
