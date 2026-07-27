@@ -230,6 +230,46 @@ describe("ConversationRegistry", () => {
     );
   });
 
+  it("opens a picked chat beside a conversation that has work in it", async () => {
+    writeStoredSession("stored-1");
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const busy = fakeTarget();
+    const busyHost = registry.create();
+    busyHost.attach(busy.target as never);
+    // Give it a conversation of its own to be protective of.
+    writeStoredSession("stored-2");
+    busy.webview.deliver({ type: "loadSession", id: "stored-2" });
+    await settle();
+    expect(busyHost.sessionId).toBe("stored-2");
+
+    busy.webview.sent.length = 0;
+    busy.webview.deliver({ type: "loadSession", id: "stored-1" });
+    await settle();
+
+    // The chat the user was in keeps its session — replacing it in place is
+    // what used to kill a running turn.
+    expect(busyHost.sessionId).toBe("stored-2");
+    expect(typesOf(busy.webview.sent)).not.toContain("loadedSession");
+    // The picked one opened next to it instead.
+    expect(registry.conversationFor("stored-1")).toBeDefined();
+    expect(panels).toHaveLength(1);
+  });
+
+  it("reuses a blank conversation rather than opening a tab for it", async () => {
+    writeStoredSession("stored-1");
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const blank = fakeTarget();
+    const blankHost = registry.create();
+    blankHost.attach(blank.target as never);
+
+    blank.webview.deliver({ type: "loadSession", id: "stored-1" });
+    await settle();
+
+    // Nothing to protect, and the user is plainly choosing what to put here.
+    expect(blankHost.sessionId).toBe("stored-1");
+    expect(panels).toHaveLength(0);
+  });
+
   it("resumes the stored conversation only where asked to", async () => {
     writeStoredSession("stored-1");
     const registry = new ConversationRegistry(fakeContext() as never);

@@ -102,6 +102,9 @@ export interface SharedServices {
    * timelines into one history file.
    */
   conversationFor(sessionId: string): ConversationHost | undefined;
+  /** Open a stored conversation as an editor tab, leaving the caller's own
+   *  conversation running and on screen. */
+  openConversationInTab(sessionId: string): void;
 }
 
 /**
@@ -127,6 +130,15 @@ export interface AttachOptions {
    * contention this whole design exists to avoid.
    */
   resumeLastConversation?: boolean;
+  /**
+   * Open this stored conversation instead of an empty one.
+   *
+   * Passed through `attach` rather than called afterwards so the adoption lands
+   * before the boot chain replays the timeline. Posting into a webview that has
+   * only just been handed its HTML races its message listener — the artifact
+   * panels carry a `requestArtifactState` handshake for exactly that reason.
+   */
+  adoptSessionId?: string;
 }
 
 /**
@@ -286,9 +298,11 @@ export class ConversationHost {
     });
     this.post({ type: "hello", sessionId: this.session.id });
     void this.broadcastAuthState();
-    const booted = opts.resumeLastConversation
-      ? this.restoreLatestSession()
-      : Promise.resolve();
+    const booted = opts.adoptSessionId
+      ? this.adoptStored(opts.adoptSessionId)
+      : opts.resumeLastConversation
+        ? this.restoreLatestSession()
+        : Promise.resolve();
     void booted.then(() => {
       this.replayTimeline();
       void broadcastUsage(this.post);
@@ -303,6 +317,13 @@ export class ConversationHost {
    * as the current session. The user can still click "New Chat" to start a
    * fresh one explicitly.
    */
+  /** Adopt one named stored conversation. Best-effort like the restore below:
+   *  a missing file leaves the empty session this host was born with. */
+  private async adoptStored(id: string): Promise<void> {
+    const stored = await this.history.load(id);
+    if (stored) this.sessions.adopt(stored);
+  }
+
   private async restoreLatestSession(): Promise<void> {
     // Only restore if our in-memory session is still empty — otherwise we'd
     // clobber a user that's already typing. (Ordinarily the constructor's
@@ -893,14 +914,21 @@ export class ConversationHost {
       open.reveal();
       return;
     }
+    // A conversation with work in it is never replaced. Adopting in place ends
+    // the turn running here — which is the whole complaint this feature exists
+    // to answer — and even a finished chat would be pushed off screen by a
+    // click meant to open a different one. Only a blank conversation, the case
+    // where the user is plainly picking what to put in it, is reused.
+    if (this.activeTurn || this.session.timeline.length > 0) {
+      this.shared.openConversationInTab(id);
+      return;
+    }
     const stored = await this.history.load(id);
     if (!stored) {
       this.post({ type: "error", message: "Session not found." });
       return;
     }
     this.artifacts.closeAll();
-    this.abortTurn();
-    this.orchestrator = undefined;
     // Splices the stored session in keeping its original id, so the next save
     // overwrites the same file instead of forking the conversation into a
     // second history entry — and drops the previous session's checkpoints.

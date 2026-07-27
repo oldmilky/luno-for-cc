@@ -87,7 +87,8 @@ export class ConversationRegistry {
       decorations,
       models,
       auth,
-      conversationFor: (sessionId) => this.conversationFor(sessionId)
+      conversationFor: (sessionId) => this.conversationFor(sessionId),
+      openConversationInTab: (sessionId) => void this.openInTab(sessionId)
     };
 
     // Pointing at a different `claude` binary changes which models the aliases
@@ -137,7 +138,7 @@ export class ConversationRegistry {
    * and drop its scroll position and half-typed prompt — every time the user
    * looked at another file.
    */
-  openInTab(): ConversationHost {
+  openInTab(sessionId?: string): ConversationHost {
     const host = this.create();
     const panel = vscode.window.createWebviewPanel(
       TAB_VIEW_TYPE,
@@ -150,10 +151,10 @@ export class ConversationRegistry {
       "assets",
       "luno-activitybar.png"
     );
-    host.attach({
-      webview: panel.webview,
-      reveal: () => panel.reveal()
-    });
+    host.attach(
+      { webview: panel.webview, reveal: () => panel.reveal() },
+      { adoptSessionId: sessionId }
+    );
     // Closing the tab ends the conversation: its CLI process must die with it
     // rather than keep streaming into a webview nobody can see.
     panel.onDidDispose(() => this.close(host));
