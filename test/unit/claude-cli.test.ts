@@ -1061,16 +1061,47 @@ describe("claude-cli stateful processor (stream_event partials)", () => {
 // reads as the product losing the user's work rather than the window doing its
 // job. Shape verified against 2.1.219.
 describe("compaction and context size", () => {
+  // Verbatim from `/compact` over stream-json on 2.1.219. The wire format is
+  // snake_case; this was first written from the camelCase names inside the CLI
+  // bundle, which parsed to a marker with every number missing.
   it("turns compact_boundary into a delta the timeline can show", () => {
     const p = makeProcessor();
     const out = p({
       type: "system",
       subtype: "compact_boundary",
-      compactMetadata: { trigger: "auto", preTokens: 812_000, postTokens: 94_000 }
+      compact_metadata: {
+        trigger: "manual",
+        pre_tokens: 41_498,
+        post_tokens: 4_228,
+        cumulative_dropped_tokens: 37_270,
+        duration_ms: 35_077,
+        preserved_segment: { head_uuid: "d774cfb6", anchor_uuid: "45c9bdd3" }
+      }
     } as never);
 
     expect(out).toHaveLength(1);
     expect(out[0].type).toBe("compact");
+    expect(out[0].compaction).toEqual({
+      trigger: "manual",
+      preTokens: 41_498,
+      postTokens: 4_228
+    });
+  });
+
+  // The CLI ships a reader for a camelCase shape of the same event, so a build
+  // that emits it must not lose the numbers.
+  it("reads the camelCase spelling of the same event", () => {
+    const p = makeProcessor();
+    const out = p({
+      type: "system",
+      subtype: "compact_boundary",
+      compactMetadata: {
+        trigger: "auto",
+        preTokens: 812_000,
+        postTokens: 94_000
+      }
+    } as never);
+
     expect(out[0].compaction).toEqual({
       trigger: "auto",
       preTokens: 812_000,
@@ -1111,5 +1142,206 @@ describe("compaction and context size", () => {
   it("has no opinion on the window when the CLI reports none", () => {
     expect(contextWindowOf(undefined)).toBeUndefined();
     expect(contextWindowOf({ "some-model": {} })).toBeUndefined();
+  });
+});
+
+// Subagents run entirely inside the CLI — it dispatches, executes and reports.
+// What LUNO has to get right is reading the report, and not mistaking the
+// subagent's own traffic for the conversation.
+//
+// Every fixture below is verbatim from a real dispatch captured on 2.1.220:
+// one `Explore` agent asked to find a definition, driven over stream-json.
+describe("subagents", () => {
+  const PARENT = "toolu_01VHk67cxKJ2HnTpAptXs4Xk";
+  const TASK = "ad0748687a4aac2a8";
+
+  it("reads the dispatch off task_started", () => {
+    const out = makeProcessor()({
+      type: "system",
+      subtype: "task_started",
+      task_id: TASK,
+      tool_use_id: PARENT,
+      description: "Find makeProcessor definition",
+      subagent_type: "Explore",
+      task_type: "local_agent",
+      prompt: "Search the codebase under src for makeProcessor."
+    } as never);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe("task");
+    expect(out[0].task).toMatchObject({
+      phase: "started",
+      taskId: TASK,
+      toolUseId: PARENT,
+      subagentType: "Explore",
+      description: "Find makeProcessor definition",
+      prompt: "Search the codebase under src for makeProcessor."
+    });
+  });
+
+  // The CLI reuses `description` for two different things. On `task_progress`
+  // it holds what the agent is doing right now, not what it was asked for —
+  // merging the two in place leaves a finished card reading "Searching for…".
+  it("keeps live activity apart from the task label", () => {
+    const out = makeProcessor()({
+      type: "system",
+      subtype: "task_progress",
+      task_id: TASK,
+      tool_use_id: PARENT,
+      description: "Searching for the makeProcessor definition",
+      subagent_type: "Explore",
+      usage: { total_tokens: 29_060, tool_uses: 1, duration_ms: 4_956 },
+      last_tool_name: "Grep"
+    } as never);
+
+    expect(out[0].task).toMatchObject({
+      phase: "progress",
+      activity: "Searching for the makeProcessor definition",
+      lastToolName: "Grep",
+      toolUses: 1,
+      totalTokens: 29_060,
+      durationMs: 4_956
+    });
+    expect(out[0].task?.description).toBeUndefined();
+  });
+
+  // `task_updated` reports its status one level down and carries no
+  // `tool_use_id` at all. Reading only the top level leaves every subagent
+  // looking like it never finished.
+  it("finds the terminal status inside the patch", () => {
+    const out = makeProcessor()({
+      type: "system",
+      subtype: "task_updated",
+      task_id: TASK,
+      patch: { status: "completed", end_time: 1_785_174_671_402 }
+    } as never);
+
+    expect(out[0].task).toMatchObject({
+      phase: "updated",
+      taskId: TASK,
+      status: "completed"
+    });
+    expect(out[0].task?.toolUseId).toBeUndefined();
+  });
+
+  it("takes the answer and the totals off task_notification", () => {
+    const out = makeProcessor()({
+      type: "system",
+      subtype: "task_notification",
+      task_id: TASK,
+      tool_use_id: PARENT,
+      status: "completed",
+      output_file: "C:/tmp/tasks/ad0748687a4aac2a8.output",
+      summary: "src/providers/claude-cli.ts",
+      usage: { total_tokens: 30_189, tool_uses: 1, duration_ms: 13_400 }
+    } as never);
+
+    expect(out[0].task).toMatchObject({
+      phase: "notification",
+      status: "completed",
+      summary: "src/providers/claude-cli.ts",
+      outputFile: "C:/tmp/tasks/ad0748687a4aac2a8.output",
+      toolUses: 1,
+      durationMs: 13_400
+    });
+  });
+
+  // Without a task id there is nothing to correlate the update with, so the
+  // card it belongs to could never be closed.
+  it("drops a task event with no id rather than opening a card it cannot close", () => {
+    const out = makeProcessor()({
+      type: "system",
+      subtype: "task_started",
+      subagent_type: "Explore"
+    } as never);
+
+    expect(out).toEqual([]);
+  });
+
+  // The event this whole guard exists for. The subagent's `assistant` message
+  // carries a real `tool_use` block; unguarded it becomes a `tool_use_start`
+  // and the nested Grep renders on the main timeline as if the top-level model
+  // had run it.
+  it("does not let a subagent's tool call reach the main timeline", () => {
+    const out = makeProcessor()({
+      type: "assistant",
+      parent_tool_use_id: PARENT,
+      message: {
+        model: "claude-sonnet-4-5",
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_0133NLeN",
+            name: "Grep",
+            input: { pattern: "makeProcessor" }
+          }
+        ]
+      }
+    } as never);
+
+    expect(out).toEqual([]);
+  });
+
+  it("does not feed a subagent's tool result back as the turn's own", () => {
+    const out = makeProcessor()({
+      type: "user",
+      parent_tool_use_id: PARENT,
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_0133NLeN",
+            content: "Found 1 file\nsrc/providers/claude-cli.ts"
+          }
+        ]
+      }
+    } as never);
+
+    expect(out).toEqual([]);
+  });
+
+  it("does not print a subagent's text as the assistant speaking", () => {
+    const out = makeProcessor()({
+      type: "assistant",
+      parent_tool_use_id: PARENT,
+      message: { content: [{ type: "text", text: "I looked in src/." }] }
+    } as never);
+
+    expect(out).toEqual([]);
+  });
+
+  // The main agent's own traffic carries the field too, set to null. Guarding
+  // on presence rather than truthiness would silence the whole conversation.
+  it("leaves the main agent's own traffic alone", () => {
+    const out = makeProcessor()({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "text", text: "Found it." }] }
+    } as never);
+
+    expect(out).toEqual([{ type: "text", text: "Found it." }]);
+  });
+
+  // The dispatching tool call is the main agent's, so it must survive the
+  // guard — it is what the card is anchored to.
+  it("keeps the dispatch itself, which is the main agent's own tool call", () => {
+    const out = makeProcessor()({
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: PARENT,
+            name: "Agent",
+            input: { subagent_type: "Explore", description: "Find it" }
+          }
+        ]
+      }
+    } as never);
+
+    expect(out[0]).toEqual({
+      type: "tool_use_start",
+      tool: { id: PARENT, name: "Agent" }
+    });
   });
 });

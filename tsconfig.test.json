@@ -17,10 +17,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": [
-    "test/**/*",
-    "src/types/**/*.d.ts",
-    "webview/src/vite-env.d.ts"
-  ],
+  "include": ["test/**/*", "src/types/**/*.d.ts", "webview/src/vite-env.d.ts"],
   "exclude": ["node_modules", "dist"]
 }

@@ -72,49 +72,39 @@ Then group the events by `type`/`subtype` before reading any of them in full.
 
 ---
 
-## 1. Subagents — visibility
+## 1. Subagents — visibility — **DONE 2026-07-27**
 
-**Size: medium–large. The highest-value item left.**
+Shipped as a card per agent: type, task, live status, step count, duration, and
+the answer behind a disclosure. Nested tool calls are deliberately not routed —
+`task_progress` reports `tool_uses` and `last_tool_name`, which is enough to
+tell a working agent from a wedged one without a second timeline inside the
+first.
 
-The CLI runs `.claude/agents/` fine. What is missing is that LUNO shows none of
-it: `webview/src/features/chat/tool-buckets.ts` renders a static "Dispatched N
-agents" and nothing else — no name, no status, no result. The processor in
-`src/providers/claude-cli.ts` handles exactly one `system` subtype (`init`);
-every `task_*` event falls through unread. `parent_tool_use_id` appears nowhere
-in the codebase.
+Where it lives: `taskUpdate` + the parent guard in `src/providers/claude-cli.ts`,
+`SubagentTask` in `src/core/types.ts`, `onSubagentUpdate` / `sweepLiveTasks` in
+`src/ui/conversation-host.ts`, `subagent-state.ts` + `SubagentCard.tsx` in the
+webview.
 
-The stream, captured from a real run:
+Two things this document had wrong, both found by probing 2.1.220 rather than
+reading the earlier capture:
 
-```
-assistant tool_use:Agent   {subagent_type, description, prompt, run_in_background}
-system/task_started        {task_id, tool_use_id, description, subagent_type,
-                            prompt, task_type:"local_agent"}
-user  parent_tool_use_id=toolu_…    ← the subagent's own traffic
-system/task_updated        {task_id, patch:{status:"completed", end_time}}
-system/task_notification   {task_id, status, summary, output_file}
-user  tool_result                    ← the result handed back to the main agent
-```
+- **`system/task_progress` exists** and was not listed here. It is the useful
+  one: `{usage:{total_tokens, tool_uses, duration_ms}, last_tool_name}` plus a
+  `description` that holds what the agent is doing _right now_ — the same field
+  name `task_started` uses for the fixed task label. Merging the two in place
+  leaves a finished card reading "Searching for…", so they are kept apart as
+  `description` and `activity`.
+- **The `parent_tool_use_id` gap was live, not theoretical.** This file said it
+  "has not bitten yet". In the probe the subagent's `assistant` event carried a
+  real `tool_use` block, so the nested Grep was being emitted as a
+  `tool_use_start` and rendered on the main timeline as the top-level model's
+  own tool call. `classifyTool` also matched only `task`, never the `Agent` the
+  CLI actually sends, so a dispatch showed up as "Ran 1 tool".
 
-Everything a card needs is there: which agent, what it was asked, live status,
-and the summary when it finishes.
-
-**Start at** `makeProcessor` in `src/providers/claude-cli.ts` — add the three
-`task_*` subtypes beside the `compact_boundary` branch, which is the closest
-worked example. Then a timeline event kind (`src/core/types.ts`), a host branch
-(`conversation-host.ts`, near the `d.type === "compact"` handler), and a card in
-the webview.
-
-**Do not skip this:** anything carrying `parent_tool_use_id` belongs to a
-subagent and must never render as the main agent speaking. There is no such
-branch today. It has not bitten yet because in the captured run the subagent's
-own text arrived as a `user` event with no `tool_result` block, which the
-processor ignores — but an `assistant` event with a parent set would be printed
-as if the main model said it. Guard it explicitly rather than relying on that.
-
-**Decision needed before starting:** status-only (a card per agent) or with
-disclosure (the subagent's own tool calls nested inside a collapsible). The
-second is much larger — it means routing every nested event by
-`parent_tool_use_id` and a nested renderer.
+`task_updated` carries neither `tool_use_id` nor a top-level status — its status
+sits in `patch` — which is why the host keeps a task-id map and closes the card
+on `task_notification`, the only phase with the summary. Anything still open
+when the turn ends is swept: the CLI process does not outlive the turn.
 
 ## 2. Permissions cannot be granted permanently from the UI
 
@@ -195,11 +185,17 @@ default no.
 
 ## Deliberately not chasing
 
-Recorded so nobody re-derives the question: Remote Control, the Web tab with
-cloud sessions, `/plugins` with its three install scopes, `@browser` (needs the
-Chrome extension), bundling the CLI inside the VSIX, Open VSX. Each is either
-tied to Anthropic infrastructure or contradicts the decision that the binary is
-found rather than shipped.
+Recorded so nobody re-derives the question: the Web tab with cloud sessions,
+`/plugins` with its three install scopes, `@browser` (needs the Chrome
+extension), bundling the CLI inside the VSIX, Open VSX. Each is either tied to
+Anthropic infrastructure or contradicts the decision that the binary is found
+rather than shipped.
+
+**Remote Control was on this list and is not any more** — decided 2026-07-27.
+It stays tied to Anthropic infrastructure, and that is accepted rather than
+worked around: it needs a claude.ai OAuth login, refuses to run under an API
+key, and keeps the session transcript on Anthropic servers. See
+`.claude/plans/remote-control.md`.
 
 Terminal mode (`useTerminal`) and Jupyter (`mcp__ide__executeCode`) are also
 absent. Both are plausible, neither has been asked for.

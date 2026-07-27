@@ -15,7 +15,8 @@ import {
   ModelInfo,
   SkillInfo,
   ChatStatus,
-  PermissionRequestView
+  PermissionRequestView,
+  SubagentTaskView
 } from "../../lib/rpc";
 import { ConnectorsModal } from "../mcp";
 import {
@@ -42,6 +43,12 @@ import { ThinkingIndicator } from "./ThinkingIndicator";
 import { ConventionsBanner } from "./ConventionsBanner";
 import { SkillSuggestion } from "./SkillSuggestion";
 import { ToolGroupCard, ToolGroupItem } from "./ToolGroupCard";
+import { SubagentCard } from "./SubagentCard";
+import {
+  AGENT_TOOL_NAMES,
+  foldSubagents,
+  type FoldedSubagents
+} from "./subagent-state";
 import { TurnHeader } from "./TurnHeader";
 import { ThoughtBlock } from "./ThoughtBlock";
 import { EditedFilesCard } from "./EditedFilesCard";
@@ -67,6 +74,9 @@ export interface ChatScreenProps {
   /** The sixth effort choice, carried beside the level the CLI knows. */
   ultracode: boolean;
   events: TimelineEvent[];
+  /** What each *running* subagent is doing, keyed by CLI task id. Live only —
+   *  the dispatch and the result come off `events` and outlive a reload. */
+  taskProgress: Record<string, SubagentTaskView>;
   streaming: string;
   busy: boolean;
   input: string;
@@ -121,6 +131,7 @@ export function ChatScreen({
   thinking,
   ultracode,
   events,
+  taskProgress,
   streaming,
   busy,
   input,
@@ -254,9 +265,14 @@ export function ChatScreen({
   // until the turn ends. Trails at the bottom of the log so it always reads as
   // "more is coming".
   const showThinking = busy;
-  const planContext = useMemo(
-    () => ({ views: grouped.views, ordered: grouped.ordered }),
-    [grouped]
+  const planContext = useMemo<RenderCtx>(
+    () => ({
+      views: grouped.views,
+      ordered: grouped.ordered,
+      subagents: grouped.subagents,
+      taskProgress
+    }),
+    [grouped, taskProgress]
   );
 
   // Continue-from-here: seed the composer with a follow-up prompt anchored to
@@ -620,7 +636,8 @@ type TurnBlock =
   | { kind: "narrative"; text: string }
   | { kind: "toolGroup"; bucket: ToolBucket; items: ToolGroupItem[] }
   | { kind: "plan"; revisionId: string }
-  | { kind: "compact"; text: string };
+  | { kind: "compact"; text: string }
+  | { kind: "subagent"; taskId: string };
 
 /**
  * Tool names whose tool_use blocks are rendered via PlanCard rather than
@@ -675,16 +692,29 @@ interface GroupingResult {
   groups: Group[];
   views: Map<string, PlanRevisionView>;
   ordered: PlanRevisionView[];
+  subagents: FoldedSubagents;
+}
+
+/** Everything the block renderers need that is not the block itself. */
+interface RenderCtx {
+  views: Map<string, PlanRevisionView>;
+  ordered: PlanRevisionView[];
+  subagents: FoldedSubagents;
+  taskProgress: Record<string, SubagentTaskView>;
 }
 
 function groupEvents(events: TimelineEvent[]): GroupingResult {
   const ordered = foldPlanState(events);
   const views = new Map<string, PlanRevisionView>();
   for (const v of ordered) views.set(v.meta.revisionId, v);
+  const subagents = foldSubagents(events);
 
   const groups: Group[] = [];
   const suppressedToolUseIds = new Set<string>();
   const toolItemsById = new Map<string, ToolGroupItem>();
+  /** Cards already placed, so a dispatch is not rendered twice when both the
+   *  `Agent` tool_call and the `subagent` event are present. */
+  const placedTasks = new Set<string>();
 
   let currentTurn: Extract<Group, { kind: "turn" }> | null = null;
   let firstToolTsInTurn: number | undefined;
@@ -810,6 +840,32 @@ function groupEvents(events: TimelineEvent[]): GroupingResult {
         continue;
       }
 
+      // A dispatch renders as its own card, in the slot the tool call would
+      // have taken. The generic chip is dropped rather than shown alongside:
+      // it says "Ran 1 tool" and nothing about which agent or what came back.
+      //
+      // Matched on `meta.name` rather than the title `name` above: the title is
+      // a rendered string that a caller has to have prefixed "Tool: " for the
+      // parse to recover anything, and a card silently reverting to a chip is
+      // the kind of miss nothing else would catch.
+      const meta = e.meta as { id?: string; name?: string } | undefined;
+      if (AGENT_TOOL_NAMES.has(meta?.name ?? name)) {
+        const tid = meta?.id;
+        const taskId = tid ? subagents.taskIdByToolUse.get(tid) : undefined;
+        if (taskId) {
+          if (tid) suppressedToolUseIds.add(tid);
+          if (firstToolTsInTurn === undefined) firstToolTsInTurn = e.ts;
+          if (!placedTasks.has(taskId)) {
+            placedTasks.add(taskId);
+            turn.blocks.push({ kind: "subagent", taskId });
+          }
+          continue;
+        }
+        // No task events for it — an older CLI, or a dispatch that died before
+        // reporting. Fall through and render the plain tool chip: an unhelpful
+        // card beats a silently missing one.
+      }
+
       if (firstToolTsInTurn === undefined) firstToolTsInTurn = e.ts;
 
       const bucket = classifyTool(name, e.body);
@@ -849,6 +905,20 @@ function groupEvents(events: TimelineEvent[]): GroupingResult {
       continue;
     }
 
+    // Normally the card is already placed by the `Agent` tool call, which
+    // lands first. This catches a timeline that has the task without the
+    // dispatch — the tool call intercepted as a plan write, or a stored
+    // session from before the two were tied together.
+    if (e.kind === "subagent") {
+      const taskId = (e.meta as { taskId?: string } | undefined)?.taskId;
+      if (taskId && !placedTasks.has(taskId)) {
+        placedTasks.add(taskId);
+        if (firstToolTsInTurn === undefined) firstToolTsInTurn = e.ts;
+        turn.blocks.push({ kind: "subagent", taskId });
+      }
+      continue;
+    }
+
     if (e.kind === "plan_revision") {
       const meta = e.meta as { revisionId?: string } | undefined;
       if (meta?.revisionId) {
@@ -860,14 +930,14 @@ function groupEvents(events: TimelineEvent[]): GroupingResult {
   }
   finalizeTurn();
 
-  return { groups, views, ordered };
+  return { groups, views, ordered, subagents };
 }
 
 function renderGroup(
   g: Group,
   idx: number,
   all: Group[],
-  ctx: { views: Map<string, PlanRevisionView>; ordered: PlanRevisionView[] },
+  ctx: RenderCtx,
   onRewindRequest: (turnId: string, messagesAfter: number) => void,
   onEditRequest: (turnId: string) => void,
   isTurnCollapsed: (
@@ -954,7 +1024,7 @@ function renderGroup(
 function renderTurnBlock(
   b: TurnBlock,
   i: number,
-  ctx: { views: Map<string, PlanRevisionView>; ordered: PlanRevisionView[] },
+  ctx: RenderCtx,
   onContinue?: (text: string) => void
 ) {
   if (b.kind === "narrative") {
@@ -980,6 +1050,21 @@ function renderTurnBlock(
         <Icon name="layers" size={11} />
         <span>{b.text}</span>
       </div>
+    );
+  }
+  if (b.kind === "subagent") {
+    const stored = ctx.subagents.byTaskId.get(b.taskId);
+    const live = ctx.taskProgress[b.taskId];
+    if (!stored && !live) return null;
+    // Live progress last: while the agent runs it is the fresher half, and it
+    // stops arriving the moment the host writes the closing event.
+    const task: SubagentTaskView = { ...stored, ...live, taskId: b.taskId };
+    return (
+      <SubagentCard
+        key={`sa-${b.taskId}`}
+        task={task}
+        fallbackMs={ctx.subagents.elapsed.get(b.taskId)}
+      />
     );
   }
   if (b.kind === "toolGroup") {

@@ -11,9 +11,11 @@ import { Session } from "../core/session.js";
 import { Orchestrator } from "../core/orchestrator.js";
 import {
   CompactionInfo,
+  isTerminalTaskStatus,
   PermissionMode,
   PermissionBehavior,
-  StreamDelta
+  StreamDelta,
+  SubagentUpdate
 } from "../core/types.js";
 import type { ChatProvider } from "../providers/base.js";
 import { createProvider } from "../providers/factory.js";
@@ -262,6 +264,17 @@ export class ConversationHost {
    *  forever. Invisible, that reads as a chat that simply stopped. */
   private awaitingApproval = false;
   private finishedWhileHidden = false;
+  /**
+   * Subagents dispatched this turn that have not reported a terminal status,
+   * keyed by CLI task id.
+   *
+   * Kept because `task_updated` identifies its task by id alone — it carries no
+   * `tool_use_id` — so the card it belongs to is only findable through what
+   * `task_started` said. Cleared when a task ends and swept at turn end: the
+   * CLI process dies with the turn, so anything still open at that point is
+   * dead rather than slow, and a card left spinning would claim otherwise.
+   */
+  private readonly liveTasks = new Map<string, SubagentUpdate>();
   /** Enough of the live turn to rebuild it on a surface that was showing
    *  another conversation while it happened. */
   private busy = false;
@@ -1897,6 +1910,9 @@ export class ConversationHost {
           });
           this.scheduleSave();
         }
+        if (d.type === "task" && d.task) {
+          this.onSubagentUpdate(d.task);
+        }
         // The CLI's own quota verdict — which window is binding and when it
         // resets. It anchors the 5-hour aggregation, so record it before the
         // post-turn refresh reads it back.
@@ -1914,6 +1930,7 @@ export class ConversationHost {
       } finally {
         this.activeProvider = undefined;
         this.awaitingApproval = false;
+        this.sweepLiveTasks();
         // A turn that landed while the user was looking elsewhere is the other
         // thing worth a glyph: the answer is sitting there unread.
         if (!this.visible) this.finishedWhileHidden = true;
@@ -1934,6 +1951,81 @@ export class ConversationHost {
     } finally {
       if (this.activeTurn === turn) this.activeTurn = undefined;
     }
+  }
+
+  /**
+   * One `task_*` event from the CLI, routed by what it actually tells us.
+   *
+   * Two of the four phases go on the timeline and two do not, and the split is
+   * about what still means something tomorrow. That an agent was dispatched and
+   * what it answered explain the turn when the chat is reopened; that it was
+   * four seconds into a Grep explains nothing once it has finished. Persisting
+   * progress would also grow the timeline by one event per nested tool call —
+   * for a fleet of agents that is hundreds of rows nobody will ever read.
+   *
+   * `notification` closes the card rather than `updated`, even though `updated`
+   * reports the terminal status first: it is the only phase carrying the
+   * summary, and the pair arrives back to back.
+   */
+  private onSubagentUpdate(update: SubagentUpdate): void {
+    const merged: SubagentUpdate = {
+      ...this.liveTasks.get(update.taskId),
+      ...stripUndefined(update),
+      // Restated because `stripUndefined` widens both to optional; they are the
+      // two fields the incoming event is always authoritative for.
+      taskId: update.taskId,
+      phase: update.phase
+    };
+
+    if (update.phase === "notification") {
+      this.liveTasks.delete(update.taskId);
+      this.emitSubagentEnd(merged);
+      return;
+    }
+
+    this.liveTasks.set(update.taskId, merged);
+
+    if (update.phase === "started") {
+      this.session.emit({
+        kind: "subagent",
+        title: subagentTitle(merged),
+        body: merged.description ?? "",
+        meta: { ...merged, phase: "start", status: "running" }
+      });
+      this.scheduleSave();
+      return;
+    }
+    this.post({ type: "subagentProgress", task: merged });
+  }
+
+  private emitSubagentEnd(task: SubagentUpdate): void {
+    this.session.emit({
+      kind: "subagent",
+      title: subagentTitle(task),
+      body: task.summary ?? task.description ?? "",
+      meta: {
+        ...task,
+        phase: "end",
+        status: isTerminalTaskStatus(task.status) ? task.status : "interrupted"
+      }
+    });
+    this.scheduleSave();
+  }
+
+  /**
+   * Close every subagent still open when the turn ends.
+   *
+   * The CLI process does not outlive the turn, so a task that never reported a
+   * terminal status did not keep running — it died with the turn, whether that
+   * was Stop, a crash, or the 10-minute hard timeout. Without this the card
+   * spins forever, and reopening the chat tomorrow replays a subagent that
+   * appears to still be working.
+   */
+  private sweepLiveTasks(): void {
+    if (this.liveTasks.size === 0) return;
+    const open = [...this.liveTasks.values()];
+    this.liveTasks.clear();
+    for (const task of open) this.emitSubagentEnd(task);
   }
 
   /**
@@ -2007,6 +2099,28 @@ function compactionSummary(info: CompactionInfo | undefined): string {
     return `${how} ${fmtTokens(preTokens)} → ${fmtTokens(postTokens)} tokens.`;
   }
   return how;
+}
+
+/**
+ * What the card is called. The agent type is the useful half — "Explore",
+ * "code-reviewer" — and it is what the user recognises from `.claude/agents/`.
+ */
+function subagentTitle(task: SubagentUpdate): string {
+  return task.subagentType ? `Agent: ${task.subagentType}` : "Agent";
+}
+
+/**
+ * Drop keys whose value is `undefined` so a later phase cannot erase what an
+ * earlier one established.
+ *
+ * Spreading the raw update would: `task_updated` carries neither `toolUseId`
+ * nor `description`, and object spread copies an explicit `undefined` over a
+ * real value. The card would lose the agent it belongs to halfway through.
+ */
+function stripUndefined<T extends object>(value: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, v]) => v !== undefined)
+  ) as Partial<T>;
 }
 
 function fmtTokens(n: number): string {

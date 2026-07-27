@@ -76,9 +76,9 @@ export function availableModels(): ModelInfo[] {
       group: "alias"
     },
     {
-      value: "opus",
-      label: "Opus",
-      note: "Deepest reasoning, hardest problems",
+      value: "fable",
+      label: "Fable",
+      note: "The most powerful, for the hardest problems",
       supportsTools: true,
       group: "alias"
     },
@@ -86,13 +86,6 @@ export function availableModels(): ModelInfo[] {
       value: "sonnet",
       label: "Sonnet",
       note: "Best for everyday tasks",
-      supportsTools: true,
-      group: "alias"
-    },
-    {
-      value: "haiku",
-      label: "Haiku",
-      note: "Fastest for quick answers",
       supportsTools: true,
       group: "alias"
     }
@@ -119,6 +112,34 @@ export function legacyModels(): ModelInfo[] {
 }
 
 const LEGACY: ReadonlyArray<ModelInfo> = [
+  // Two aliases behind this door, and the only rows here that do not pin a
+  // version — both still track the latest of their tier. They sit here rather
+  // than on the front page because a short page is what makes it readable in a
+  // sidebar, and neither is the one to reach for first.
+  //
+  // `opus` is NOT the same model as `default`, however alike the two rows read:
+  // measured against 2.1.219, `default` serves `claude-opus-5[1m]` and `opus`
+  // serves `claude-opus-5`. The difference is the million-token window, so this
+  // row is how you ask for the one without it.
+  {
+    value: "opus",
+    label: "Opus",
+    note: "Opus 5 without the 1M window",
+    plus: "The same model the default serves, on the standard context window",
+    minus:
+      "Long sessions fold sooner — there is a million fewer tokens of room",
+    supportsTools: true,
+    group: "alias"
+  },
+  {
+    value: "haiku",
+    label: "Haiku",
+    note: "Fastest for quick answers — tracks the latest Haiku, not a pin",
+    plus: "Answers in a fraction of the time and spends far less of the quota",
+    minus: "Loses the thread on long multi-step work with many tool calls",
+    supportsTools: true,
+    group: "alias"
+  },
   {
     value: "claude-opus-4-8",
     label: "Opus 4.8",

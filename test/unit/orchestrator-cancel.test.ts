@@ -33,7 +33,7 @@ function orchestratorFor(
   return new Orchestrator(session, {
     provider,
     model: "opus",
-    maxTokens: 1000,
+    maxTokens: 1000
   });
 }
 

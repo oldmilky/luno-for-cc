@@ -1,28 +1,25 @@
 // ─────────────────────────────────────────────────────────────
 // Model picker. Mirrors Claude Code's own model menu — a flat
 // "Select a model" list where each row shows the concrete model
-// its alias resolves to (e.g. Default → "Opus 4.7 · 1M context"),
-// followed by an Effort segmented control and a Thinking toggle.
+// its alias resolves to (e.g. Default → "Opus 5 · 1M context").
+//
+// Effort and thinking used to live at the foot of this panel and
+// now have their own chip beside it: the list is the answer to
+// "which model", and a control stack under it left no room to
+// read that list in a sidebar.
 //
 // The catalog comes from the extension via the `models` RPC; the
 // resolved versions arrive via `activeModel` messages (the host
-// probes each alias against the CLI). Effort + thinking are
-// persisted in luno config and applied to the spawned `claude`
-// CLI (`--effort` / `--settings alwaysThinkingEnabled`).
+// probes each alias against the CLI).
 // ─────────────────────────────────────────────────────────────
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { POPOVER_ABOVE, SWAP } from "../../design/motion";
 import { AnimatePresence, motion } from "framer-motion";
 import { Icon } from "../../design/icons";
 import { send, onMessage } from "../../lib/rpc";
 import type { ModelInfo, EffortLevel } from "../../lib/rpc";
-import {
-  EFFORT_LEVELS,
-  ULTRACODE_OPTION,
-  findEffort,
-  clampEffort
-} from "./constants";
+import { ULTRACODE_OPTION, clampEffort } from "./constants";
 import { Tooltip } from "../../design/primitives";
 import d from "../../design/primitives/Dropdown.module.scss";
 import s from "./ModelPicker.module.scss";
@@ -35,13 +32,12 @@ export interface ModelPickerProps {
    *  static description until their version arrives. */
   resolvedModels?: Record<string, string>;
   onSelect: (id: string) => void;
+  /** The posture the effort picker owns. Held here only to correct it: a model
+   *  that never had the pinned level — or has no X-high for ultracode — would
+   *  otherwise fail on the first turn with an error the user cannot read. */
   effort: EffortLevel;
-  /** The sixth choice on the same control: xhigh plus workflow orchestration.
-   *  Handed back together with the level because they are one decision. */
   ultracode: boolean;
   onEffort: (level: EffortLevel, ultracode: boolean) => void;
-  thinking: boolean;
-  onThinking: (on: boolean) => void;
 }
 
 export function ModelPicker({
@@ -51,9 +47,7 @@ export function ModelPicker({
   onSelect,
   effort,
   ultracode,
-  onEffort,
-  thinking,
-  onThinking
+  onEffort
 }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<"models" | "legacy">("models");
@@ -111,18 +105,6 @@ export function ModelPicker({
       group: "alias"
     } satisfies ModelInfo);
 
-  const activeEffort = useMemo(() => findEffort(effort), [effort]);
-
-  // What the selection accepts from `--effort`. An alias carries no ladder
-  // because it always resolves to something current; an unknown id is treated
-  // the same way rather than guessing a restriction onto it.
-  const ladder = current.effort ?? EFFORT_LEVELS.map((e) => e.value);
-  const effortRejected = ladder.length === 0;
-  // The official client hides ultracode outright on a model without xhigh; we
-  // show it disabled instead, so the row does not appear and vanish as the
-  // model changes under the same open panel.
-  const ultracodeAllowed = ladder.includes(ULTRACODE_OPTION.effort);
-
   // Concrete version for the active selection (drives the trigger + header).
   const currentResolved = resolvedModels[value]
     ? prettyModel(resolvedModels[value])
@@ -134,8 +116,16 @@ export function ModelPicker({
     // keeps the correction attached to the click that caused it.
     if (m.effort && m.effort.length > 0) {
       const next = clampEffort(effort, m.effort);
-      // Ultracode *is* xhigh, so a model without xhigh cannot stay in it.
-      if (next !== effort) onEffort(next, false);
+      // Ultracode *is* xhigh, so a model without xhigh cannot stay in it — and
+      // the level it would fall back to is not xhigh either.
+      const keepsUltracode =
+        ultracode && m.effort.includes(ULTRACODE_OPTION.effort);
+      if (next !== effort || (ultracode && !keepsUltracode)) {
+        onEffort(
+          keepsUltracode ? ULTRACODE_OPTION.effort : next,
+          keepsUltracode
+        );
+      }
     }
     setOpen(false);
   };
@@ -150,7 +140,7 @@ export function ModelPicker({
       <Tooltip
         label={`Model: ${current.label}${
           currentResolved ? ` — ${currentResolved}` : ""
-        } · Effort: ${activeEffort.label} · Thinking: ${thinking ? "on" : "off"}`}
+        }`}
       >
         <button
           type="button"
@@ -164,7 +154,6 @@ export function ModelPicker({
           aria-label="Model"
         >
           <span className={s.triggerName}>{current.label}</span>
-          {thinking && <Icon name="sparkle" size={9} />}
           <Icon name="chevronD" size={9} />
         </button>
       </Tooltip>
@@ -218,10 +207,9 @@ export function ModelPicker({
                         onClick={openLegacy}
                       >
                         <span className={s.legacyEntryBody}>
-                          <span className={s.rowLabel}>Older models</span>
+                          <span className={s.rowLabel}>Other models</span>
                           <span className={s.rowNote}>
-                            Pin a specific version instead of tracking the
-                            latest
+                            Haiku, Opus without 1M, and pinned older versions
                           </span>
                         </span>
                         <Icon name="chevronR" size={13} />
@@ -238,11 +226,12 @@ export function ModelPicker({
                       onClick={() => setPanel("models")}
                     >
                       <Icon name="chevronL" size={12} />
-                      <span className={s.title}>Older models</span>
+                      <span className={s.title}>Other models</span>
                     </button>
                     <span className={s.sub}>
-                      A pinned version stays put while the aliases move on. Each
-                      is checked against your own CLI.
+                      Everything not on the front page. A pinned version stays
+                      put while the aliases move on; each is checked against
+                      your CLI.
                     </span>
                   </div>
 
@@ -265,124 +254,6 @@ export function ModelPicker({
                 </motion.div>
               )}
             </AnimatePresence>
-
-            <div className={s.controls}>
-              <div className={s.control}>
-                <div className={s.controlHead}>
-                  <span className={s.controlLabel}>Effort</span>
-                  <span className={s.controlValue}>
-                    {effortRejected
-                      ? "Not supported"
-                      : ultracode
-                        ? ULTRACODE_OPTION.label
-                        : activeEffort.label}
-                  </span>
-                </div>
-                <div
-                  className={s.seg}
-                  role="radiogroup"
-                  aria-label="Reasoning effort"
-                >
-                  {EFFORT_LEVELS.map((opt, i) => {
-                    // Under ultracode the ramp still fills to the level the
-                    // turn runs at, but nothing on it is *chosen* — the row
-                    // below is. Two active cells would be two answers to one
-                    // question.
-                    const activeIdx = EFFORT_LEVELS.findIndex(
-                      (e) =>
-                        e.value ===
-                        (ultracode
-                          ? ULTRACODE_OPTION.effort
-                          : activeEffort.value)
-                    );
-                    // We push `--effort` on every spawn, so a level this model
-                    // never had is a CLI error rather than a quieter answer.
-                    const allowed = ladder.includes(opt.value);
-                    return (
-                      // The cell shows `opt.short` — a letter or two — so the
-                      // full level name is genuinely new information, not an echo.
-                      <Tooltip
-                        key={opt.value}
-                        label={
-                          allowed
-                            ? opt.label
-                            : `${current.label} does not accept ${opt.label}`
-                        }
-                      >
-                        <button
-                          type="button"
-                          role="radio"
-                          disabled={!allowed}
-                          aria-checked={
-                            !ultracode && opt.value === activeEffort.value
-                          }
-                          aria-label={opt.label}
-                          className={`${s.cell}${
-                            allowed && i <= activeIdx ? ` ${s.filled}` : ""
-                          }${
-                            allowed &&
-                            !ultracode &&
-                            opt.value === activeEffort.value
-                              ? ` ${s.active}`
-                              : ""
-                          }${allowed ? "" : ` ${s.cellOff}`}`}
-                          onClick={() => onEffort(opt.value, false)}
-                        >
-                          <span className={s.cellLabel}>{opt.short}</span>
-                        </button>
-                      </Tooltip>
-                    );
-                  })}
-                </div>
-                {/* Its own row, and part of the same radiogroup: one more way
-                    to answer "how hard should this turn work", but not a rung
-                    on the ramp — it runs at X-high, below Max. */}
-                <Tooltip
-                  label={
-                    ultracodeAllowed
-                      ? "Runs every substantive task through a multi-agent workflow. Thorough, and it spends the quota accordingly."
-                      : `${current.label} does not accept ${findEffort(ULTRACODE_OPTION.effort).label}`
-                  }
-                >
-                  <button
-                    type="button"
-                    role="radio"
-                    disabled={!ultracodeAllowed}
-                    aria-checked={ultracode}
-                    aria-label={ULTRACODE_OPTION.label}
-                    className={`${s.ultra}${ultracode ? ` ${s.ultraOn}` : ""}${
-                      ultracodeAllowed ? "" : ` ${s.cellOff}`
-                    }`}
-                    onClick={() => onEffort(ULTRACODE_OPTION.effort, true)}
-                  >
-                    <Icon name="bolt" size={11} />
-                    <span className={s.ultraLabel}>
-                      {ULTRACODE_OPTION.label}
-                    </span>
-                    <span className={s.ultraNote}>{ULTRACODE_OPTION.note}</span>
-                  </button>
-                </Tooltip>
-              </div>
-
-              <div className={`${s.control} ${s.controlRow}`}>
-                <div className={`${s.controlHead} ${s.controlHeadInline}`}>
-                  <span className={s.controlLabel}>Thinking</span>
-                  <span className={s.controlNote}>
-                    Reason step-by-step before answering
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={thinking}
-                  aria-label="Extended thinking"
-                  className={`${s.switch}${thinking ? ` ${s.on}` : ""}`}
-                  onClick={() => onThinking(!thinking)}
-                >
-                  <span className={s.knob} />
-                </button>
-              </div>
-            </div>
           </motion.div>
         )}
       </AnimatePresence>

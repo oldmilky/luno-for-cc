@@ -102,6 +102,90 @@ export interface CompactionInfo {
 }
 
 /**
+ * One subagent the main agent dispatched through its `Agent` tool.
+ *
+ * The CLI owns the whole lifecycle — it dispatches, runs and reports; nothing
+ * here executes anything. What it does is carry the four `system`/`task_*`
+ * events into one shape, because each of them says a different part of the
+ * story and none of them says all of it.
+ *
+ * Field availability by phase, observed on 2.1.220 and not guessable:
+ * `started` has the identity and the prompt; `progress` replaces `description`
+ * with what the subagent is doing *right now* and adds `lastToolName`;
+ * `updated` carries nothing but `taskId` and the patch — no `toolUseId`, which
+ * is why the host keeps the id map; `notification` is the only one with
+ * `summary`.
+ */
+export interface SubagentTask {
+  /** CLI task id — the only field present on every phase. */
+  taskId: string;
+  /** The main agent's `Agent` tool_use block this task belongs to. Absent on
+   *  `updated`; the host fills it in from `started`. */
+  toolUseId?: string;
+  /** Which agent ran: `Explore`, `general-purpose`, a name from
+   *  `.claude/agents/`. */
+  subagentType?: string;
+  /** The label the main agent gave the task. Set once, on `started`. */
+  description?: string;
+  /**
+   * What the subagent is doing at this moment — "Searching for makeProcessor".
+   *
+   * Split out because the CLI sends it in `description`, the same field it used
+   * for the task label. Merging the two in place would leave a finished card
+   * reading whatever the agent happened to be doing a second before it stopped,
+   * instead of what it was asked for.
+   */
+  activity?: string;
+  /** The full prompt handed to the subagent. `started` only. */
+  prompt?: string;
+  /**
+   * Kept as a free string rather than a union: the CLI adds statuses between
+   * releases, and an unknown one must render as itself instead of collapsing
+   * into "done". Terminal values are decided by {@link isTerminalTaskStatus}.
+   */
+  status?: string;
+  /** Wall-clock the CLI measured, not a difference of our own timestamps. */
+  durationMs?: number;
+  /** How many tools the subagent has used so far — the only cheap signal that
+   *  a long-running agent is alive without routing its nested traffic. */
+  toolUses?: number;
+  totalTokens?: number;
+  /** Name of the tool the subagent most recently ran. `progress` only. */
+  lastToolName?: string;
+  /** The subagent's answer, handed back to the main agent. `notification`
+   *  only. */
+  summary?: string;
+  /** Where the CLI spilled the full output when it was too long to inline. */
+  outputFile?: string;
+}
+
+/** Which `task_*` event this update came from. The host routes on it: two of
+ *  the four belong on the timeline, the other two are live-only. */
+export type SubagentPhase = "started" | "progress" | "updated" | "notification";
+
+export interface SubagentUpdate extends SubagentTask {
+  phase: SubagentPhase;
+}
+
+/**
+ * Whether a reported status means the subagent has stopped.
+ *
+ * Anything unrecognised counts as still running, which is the safe way round:
+ * a card left spinning is corrected by the turn-end sweep, whereas a card
+ * closed early reports a result the subagent never produced.
+ */
+export function isTerminalTaskStatus(status: string | undefined): boolean {
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "error" ||
+    status === "cancelled" ||
+    status === "canceled" ||
+    status === "interrupted"
+  );
+}
+
+/**
  * The quota verdict the CLI reports mid-turn, from its `rate_limit_event`.
  *
  * This is the only authoritative quota signal available on the subscription
@@ -143,6 +227,7 @@ export interface StreamDelta {
     | "model"
     | "permission_request"
     | "compact"
+    | "task"
     | "done"
     | "error";
   text?: string;
@@ -155,6 +240,8 @@ export interface StreamDelta {
   usage?: TokenUsage;
   /** Carried on `type: "compact"` — the CLI folded earlier messages away. */
   compaction?: CompactionInfo;
+  /** Carried on `type: "task"` — one subagent moved through its lifecycle. */
+  task?: SubagentUpdate;
   /** Carried on `type: "rate_limit"` — the CLI's own quota verdict for the
    *  turn in flight. */
   rateLimit?: RateLimitStatus;
@@ -219,6 +306,7 @@ export interface TimelineEvent {
     | "error"
     | "checkpoint"
     | "compact"
+    | "subagent"
     | "plan_revision"
     | "plan_question"
     | "plan_comment"

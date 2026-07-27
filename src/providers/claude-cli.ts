@@ -10,6 +10,8 @@ import {
   PermissionRequestPayload,
   PermissionSuggestion,
   StreamDelta,
+  SubagentPhase,
+  SubagentUpdate,
   TaskType
 } from "../core/types.js";
 import { getModePrompt, getTaskTypePrompt } from "../services/prompt-loader.js";
@@ -1041,10 +1043,41 @@ interface CliUsage {
   cache_creation_input_tokens?: number;
 }
 
+/**
+ * The `usage` block on a `system`/`task_*` event.
+ *
+ * Deliberately not `CliUsage`: the CLI reuses the field name for a completely
+ * different measurement — how much the *subagent* spent, not the main turn's
+ * token counts. The two are intersected on `CliEvent.usage` because both are
+ * all-optional, so reading either shape needs no cast and neither can silently
+ * pick up the other's numbers.
+ */
+export interface CliTaskUsage {
+  total_tokens?: number;
+  tool_uses?: number;
+  duration_ms?: number;
+}
+
+/** `system`/`task_*` subtype → the phase the rest of the app speaks in. */
+const TASK_PHASES: Record<string, SubagentPhase> = {
+  task_started: "started",
+  task_progress: "progress",
+  task_updated: "updated",
+  task_notification: "notification"
+};
+
 export interface CliEvent {
   type: string;
   subtype?: string;
   session_id?: string;
+  /**
+   * Set to the dispatching `Agent` tool_use id on everything a subagent
+   * produces; `null` on the main agent's own traffic.
+   *
+   * The one field in this protocol that changes what an event *means* rather
+   * than adding to it, which is why it is read before anything else.
+   */
+  parent_tool_use_id?: string | null;
   /** Resolved model id on the `system`/`init` event (alias → concrete id). */
   model?: string;
   /** Every slash command the CLI knows, reported on `system`/`init`. */
@@ -1087,12 +1120,26 @@ export interface CliEvent {
     };
     index?: number;
   };
-  /** End-of-turn result event — has the canonical post-turn usage + cost. */
-  usage?: CliUsage;
+  /** End-of-turn result event — has the canonical post-turn usage + cost. On a
+   *  `task_*` event this same field carries {@link CliTaskUsage} instead. */
+  usage?: CliUsage & CliTaskUsage;
   total_cost_usd?: number;
   error?: string;
   result?: string;
-  /** Present on `system`/`compact_boundary`. */
+  /**
+   * Present on `system`/`compact_boundary`.
+   *
+   * Both spellings are read because both exist: the wire format observed on
+   * 2.1.219 is snake_case, while the CLI carries its own reader for a
+   * camelCase shape. Taking one on faith would silently drop the numbers —
+   * the event would still arrive and the marker would still render, just with
+   * nothing in it, which is the least detectable kind of wrong.
+   */
+  compact_metadata?: {
+    trigger?: string;
+    pre_tokens?: number;
+    post_tokens?: number;
+  };
   compactMetadata?: {
     trigger?: string;
     preTokens?: number;
@@ -1109,6 +1156,26 @@ export interface CliEvent {
     rateLimitType?: string;
     isUsingOverage?: boolean;
   };
+  /**
+   * `system`/`task_*` fields — one subagent's lifecycle.
+   *
+   * Spread flat across the event rather than nested, and unevenly: `task_id` is
+   * the only one every phase carries. `task_updated` in particular has neither
+   * `tool_use_id` nor a top-level `status` — its status lives in `patch`, which
+   * is why reading only the top level would leave every task looking unfinished.
+   */
+  task_id?: string;
+  tool_use_id?: string;
+  subagent_type?: string;
+  task_type?: string;
+  description?: string;
+  prompt?: string;
+  status?: string;
+  last_tool_name?: string;
+  summary?: string;
+  output_file?: string;
+  patch?: { status?: string; end_time?: number };
+
   /** Control-protocol fields — present on `control_request` events the CLI
    *  emits when `--permission-prompt-tool stdio` is active. */
   request_id?: string;
@@ -1146,16 +1213,37 @@ export function makeProcessor(
   return (ev) => {
     const out: StreamDelta[] = [];
 
+    // Everything a subagent produces is stamped with the `Agent` tool_use id
+    // that dispatched it, and none of it is the conversation talking. Verified
+    // on 2.1.220: a subagent's `assistant` event carries a real `tool_use`
+    // block, so without this its nested Grep is emitted as a `tool_use_start`
+    // and renders on the main timeline as a tool the top-level model ran. Its
+    // `tool_result` would likewise be fed back into the main message history.
+    // The subagent is reported through `task_*` instead — the only channel
+    // that says which agent the work belongs to.
+    if (ev.parent_tool_use_id) return out;
+
+    if (ev.type === "system" && ev.subtype && ev.subtype in TASK_PHASES) {
+      const update = taskUpdate(ev, TASK_PHASES[ev.subtype]);
+      if (update) out.push({ type: "task", task: update });
+      return out;
+    }
+
     // The CLI folded earlier messages into a summary to make room. Silent
     // until now: a long chat simply stopped remembering its own beginning,
     // which reads as the product losing the user's work.
     if (ev.type === "system" && ev.subtype === "compact_boundary") {
+      const meta = ev.compact_metadata ?? ev.compactMetadata;
       out.push({
         type: "compact",
         compaction: {
-          trigger: ev.compactMetadata?.trigger,
-          preTokens: ev.compactMetadata?.preTokens,
-          postTokens: ev.compactMetadata?.postTokens
+          trigger: meta?.trigger,
+          preTokens:
+            (meta as { pre_tokens?: number } | undefined)?.pre_tokens ??
+            (meta as { preTokens?: number } | undefined)?.preTokens,
+          postTokens:
+            (meta as { post_tokens?: number } | undefined)?.post_tokens ??
+            (meta as { postTokens?: number } | undefined)?.postTokens
         }
       });
       return out;
@@ -1404,6 +1492,38 @@ export function createToolStallWatchdog(opts: {
       for (const t of timers.values()) clearTimeout(t);
       timers.clear();
     }
+  };
+}
+
+/**
+ * One `system`/`task_*` event, flattened into the shape the rest of the app
+ * reads. Pure translation — which of these reach the timeline and which stay
+ * live is the host's decision, not this function's.
+ *
+ * Returns null for an event with no `task_id`: without it there is nothing to
+ * correlate the update with, and a card that can never be closed is worse than
+ * one that never opened.
+ */
+function taskUpdate(ev: CliEvent, phase: SubagentPhase): SubagentUpdate | null {
+  if (!ev.task_id) return null;
+  const u = ev.usage;
+  return {
+    phase,
+    taskId: ev.task_id,
+    toolUseId: ev.tool_use_id,
+    subagentType: ev.subagent_type,
+    // Same wire field, two different meanings — see `SubagentTask.activity`.
+    description: phase === "progress" ? undefined : ev.description,
+    activity: phase === "progress" ? ev.description : undefined,
+    prompt: ev.prompt,
+    // `task_updated` hides its status one level down; the others report it flat.
+    status: ev.patch?.status ?? ev.status,
+    durationMs: u?.duration_ms,
+    toolUses: u?.tool_uses,
+    totalTokens: u?.total_tokens,
+    lastToolName: ev.last_tool_name,
+    summary: ev.summary,
+    outputFile: ev.output_file
   };
 }
 

@@ -33,10 +33,38 @@ export interface TimelineEvent {
     | "plan_question"
     | "plan_comment"
     | "plan_answer"
+    | "subagent"
     | string;
   title: string;
   body?: string;
   meta?: Record<string, unknown>;
+}
+
+/**
+ * One subagent the main agent dispatched, as the chat renders it. Mirrors
+ * `SubagentTask` in src/core/types.ts.
+ *
+ * Arrives two ways and both are needed: `subagent` timeline events open and
+ * close the card and survive a reload, while `subagentProgress` messages carry
+ * what the agent is doing mid-run and are deliberately not persisted.
+ */
+export interface SubagentTaskView {
+  taskId: string;
+  toolUseId?: string;
+  subagentType?: string;
+  /** What the agent was asked for — the task label, fixed for the whole run. */
+  description?: string;
+  /** What it is doing right now. Live only; absent once the run ends. */
+  activity?: string;
+  prompt?: string;
+  /** `running` until the CLI says otherwise; then whatever it said. */
+  status?: string;
+  durationMs?: number;
+  toolUses?: number;
+  totalTokens?: number;
+  lastToolName?: string;
+  summary?: string;
+  outputFile?: string;
 }
 
 // ── Plan-mode payloads (mirror src/core/types.ts) ─────────────
@@ -517,6 +545,9 @@ export type Inbound =
   /** The queue came back unsent — Stop, a rewind, an edit, or a turn that
    *  failed. The composer takes the text so nothing typed is lost. */
   | { type: "returnToComposer"; text: string }
+  /** Live-only: what a running subagent is doing right now. Never persisted —
+   *  the timeline holds the dispatch and the result, this holds the middle. */
+  | { type: "subagentProgress"; task: SubagentTaskView }
   | { type: "permissionRequest"; request: PermissionRequestView }
   | { type: "error"; message: string }
   | { type: "editorContext"; context: EditorContext | null }

@@ -224,7 +224,10 @@ describe("scanCommandFiles finds skills too", () => {
   // A name defined both ways is one command, not two rows that look identical.
   it("does not offer the same name twice", async () => {
     await writeCommand("audit.md", "---\ndescription: From commands\n---\n");
-    await writeSkill("audit", "---\nname: audit\ndescription: From skills\n---\n");
+    await writeSkill(
+      "audit",
+      "---\nname: audit\ndescription: From skills\n---\n"
+    );
 
     const audits = (await scanCommandFiles(root)).filter(
       (c) => c.name === "audit"

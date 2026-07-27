@@ -1,0 +1,251 @@
+// ─────────────────────────────────────────────────────────────
+// Effort picker — the toolbar chip left of the model one, and its
+// panel. Deliberately the same grammar as ModelPicker: a list of
+// rows, each a name and what it costs you, with a check on the
+// chosen one. The segmented ramp this replaced could not say what
+// ultracode is — it runs at X-high, below Max, so a sixth cell
+// after Max claimed something untrue.
+// ─────────────────────────────────────────────────────────────
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--round-sm);
+  background: transparent;
+  color: var(--t3);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b1);
+    background: var(--s2);
+    color: var(--t1);
+  }
+}
+
+// Ultracode is the one posture worth reading off the closed toolbar: it
+// changes what a turn costs, not just how hard it thinks.
+.triggerUltra {
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+  color: var(--accent-glow);
+}
+
+.triggerName {
+  max-width: 96px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.menu.menu {
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  // 500, not the model panel's 440: six rows, a rule and the thinking foot
+  // come to 490 here, and the row that ends up under the fold at 440 is
+  // ultracode — the one nobody is looking for yet.
+  max-height: min(500px, calc(100vh - 120px));
+  padding: 0;
+  overflow: hidden;
+}
+
+.head {
+  flex-shrink: 0;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--b1);
+}
+
+.title {
+  display: block;
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--t3);
+  font-size: 11px;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 6px 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 11px;
+  border: 1px solid transparent;
+  border-radius: var(--round-sm);
+  background: transparent;
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out);
+
+  &:hover:not(:disabled) {
+    background: var(--s3);
+  }
+}
+
+// Compound so it ties with `.row:hover` and keeps the wash under the pointer.
+.row.selected {
+  border-color: var(--accent-mid);
+  background: var(--accent-soft);
+
+  .rowLabel {
+    color: var(--accent);
+  }
+}
+
+// A level this model rejects. `filter: opacity()` rather than the property —
+// the row sits under framer's inline styles on the panel.
+.row.off {
+  cursor: not-allowed;
+  filter: opacity(0.4);
+}
+
+.rowBody {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.rowHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rowLabel {
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.1px;
+}
+
+.rowNote {
+  color: var(--t3);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.rowCheck {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+// The rule above the ultracode row: everything below it stops being a rung on
+// the same ladder.
+.divider {
+  height: 1px;
+  margin: 5px 8px;
+  background: var(--b1);
+}
+
+// ── Thinking, on the same panel ──────────────────────────────
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--b1);
+}
+
+.footBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.footLabel {
+  color: var(--t1);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.footNote {
+  color: var(--t3);
+  font-size: 11px;
+}
+
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 19px;
+  padding: 0;
+  border: 1px solid var(--b2);
+  border-radius: 999px;
+  background: var(--s1);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out);
+}
+
+// CSS, not framer: the knob travels on the shared hover role, the same as the
+// switch this was lifted from, and one toggle animated two different ways
+// across two panels is the drift the tokens exist to stop.
+.switch.on {
+  border-color: var(--accent);
+  background: var(--accent);
+
+  .knob {
+    background: var(--on-accent);
+    transform: translate(15px, -50%);
+  }
+}
+
+.knob {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--t2);
+  transform: translateY(-50%);
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    transform var(--motion-hover) var(--ease-out);
+}

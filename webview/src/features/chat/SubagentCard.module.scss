@@ -1,0 +1,187 @@
+// ─────────────────────────────────────────────────────────────
+// Subagent card — work the main model handed to another agent.
+//
+// Reads as delegated rather than as one more tool call: a ruled
+// left rail sets it apart from the flat tool-group chips it sits
+// among, without becoming a second panel inside the turn.
+// ─────────────────────────────────────────────────────────────
+
+@use "../../themes/motion" as motion;
+
+.card {
+  margin: 2px 0;
+  border-left: 2px solid var(--b2);
+  border-radius: 0 var(--round-sm) var(--round-sm) 0;
+  background: var(--tint-weak);
+  transition: border-color var(--motion) var(--ease);
+}
+
+// Full-strength accent, not `--accent-mid`: at 22% the rail measured 1.33:1
+// against the page while the failed and interrupted rails sit at 7.07 and
+// 11.71, so the one state that means "something is happening right now" was
+// the hardest of the three to see.
+.running {
+  border-left-color: var(--accent);
+}
+
+.failed {
+  border-left-color: var(--err);
+}
+
+// A run the turn ended under: it did not fail, it never finished. Dimmer than
+// a failure so the two do not read as the same outcome.
+.interrupted {
+  border-left-color: var(--warn);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 0 var(--round-sm) var(--round-sm) 0;
+  background: transparent;
+  color: var(--t1);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-hover) var(--ease-out);
+
+  &:hover:not(:disabled) {
+    background: var(--s2);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  justify-content: center;
+  width: 14px;
+  color: var(--t3);
+}
+
+.running .icon {
+  color: var(--accent);
+}
+
+.name {
+  flex-shrink: 0;
+  color: var(--t1);
+  font-weight: 500;
+}
+
+.desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--t3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.count {
+  color: var(--t3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ok {
+  display: inline-flex;
+  color: var(--t3);
+}
+
+.err {
+  display: inline-flex;
+  color: var(--err);
+}
+
+// An agent the turn ended under did not fail — nothing went wrong, it simply
+// never got to finish. Sharing the failure glyph's red said otherwise, so the
+// mark follows the rail instead.
+.interrupted .err {
+  color: var(--warn);
+}
+
+.spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--accent);
+  border-right-color: transparent;
+  border-radius: 50%;
+
+  @include motion.spin;
+}
+
+.chev {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--t3);
+
+  // framer writes `opacity` inline on this element; a class rule cannot
+  // outrank it, so the dim has to come through a filter instead.
+  filter: opacity(0.5);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 10px 10px 8px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sectionLabel {
+  color: var(--t4);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.prompt {
+  max-height: 180px;
+  padding: 6px 8px;
+  overflow-y: auto;
+  border-radius: var(--round-sm);
+  background: var(--s0);
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.answer {
+  color: var(--t2);
+  font-size: 12.5px;
+  line-height: 1.55;
+
+  p:first-child {
+    margin-top: 0;
+  }
+
+  p:last-child {
+    margin-bottom: 0;
+  }
+}

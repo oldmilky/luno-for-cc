@@ -16,9 +16,9 @@ export const FALLBACK_MODELS: ReadonlyArray<ModelInfo> = [
     group: "alias"
   },
   {
-    value: "opus",
-    label: "Opus",
-    note: "Deepest reasoning, hardest problems",
+    value: "fable",
+    label: "Fable",
+    note: "The most powerful, for the hardest problems",
     supportsTools: true,
     group: "alias"
   },
@@ -28,13 +28,6 @@ export const FALLBACK_MODELS: ReadonlyArray<ModelInfo> = [
     note: "Best for everyday tasks",
     supportsTools: true,
     group: "alias"
-  },
-  {
-    value: "haiku",
-    label: "Haiku",
-    note: "Fastest for quick answers",
-    supportsTools: true,
-    group: "alias"
   }
 ];
 
@@ -42,18 +35,46 @@ export interface EffortOption {
   value: EffortLevel;
   /** Full label shown next to the "Effort" heading. */
   label: string;
-  /** Compact label for the segment cell. */
+  /** Compact label for the toolbar chip. */
   short: string;
+  /** What picking it costs and buys. The picker is a list of rows now, and a
+   *  list of five bare adjectives would say nothing the ramp did not. */
+  note: string;
 }
 
 // Order matters — the segmented control treats this as a low→high ramp and
 // fills every cell up to and including the active level.
 export const EFFORT_LEVELS: ReadonlyArray<EffortOption> = [
-  { value: "low", label: "Low", short: "Low" },
-  { value: "medium", label: "Medium", short: "Med" },
-  { value: "high", label: "High", short: "High" },
-  { value: "xhigh", label: "Extra high", short: "X-high" },
-  { value: "max", label: "Max", short: "Max" }
+  {
+    value: "low",
+    label: "Low",
+    short: "Low",
+    note: "Fastest and cheapest — mechanical edits, quick answers"
+  },
+  {
+    value: "medium",
+    label: "Medium",
+    short: "Med",
+    note: "Enough for well-specified work"
+  },
+  {
+    value: "high",
+    label: "High",
+    short: "High",
+    note: "The default. Reads around before it changes anything"
+  },
+  {
+    value: "xhigh",
+    label: "Extra high",
+    short: "X-high",
+    note: "For work that has to be right the first time"
+  },
+  {
+    value: "max",
+    label: "Max",
+    short: "Max",
+    note: "Thinks longest, and spends the quota to match"
+  }
 ];
 
 /**

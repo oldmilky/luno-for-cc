@@ -18,7 +18,8 @@ import {
   ModelInfo,
   SkillInfo,
   ChatStatus,
-  PermissionRequestView
+  PermissionRequestView,
+  SubagentTaskView
 } from "./lib/rpc";
 import { Spinner, type CodeInsert } from "./design/primitives";
 import { ChatScreen } from "./features/chat";
@@ -156,6 +157,16 @@ export function App() {
   >([]);
   const pendingPermission = pendingPermissions[0] ?? null;
 
+  // What each running subagent is doing right now, keyed by CLI task id.
+  // Deliberately outside `events` and outside `patchState`: the timeline holds
+  // the dispatch and the result, which are what still mean something tomorrow.
+  // This holds the middle of the run, which stops meaning anything the moment
+  // the run ends — and the CLI process dies with the turn, so there is never a
+  // live subagent to restore after a reload.
+  const [taskProgress, setTaskProgress] = useState<
+    Record<string, SubagentTaskView>
+  >({});
+
   // Persist non-volatile UI state. Patch rather than replace — the theme
   // store owns its own slice of the same state object.
   useEffect(() => {
@@ -217,6 +228,7 @@ export function App() {
           setBusy(false);
           setPendingPermissions([]);
           setQueued("");
+          setTaskProgress({});
           break;
         case "queued":
           setQueued(m.text);
@@ -254,6 +266,15 @@ export function App() {
           // The turn is over (completed or cancelled) — no prompt can still
           // be live, so drop any card that didn't get an explicit answer.
           setPendingPermissions([]);
+          // Same for subagents: the host has just closed every open one on the
+          // timeline, so keeping live progress would fight the finished card.
+          setTaskProgress({});
+          break;
+        case "subagentProgress":
+          setTaskProgress((prev) => ({
+            ...prev,
+            [m.task.taskId]: { ...prev[m.task.taskId], ...m.task }
+          }));
           break;
         case "permissionRequest":
           // Append to the queue (deduping on requestId so a re-posted prompt
@@ -378,6 +399,7 @@ export function App() {
         thinking={auth.thinking}
         ultracode={auth.ultracode}
         events={events}
+        taskProgress={taskProgress}
         streaming={streaming}
         busy={busy}
         input={input}

@@ -34,7 +34,15 @@ describe("findMode", () => {
 
 describe("findModel", () => {
   it("returns a model from the provided list when present", () => {
-    expect(findModel(FALLBACK_MODELS, "opus").label).toBe("Opus");
+    expect(findModel(FALLBACK_MODELS, "fable").label).toBe("Fable");
+  });
+  // `opus` moved behind "Other models" — it is a different model from
+  // `default` (no 1M window), so it is still selectable, just not on the front
+  // page. A value the fallback list has never heard of must still render as
+  // itself rather than silently becoming the first row.
+  it("keeps a model that is no longer on the front page recognisable", () => {
+    expect(findModel(FALLBACK_MODELS, "opus").value).toBe("opus");
+    expect(findModel(FALLBACK_MODELS, "opus").label).toBe("opus");
   });
   it("synthesizes a 'version' entry with a shortened label when not in the list", () => {
     const m = findModel([], "claude-sonnet-4-6-20250101");

@@ -130,8 +130,9 @@ describe("setTaskStatus", () => {
     const result = setTaskStatus([ev], "r1", "t2", "accepted");
 
     expect(result?.task).toEqual({ id: "t2", status: "accepted" });
-    const tasks = (ev.meta as unknown as { tasks: Array<{ id: string; status: string }> })
-      .tasks;
+    const tasks = (
+      ev.meta as unknown as { tasks: Array<{ id: string; status: string }> }
+    ).tasks;
     expect(tasks[0].status).toBe("pending");
     expect(tasks[1].status).toBe("accepted");
   });
@@ -153,11 +154,13 @@ describe("setTaskStatus", () => {
     // The webview diffs on identity; mutating the existing object would let a
     // status change render as no change at all.
     const ev = withTasks();
-    const before = (ev.meta as unknown as { tasks: Array<{ id: string; status: string }> })
-      .tasks[0];
+    const before = (
+      ev.meta as unknown as { tasks: Array<{ id: string; status: string }> }
+    ).tasks[0];
     setTaskStatus([ev], "r1", "t1", "in_progress");
-    const after = (ev.meta as unknown as { tasks: Array<{ id: string; status: string }> })
-      .tasks[0];
+    const after = (
+      ev.meta as unknown as { tasks: Array<{ id: string; status: string }> }
+    ).tasks[0];
     expect(after).not.toBe(before);
     expect(before.status).toBe("pending");
   });

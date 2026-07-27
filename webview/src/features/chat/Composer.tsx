@@ -34,6 +34,7 @@ import { SlashPopover } from "./SlashPopover";
 import { slashQuery } from "./slash-filter";
 import { SkillsPicker } from "./SkillsPicker";
 import { ModelPicker } from "./ModelPicker";
+import { EffortPicker } from "./EffortPicker";
 import { ImageLightbox } from "./ImageLightbox";
 import s from "./Composer.module.scss";
 
@@ -576,6 +577,21 @@ export function Composer({
 
           <div className={s.spacer} />
 
+          {/* Left of the model, and its own control: how hard to work is a
+              different question from which model answers, and the two were
+              sharing one panel that had room for neither. */}
+          <EffortPicker
+            model={model}
+            models={models}
+            effort={effort}
+            ultracode={ultracode}
+            onEffort={(level, ultra) =>
+              send({ type: "setEffort", effort: level, ultracode: ultra })
+            }
+            thinking={thinking}
+            onThinking={(on) => send({ type: "setThinking", thinking: on })}
+          />
+
           <ModelPicker
             models={models}
             value={model}
@@ -586,8 +602,6 @@ export function Composer({
             onEffort={(level, ultra) =>
               send({ type: "setEffort", effort: level, ultracode: ultra })
             }
-            thinking={thinking}
-            onThinking={(on) => send({ type: "setThinking", thinking: on })}
           />
 
           {/* Both, mid-turn: stopping and adding to what is running are two

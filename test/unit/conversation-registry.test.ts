@@ -12,7 +12,13 @@ const disposable = { dispose: () => {} };
 
 /** Panels the code under test asked VS Code to create, newest last. */
 const panels = vi.hoisted(
-  () => [] as { webview: FakeWebview; revealed: number; disposed: number; title?: string }[]
+  () =>
+    [] as {
+      webview: FakeWebview;
+      revealed: number;
+      disposed: number;
+      title?: string;
+    }[]
 );
 
 /** The tab serializer the registry registers, so a test can hand a panel back
