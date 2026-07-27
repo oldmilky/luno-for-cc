@@ -7,19 +7,26 @@
 // anything. So the prompt text goes out untouched and this module only answers
 // "what could the user type".
 //
-// Two sources, because neither alone is enough:
+// Three sources, because none alone is enough:
 //
 //   • The CLI's own list, which it reports on every turn's `init` event. It is
 //     authoritative and covers built-ins and plugins, but it is names only and
-//     arrives no earlier than the first turn.
-//   • `.claude/commands/**.md` on disk, which is where the user's own commands
-//     live. Available immediately and carries the descriptions the popover
-//     needs to be worth opening.
+//     arrives no earlier than the first turn — the CLI emits nothing until it
+//     is given a message, so there is no way to ask it up front for free.
+//   • `.claude/commands/**.md` on disk.
+//   • `.claude/skills/*/SKILL.md`, which Claude Code also exposes as `/name`.
+//     This is the one that matters in practice: shipping without it left the
+//     popover empty on a machine whose commands are all skills, which is the
+//     normal case.
+//
+// The two disk sources are read every time and carry the descriptions that
+// make the list worth opening.
 // ─────────────────────────────────────────────────────────────
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
+import { discoverClaudeSkills } from "./claude-skills.js";
 
 export interface SlashCommand {
   /** Without the leading slash, exactly as the CLI names it. */
@@ -62,6 +69,19 @@ export async function scanCommandFiles(
       if (!out.has(found.name)) out.set(found.name, found);
     }
   }
+
+  // Skills answer to `/name` exactly as commands do, and on most machines they
+  // are all the user has — `.claude/commands` is frequently empty while
+  // `.claude/skills` is not.
+  for (const skill of await discoverClaudeSkills(workspaceRoot)) {
+    if (out.has(skill.id)) continue;
+    out.set(skill.id, {
+      name: skill.id,
+      description: skill.description,
+      source: skill.source
+    });
+  }
+
   return [...out.values()];
 }
 

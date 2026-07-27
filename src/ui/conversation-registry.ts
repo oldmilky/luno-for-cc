@@ -331,6 +331,19 @@ export class ConversationRegistry {
     return [...this.hosts].filter((h) => h.attention !== "none").length;
   }
 
+  /** The same count split by why, because the two are not the same errand: an
+   *  approval is a question nobody has answered, a finished turn is an answer
+   *  nobody has read. Only the badge's wording depends on the difference. */
+  attentionCounts(): { approval: number; finished: number } {
+    let approval = 0;
+    let finished = 0;
+    for (const host of this.hosts) {
+      if (host.attention === "approval") approval += 1;
+      else if (host.attention === "finished") finished += 1;
+    }
+    return { approval, finished };
+  }
+
   /** Create a conversation. The first one becomes the primary. */
   create(): ConversationHost {
     const host = new ConversationHost(this.shared);

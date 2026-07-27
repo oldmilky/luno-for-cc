@@ -16,6 +16,18 @@ import * as vscode from "vscode";
 import { ConversationHost } from "./conversation-host.js";
 import { ConversationRegistry } from "./conversation-registry.js";
 
+const chats = (n: number): string => `${n} chat${n === 1 ? "" : "s"}`;
+
+/** What the badge says on hover. Two errands, named separately: a chat parked
+ *  on an approval cannot continue without an answer, while one that finished
+ *  off screen only holds an answer nobody has read yet. */
+function attentionTooltip(approval: number, finished: number): string {
+  const waiting = `${chats(approval)} waiting for your approval`;
+  const done = `${chats(finished)} finished while you were away`;
+  if (approval > 0 && finished > 0) return `${waiting} · ${done}`;
+  return approval > 0 ? waiting : done;
+}
+
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = "luno.chat";
 
@@ -32,13 +44,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // the count for every conversation that is waiting off screen. Without it a
     // tab parked on an approval is a chat that silently stopped.
     this.registry.onAttentionChanged = () => {
-      const waiting = this.registry.attentionCount();
+      const { approval, finished } = this.registry.attentionCounts();
+      const total = approval + finished;
       view.badge =
-        waiting > 0
-          ? { value: waiting, tooltip: `${waiting} chat(s) need you` }
+        total > 0
+          ? { value: total, tooltip: attentionTooltip(approval, finished) }
           : undefined;
     };
-    view.onDidChangeVisibility(() => this.sidebar.setVisible(view.visible));
+    // `this.current`, not `this.sidebar` — the same routing the message
+    // listener below needs, and for the same reason. Told to the wrong
+    // conversation, "the user is looking at this now" never reaches whoever
+    // actually occupies the sidebar after a switch: its finished-while-hidden
+    // mark is never cleared, and the badge sits there claiming a chat needs an
+    // answer while the user reads that very chat.
+    view.onDidChangeVisibility(() => this.current.setVisible(view.visible));
     const target = {
       webview: view.webview,
       // `show` is optional on the view type and absent in some hosts, hence

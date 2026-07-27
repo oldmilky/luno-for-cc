@@ -65,32 +65,34 @@ export function AssistantMessage({
           </motion.div>
         </div>
       )}
-      <div className={`md ${s.body}`}>
-        <MarkdownBody text={text} />
-        {streaming && <span className={s.caret} aria-hidden />}
-      </div>
-      {!streaming && text.length > 0 && (
-        <div className={s.actions}>
-          {/* No tooltip: the old `title` was the same expression as the
-              button's own text, character for character. */}
-          <button type="button" onClick={copy} className={s.copy}>
-            <Icon name={copied ? "check" : "copy"} size={9} />
-            {copied ? "Copied" : "Copy"}
-          </button>
-          {onContinue && (
-            <Tooltip label="Continue from here — seed the composer with a follow-up anchored to this message">
-              <button
-                type="button"
-                onClick={() => onContinue(excerpt(text))}
-                className={s.continue}
-              >
-                <Icon name="arrow" size={9} />
-                Continue
-              </button>
-            </Tooltip>
-          )}
+      <div className={s.column}>
+        <div className={`md ${s.body}`}>
+          <MarkdownBody text={text} />
+          {streaming && <span className={s.caret} aria-hidden />}
         </div>
-      )}
+        {!streaming && text.length > 0 && (
+          <div className={s.actions}>
+            {/* No tooltip: the old `title` was the same expression as the
+                button's own text, character for character. */}
+            <button type="button" onClick={copy} className={s.copy}>
+              <Icon name={copied ? "check" : "copy"} size={9} />
+              {copied ? "Copied" : "Copy"}
+            </button>
+            {onContinue && (
+              <Tooltip label="Continue from here — seed the composer with a follow-up anchored to this message">
+                <button
+                  type="button"
+                  onClick={() => onContinue(excerpt(text))}
+                  className={s.continue}
+                >
+                  <Icon name="arrow" size={9} />
+                  Continue
+                </button>
+              </Tooltip>
+            )}
+          </div>
+        )}
+      </div>
     </motion.div>
   );
 }

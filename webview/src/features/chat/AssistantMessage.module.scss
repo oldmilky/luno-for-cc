@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────────────────────
-// Assistant message — converted from Tailwind to an SCSS module
-// in Ф1. Reads design tokens only; see docs/TOKENS.md.
+// Assistant message — avatar, markdown body, and the actions
+// that act on the message. Reads design tokens only; see
+// docs/TOKENS.md.
 // ─────────────────────────────────────────────────────────────
 
 @use "../../themes/motion" as motion;
@@ -67,8 +68,18 @@
     0 0 0 1px var(--sheen) inset;
 }
 
-.body {
+// Body and its actions stack, so the buttons can sit under the text instead of
+// on top of it.
+.column {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.body {
+  max-width: 100%;
   min-width: 0;
   padding-top: 4px;
   color: var(--t2);
@@ -94,13 +105,17 @@
   animation: caret-breathe var(--motion-ambient) var(--ease-soft) infinite;
 }
 
+// Under the message, in flow, and holding its place whether or not it is
+// visible. Absolutely positioned at the top-right it covered the first line of
+// the answer — the one line most worth reading — and fading a box in over text
+// is worse than a box that is simply there. The height is spent once per
+// message and never moves; revealing it on hover only changes opacity, so
+// nothing below it shifts.
 .actions {
-  position: absolute;
-  top: 0;
-  right: 0;
   display: flex;
   align-items: center;
   gap: 4px;
+  margin-top: 4px;
   opacity: 0;
   transition: opacity var(--motion-hover) var(--ease-out);
 

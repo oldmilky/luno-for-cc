@@ -467,6 +467,12 @@ h6.md-h {
   font-weight: 600;
 }
 .md-code-copy {
+  /* Inline-flex with a gap, because the glyph and the word are two inline
+     boxes with no whitespace between them in the JSX — they rendered glued
+     together, reading as one broken token. */
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   background: transparent;
   border: none;
   color: var(--t3);

@@ -14,7 +14,7 @@
 // is touched.
 // ─────────────────────────────────────────────────────────────
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { SlashCommand } from "../../lib/rpc";
 import { filterCommands } from "./slash-filter";
@@ -30,10 +30,6 @@ export interface SlashPopoverProps {
   onClose: () => void;
 }
 
-/** How many to show. The CLI reports well over a hundred on a machine with
- *  plugins installed, and a popover taller than the panel is not a menu. */
-const MAX_SHOWN = 12;
-
 export function SlashPopover({
   query,
   open,
@@ -42,15 +38,28 @@ export function SlashPopover({
   onClose
 }: SlashPopoverProps) {
   const [active, setActive] = useState(0);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
+  // Everything that matches. The list scrolls rather than truncating: a cap
+  // hides commands the user knows they have, and "it is not in the list" is
+  // indistinguishable from "it does not exist".
   const matches = useMemo(
-    () => filterCommands(commands, query).slice(0, MAX_SHOWN),
+    () => filterCommands(commands, query),
     [commands, query]
   );
 
   useEffect(() => {
     setActive(0);
   }, [query]);
+
+  // Arrowing past the visible rows would otherwise move a selection nobody can
+  // see — the list is 260px tall and the CLI reports well over a hundred.
+  useEffect(() => {
+    if (!open) return;
+    listRef.current
+      ?.querySelector('[aria-selected="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [active, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -97,14 +106,16 @@ export function SlashPopover({
           <div className={s.head}>
             <Icon name="terminal" size={11} />
             <span>
-              {query ? `Commands matching "${query}"` : "Run a command"}
+              {query
+                ? `Commands matching "${query}" (${matches.length})`
+                : `Run a command (${matches.length})`}
             </span>
             <span className={s.hint}>↑↓ navigate · ↵ select · Esc</span>
           </div>
           {matches.length === 0 ? (
             <div className={s.empty}>No matching command</div>
           ) : (
-            <div className={s.list}>
+            <div className={s.list} ref={listRef}>
               {matches.map((c, i) => (
                 <button
                   key={c.name}

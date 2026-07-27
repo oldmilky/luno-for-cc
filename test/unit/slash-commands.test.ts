@@ -196,3 +196,42 @@ describe("slashQuery", () => {
     expect(slashQuery("see src/gate.ts")).toBeNull();
   });
 });
+
+// Shipped without this and the popover was empty on the machine it was built
+// for: `.claude/commands` did not exist, while `.claude/skills` held sixteen
+// entries. Claude Code exposes a skill as `/name` just like a command.
+describe("scanCommandFiles finds skills too", () => {
+  async function writeSkill(id: string, body: string): Promise<void> {
+    const abs = path.join(root, ".claude", "skills", id, "SKILL.md");
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, body);
+  }
+
+  it("offers a project skill as a command, with its description", async () => {
+    await writeSkill(
+      "browser",
+      "---\nname: browser\ndescription: Verify the webview in a real browser.\n---\n\nSteps.\n"
+    );
+
+    const found = (await scanCommandFiles(root)).find(
+      (c) => c.name === "browser"
+    );
+
+    expect(found?.source).toBe("project");
+    expect(found?.description).toContain("Verify the webview");
+  });
+
+  // A name defined both ways is one command, not two rows that look identical.
+  it("does not offer the same name twice", async () => {
+    await writeCommand("audit.md", "---\ndescription: From commands\n---\n");
+    await writeSkill("audit", "---\nname: audit\ndescription: From skills\n---\n");
+
+    const audits = (await scanCommandFiles(root)).filter(
+      (c) => c.name === "audit"
+    );
+
+    expect(audits).toHaveLength(1);
+    // `.claude/commands` is the more specific definition and wins.
+    expect(audits[0].description).toBe("From commands");
+  });
+});

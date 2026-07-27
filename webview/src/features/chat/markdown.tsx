@@ -107,7 +107,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
           aria-label={copied ? "Copied" : "Copy code"}
         >
           <Icon name={copied ? "check" : "copy"} size={11} />
-          {copied ? "copied" : "copy"}
+          {copied ? "Copied" : "Copy"}
         </button>
       </div>
       <pre className="md-code hljs">

@@ -48,3 +48,12 @@ webview/tsconfig.json
 assets/**
 !assets/luno-icon-500.png
 !assets/luno-activitybar.png
+# Screenshots taken at the repo root. The `assets/**` rule above does not reach
+# them, and one shipped inside 0.21.0 — 130 kB of a debugging screenshot, in a
+# package that is otherwise measured to the kilobyte. Every runtime image lives
+# under `assets/`, so nothing at the root is ever needed.
+*.png
+*.jpg
+# Dev-only, and at the root where the bare `tsconfig.json` rule does not reach.
+tsconfig.test.json
+TESTING.md
