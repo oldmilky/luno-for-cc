@@ -21,7 +21,11 @@ import { ModelResolver } from "./domains/models.js";
 import { broadcastSkills } from "./domains/skills.js";
 import { broadcastUsage } from "./domains/usage.js";
 import { broadcastEditorContext } from "./domains/files.js";
-import { ConversationHost, type SharedServices } from "./conversation-host.js";
+import {
+  ConversationHost,
+  type HostTarget,
+  type SharedServices
+} from "./conversation-host.js";
 import type { Post } from "./messages.js";
 
 /** How often to re-aggregate Claude Code's on-disk usage. Cheap (a few JSONL
@@ -78,6 +82,10 @@ export class ConversationRegistry {
    */
   private active?: ConversationHost;
 
+  /** The sidebar and whichever conversation currently occupies it. */
+  private sidebarTarget?: HostTarget;
+  private sidebarHost?: ConversationHost;
+
   /**
    * Told when any conversation starts or stops wanting the user, so the sidebar
    * can carry one badge for every chat that is off screen. Owned by whoever
@@ -129,6 +137,7 @@ export class ConversationRegistry {
       auth,
       conversationFor: (sessionId) => this.conversationFor(sessionId),
       openConversationInTab: (sessionId) => void this.openInTab(sessionId),
+      showConversation: (sessionId) => void this.showInSidebar(sessionId),
       markActive: (host) => {
         this.active = host;
       },
@@ -163,6 +172,68 @@ export class ConversationRegistry {
    */
   conversationFor(sessionId: string): ConversationHost | undefined {
     return [...this.hosts].find((h) => h.sessionId === sessionId);
+  }
+
+  /**
+   * Hand the registry the sidebar, so it can swap which conversation is on it.
+   *
+   * The sidebar is a fixed surface with a changing occupant — the opposite of a
+   * tab, which is created around one conversation and dies with it.
+   */
+  useSidebar(target: HostTarget, host: ConversationHost): void {
+    this.sidebarTarget = target;
+    this.sidebarHost = host;
+  }
+
+  /**
+   * Put a stored conversation on the sidebar.
+   *
+   * A conversation already open somewhere else is revealed rather than moved:
+   * two surfaces on one session would resume the same CLI session twice. One
+   * that is merely detached — left behind by an earlier switch, possibly still
+   * streaming — is picked back up with its turn intact.
+   */
+  async showInSidebar(sessionId: string): Promise<void> {
+    const open = this.conversationFor(sessionId);
+    if (open?.hasSurface) {
+      open.reveal();
+      return;
+    }
+    const host = open ?? this.create();
+    if (!open) await host.adoptStored(sessionId);
+    this.swapSidebar(host);
+  }
+
+  /** The conversation currently on the sidebar. Not the one created at
+   *  startup — that is only its first occupant. */
+  sidebarConversation(): ConversationHost | undefined {
+    return this.sidebarHost;
+  }
+
+  /**
+   * New Chat.
+   *
+   * A blank conversation is reused rather than piling up an empty host beside
+   * it. One with work in it is left running and reachable from history, because
+   * clearing it in place is how a turn used to die.
+   */
+  startNewSidebarConversation(): void {
+    const current = this.sidebarHost;
+    if (current && !current.hasWork) {
+      current.newSession();
+      return;
+    }
+    this.swapSidebar(this.create());
+  }
+
+  private swapSidebar(host: ConversationHost): void {
+    if (!this.sidebarTarget || host === this.sidebarHost) return;
+    this.sidebarHost?.hide();
+    this.sidebarHost = host;
+    // Editor decorations follow the sidebar: it is the conversation the user is
+    // reading source alongside.
+    this.primary = host;
+    host.show(this.sidebarTarget);
   }
 
   /** Whether the sidebar conversation runs in its own checkout. Only under

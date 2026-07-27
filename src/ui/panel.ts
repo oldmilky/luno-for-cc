@@ -39,13 +39,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           : undefined;
     };
     view.onDidChangeVisibility(() => this.sidebar.setVisible(view.visible));
+    const target = {
+      webview: view.webview,
+      // `show` is optional on the view type and absent in some hosts, hence
+      // the guard rather than a direct call.
+      reveal: () => view.show?.(true)
+    };
+    // The sidebar is a fixed surface whose occupant changes; the registry owns
+    // that swap, so it needs both.
+    this.registry.useSidebar(target, this.sidebar);
     this.sidebar.attach(
-      {
-        webview: view.webview,
-        // `show` is optional on the view type and absent in some hosts, hence
-        // the guard rather than a direct call.
-        reveal: () => view.show?.(true)
-      },
+      target,
       // Only the sidebar resumes: it is the surface a window reload is expected
       // to bring back. A tab that did this would reopen a chat already on
       // screen. Isolation is decided by the registry, which reads the setting.
@@ -61,24 +65,27 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   // ── Commands bound in extension.ts ───────────────────────────
   //
-  // They address the sidebar conversation. Once conversations can also open as
-  // editor tabs, "the sidebar one" stops being the obvious target and these
-  // route to whichever is focused instead.
+  // They address whichever conversation the sidebar is currently showing, which
+  // stops being the one built at startup as soon as the user switches chats.
+
+  private get current(): ConversationHost {
+    return this.registry.sidebarConversation() ?? this.sidebar;
+  }
 
   newSession() {
-    this.sidebar.newSession();
+    this.registry.startNewSidebarConversation();
   }
 
   async sendUserMessage(text: string) {
-    await this.sidebar.sendUserMessage(text);
+    await this.current.sendUserMessage(text);
   }
 
   commentOnEditorSelection() {
-    this.sidebar.commentOnEditorSelection();
+    this.current.commentOnEditorSelection();
   }
 
   sendSelectionToChat() {
-    this.sidebar.sendSelectionToChat();
+    this.current.sendSelectionToChat();
   }
 
   /** Shift+Tab. Targets the conversation the user is working in, since each
@@ -88,6 +95,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   openConnectors() {
-    this.sidebar.openConnectors();
+    this.current.openConnectors();
   }
 }

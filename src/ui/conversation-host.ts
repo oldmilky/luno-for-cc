@@ -115,9 +115,18 @@ export interface SharedServices {
    * timelines into one history file.
    */
   conversationFor(sessionId: string): ConversationHost | undefined;
-  /** Open a stored conversation as an editor tab, leaving the caller's own
-   *  conversation running and on screen. */
+  /** Open a stored conversation as an editor tab. The explicit "new tab"
+   *  command; picking a chat from history switches in place instead. */
   openConversationInTab(sessionId: string): void;
+  /**
+   * Show a stored conversation on the surface the caller is on.
+   *
+   * Switching, not replacing: the conversation being left keeps its turn, its
+   * checkpoints and its process, and is reachable again from history. This is
+   * what a chat picker is expected to do — the earlier behaviour of opening an
+   * editor tab moved the work somewhere the user had not asked for.
+   */
+  showConversation(sessionId: string): void;
   /** Note which conversation the user is working in, so a keybinding lands on
    *  the chat in front of them rather than an arbitrary one. */
   markActive(host: ConversationHost): void;
@@ -210,6 +219,11 @@ export class ConversationHost {
    *  forever. Invisible, that reads as a chat that simply stopped. */
   private awaitingApproval = false;
   private finishedWhileHidden = false;
+  /** Enough of the live turn to rebuild it on a surface that was showing
+   *  another conversation while it happened. */
+  private busy = false;
+  private streamed = "";
+  private pendingRequest?: unknown;
   /** The posture this conversation runs in. Born from the `luno.*` defaults,
    *  then owned here and saved with the session. */
   private settings: ConversationSettings = defaultSettings();
@@ -397,6 +411,96 @@ export class ConversationHost {
     return "none";
   }
 
+  /**
+   * Watch what goes out, so a conversation can be rebuilt on a surface it was
+   * not attached to when it happened.
+   *
+   * Switching the sidebar to another chat leaves this one running with nowhere
+   * to post. Its timeline keeps filling, but the text streaming *between* two
+   * timeline events lives only in the messages themselves — come back mid-turn
+   * without this and the answer is invisible until the next flush.
+   */
+  private rememberLiveState(msg: unknown): void {
+    const m = msg as {
+      type?: string;
+      delta?: { type?: string; text?: string };
+    };
+    if (m.type === "turnStart") {
+      this.busy = true;
+      this.streamed = "";
+    } else if (m.type === "turnEnd") {
+      this.busy = false;
+      this.streamed = "";
+      this.pendingRequest = undefined;
+    } else if (m.type === "delta" && m.delta?.type === "text") {
+      this.streamed += m.delta.text ?? "";
+    } else if (m.type === "timeline") {
+      // The orchestrator flushes streamed text into a real event before any
+      // tool call, so the buffer's job ends exactly where the webview's does.
+      const kind = (msg as { event?: { kind?: string } }).event?.kind;
+      if (kind === "assistant" || kind === "tool_call") this.streamed = "";
+    } else if (m.type === "permissionRequest") {
+      this.pendingRequest = (msg as { request?: unknown }).request;
+    } else if (m.type === "permissionResolved") {
+      this.pendingRequest = undefined;
+    }
+  }
+
+  /** Whether this conversation holds anything worth not losing — a running
+   *  turn, or messages already exchanged. */
+  get hasWork(): boolean {
+    return this.activeTurn !== undefined || this.session.timeline.length > 0;
+  }
+
+  /** Whether some surface is currently showing this conversation. */
+  get hasSurface(): boolean {
+    return this.target !== undefined;
+  }
+
+  /** Stop rendering: the surface is about to show a different conversation.
+   *  The turn, if any, carries on. */
+  hide(): void {
+    this.target = undefined;
+    this.visible = false;
+  }
+
+  /**
+   * Take over a surface that was showing something else, and rebuild what the
+   * user would have seen had they never left: the conversation, its posture,
+   * whether a turn is running, the text streamed so far, and an approval still
+   * waiting for an answer.
+   *
+   * Posts straight to the webview rather than through `post`, which exists to
+   * *record* this state — replaying it through there would fold the restore
+   * back into the buffer it came from.
+   */
+  show(target: HostTarget): void {
+    this.target = target;
+    this.visible = true;
+    this.finishedWhileHidden = false;
+    const webview = target.webview;
+    void webview.postMessage({
+      type: "loadedSession",
+      events: this.session.timeline,
+      title: this.session.title
+    });
+    void this.publishAuthState();
+    if (this.busy) void webview.postMessage({ type: "turnStart" });
+    if (this.streamed) {
+      void webview.postMessage({
+        type: "delta",
+        delta: { type: "text", text: this.streamed }
+      });
+    }
+    if (this.pendingRequest) {
+      void webview.postMessage({
+        type: "permissionRequest",
+        request: this.pendingRequest
+      });
+    }
+    this.refreshSurface();
+  }
+
   /** Told by the surface when the user can or cannot see this conversation. */
   setVisible(visible: boolean): void {
     this.visible = visible;
@@ -501,7 +605,7 @@ export class ConversationHost {
    */
   /** Adopt one named stored conversation. Best-effort like the restore below:
    *  a missing file leaves the empty session this host was born with. */
-  private async adoptStored(id: string): Promise<void> {
+  async adoptStored(id: string): Promise<void> {
     const stored = await this.history.load(id);
     if (!stored) return;
     this.sessions.adopt(stored);
@@ -1128,13 +1232,13 @@ export class ConversationHost {
       open.reveal();
       return;
     }
-    // A conversation with work in it is never replaced. Adopting in place ends
-    // the turn running here — which is the whole complaint this feature exists
-    // to answer — and even a finished chat would be pushed off screen by a
-    // click meant to open a different one. Only a blank conversation, the case
-    // where the user is plainly picking what to put in it, is reused.
+    // A conversation with work in it is never replaced in place — adopting
+    // here would end the turn running in it. The surface switches to the picked
+    // chat instead, and this one carries on where it is, reachable again from
+    // history. Only a blank conversation is reused, which is the case where the
+    // user is plainly choosing what to put in it.
     if (this.activeTurn || this.session.timeline.length > 0) {
-      this.shared.openConversationInTab(id);
+      this.shared.showConversation(id);
       return;
     }
     const stored = await this.history.load(id);
@@ -1450,6 +1554,7 @@ export class ConversationHost {
    * and a plain method passed by reference arrives with `this` unbound.
    */
   private readonly post: Post = (msg: unknown) => {
+    this.rememberLiveState(msg);
     this.target?.webview.postMessage(msg);
     // Mirror to any open artifact editor tabs so they stay in sync with the
     // chat — comment edits, step accepts, plan revisions, etc. all need to

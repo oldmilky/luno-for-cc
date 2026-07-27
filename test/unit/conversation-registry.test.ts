@@ -231,32 +231,55 @@ describe("ConversationRegistry", () => {
     );
   });
 
-  it("opens a picked chat beside a conversation that has work in it", async () => {
+  it("swaps the sidebar to a picked chat and leaves the old one running", async () => {
     writeStoredSession("stored-1");
-    const registry = new ConversationRegistry(fakeContext() as never);
-    const busy = fakeTarget();
-    const busyHost = registry.create();
-    busyHost.attach(busy.target as never);
-    // Give it a conversation of its own to be protective of.
     writeStoredSession("stored-2");
-    busy.webview.deliver({ type: "loadSession", id: "stored-2" });
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const sidebar = fakeTarget();
+    const first = registry.create();
+    registry.useSidebar(sidebar.target as never, first);
+    first.attach(sidebar.target as never);
+    // Give it a conversation of its own to be protective of.
+    sidebar.webview.deliver({ type: "loadSession", id: "stored-2" });
     await settle();
-    expect(busyHost.sessionId).toBe("stored-2");
+    expect(first.sessionId).toBe("stored-2");
 
-    busy.webview.sent.length = 0;
-    busy.webview.deliver({ type: "loadSession", id: "stored-1" });
+    sidebar.webview.deliver({ type: "loadSession", id: "stored-1" });
     await settle();
 
-    // The chat the user was in keeps its session — replacing it in place is
-    // what used to kill a running turn.
-    expect(busyHost.sessionId).toBe("stored-2");
-    expect(typesOf(busy.webview.sent)).not.toContain("loadedSession");
-    // The picked one opened next to it instead.
-    expect(registry.conversationFor("stored-1")).toBeDefined();
-    expect(panels).toHaveLength(1);
+    // The picked chat is now on the sidebar — no editor tab was opened, which
+    // is what moved work somewhere the user had not asked for.
+    expect(panels).toHaveLength(0);
+    expect(registry.sidebarConversation()?.sessionId).toBe("stored-1");
+    // And the one it replaced is still alive, just off screen.
+    expect(first.sessionId).toBe("stored-2");
+    expect(first.hasSurface).toBe(false);
+    expect(registry.conversationFor("stored-2")).toBe(first);
   });
 
-  it("reuses a blank conversation rather than opening a tab for it", async () => {
+  it("brings a detached conversation back rather than building a second one", async () => {
+    writeStoredSession("stored-1");
+    writeStoredSession("stored-2");
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const sidebar = fakeTarget();
+    const first = registry.create();
+    registry.useSidebar(sidebar.target as never, first);
+    first.attach(sidebar.target as never);
+    sidebar.webview.deliver({ type: "loadSession", id: "stored-2" });
+    await settle();
+
+    sidebar.webview.deliver({ type: "loadSession", id: "stored-1" });
+    await settle();
+    sidebar.webview.deliver({ type: "loadSession", id: "stored-2" });
+    await settle();
+
+    // Switching back must land on the same host: a second one would resume the
+    // same CLI session from a second process.
+    expect(registry.sidebarConversation()).toBe(first);
+    expect(first.hasSurface).toBe(true);
+  });
+
+  it("reuses a blank conversation rather than switching away from it", async () => {
     writeStoredSession("stored-1");
     const registry = new ConversationRegistry(fakeContext() as never);
     const blank = fakeTarget();
@@ -322,5 +345,61 @@ describe("ConversationRegistry", () => {
     expect(panels).toHaveLength(1);
     const hellos = panels[0].webview.sent.filter((m) => m.type === "hello");
     expect((hellos[0] as { sessionId?: string }).sessionId).toBe(tab.sessionId);
+  });
+});
+
+describe("switching away from a running conversation", () => {
+  it("restores what streamed while the conversation was off screen", async () => {
+    writeStoredSession("stored-1");
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const sidebar = fakeTarget();
+    const running = registry.create();
+    registry.useSidebar(sidebar.target as never, running as never);
+    running.attach(sidebar.target as never);
+
+    // Drive the messages a live turn produces, without a real CLI.
+    const host = running as unknown as { post: (m: unknown) => void };
+    host.post({ type: "turnStart" });
+    host.post({ type: "delta", delta: { type: "text", text: "half an " } });
+    host.post({ type: "delta", delta: { type: "text", text: "answer" } });
+
+    running.hide();
+    sidebar.webview.sent.length = 0;
+    running.show(sidebar.target as never);
+
+    const kinds = typesOf(sidebar.webview.sent);
+    // Coming back must show the turn still running and the text so far, not a
+    // conversation that looks finished and empty.
+    expect(kinds).toContain("loadedSession");
+    expect(kinds).toContain("turnStart");
+    const delta = sidebar.webview.sent.find((m) => m.type === "delta") as {
+      delta?: { text?: string };
+    };
+    expect(delta?.delta?.text).toBe("half an answer");
+  });
+
+  it("drops the buffer once the text lands in the timeline", () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const sidebar = fakeTarget();
+    const running = registry.create();
+    registry.useSidebar(sidebar.target as never, running);
+    running.attach(sidebar.target as never);
+
+    const host = running as unknown as { post: (m: unknown) => void };
+    host.post({ type: "turnStart" });
+    host.post({ type: "delta", delta: { type: "text", text: "flushed" } });
+    // The orchestrator writes a real assistant event once the text is settled.
+    host.post({
+      type: "timeline",
+      event: { id: "a1", ts: 1, kind: "assistant", title: "A", body: "flushed" }
+    });
+
+    running.hide();
+    sidebar.webview.sent.length = 0;
+    running.show(sidebar.target as never);
+
+    // Replaying the buffer here would print the answer twice: once from the
+    // timeline, once from the buffer it was flushed out of.
+    expect(sidebar.webview.sent.filter((m) => m.type === "delta")).toEqual([]);
   });
 });
