@@ -14,7 +14,7 @@ import { buildSystemPrompt } from "./system-prompt.js";
 import { createProvider } from "../providers/factory.js";
 import type { EffortLevel } from "../providers/claude-cli.js";
 import { CheckpointService } from "../services/checkpoint.js";
-import { HistoryService } from "../services/history.js";
+import { HistoryService, type StoredSession } from "../services/history.js";
 import { PlanDecorationService } from "../services/plan-decorations.js";
 import { PlanArtifactManager } from "./plan-artifact-panel.js";
 import { buildWebviewHtml } from "./webview-html.js";
@@ -31,9 +31,12 @@ import {
   type RawMessage
 } from "./messages.js";
 import { broadcastUsage } from "./domains/usage.js";
-import { SessionStore } from "./domains/session-store.js";
-import { scopeForWrite } from "./domains/settings-scope.js";
+import {
+  SessionStore,
+  type ConversationSettings
+} from "./domains/session-store.js";
 import { confirmBypassMode } from "./domains/permission-modes.js";
+import { nextCycleMode } from "../core/permission-cycle.js";
 import { AuthManager } from "./domains/auth.js";
 import { PlanHandlers } from "./domains/plan-handlers.js";
 import { runInSetupTerminal } from "./domains/terminal.js";
@@ -111,6 +114,9 @@ export interface SharedServices {
   /** Open a stored conversation as an editor tab, leaving the caller's own
    *  conversation running and on screen. */
   openConversationInTab(sessionId: string): void;
+  /** Note which conversation the user is working in, so a keybinding lands on
+   *  the chat in front of them rather than an arbitrary one. */
+  markActive(host: ConversationHost): void;
 }
 
 /**
@@ -189,6 +195,9 @@ export class ConversationHost {
   /** Whether this conversation gets its own checkout. Cleared when isolation
    *  turns out to be impossible, so it is asked for once rather than per turn. */
   private isolate = false;
+  /** The posture this conversation runs in. Born from the `luno.*` defaults,
+   *  then owned here and saved with the session. */
+  private settings: ConversationSettings = defaultSettings();
   private worktree?: Worktree;
   /** The repository the worktree belongs to — needed to remove it later, and
    *  not the same path as the worktree itself. */
@@ -235,7 +244,12 @@ export class ConversationHost {
     this.artifacts = new PlanArtifactManager(shared.ctx);
     // After history and decorations: the store wires session events straight
     // into both, so it cannot be built before they exist.
-    this.sessions = new SessionStore(this.post, this.history, this.decorations);
+    this.sessions = new SessionStore(
+      this.post,
+      this.history,
+      this.decorations,
+      () => this.settings
+    );
     this.plan = new PlanHandlers({
       post: this.post,
       sessions: this.sessions,
@@ -404,6 +418,11 @@ export class ConversationHost {
         : Promise.resolve();
     void booted.then(() => {
       this.replayTimeline();
+      // Again, after the boot chain: the first publish above went out with the
+      // posture this host was born with, and adopting a stored conversation
+      // replaces it with the one that conversation ran in. Without this the
+      // composer shows the defaults while the turn would use something else.
+      void this.publishAuthState();
       void broadcastUsage(this.post);
     });
   }
@@ -420,7 +439,9 @@ export class ConversationHost {
    *  a missing file leaves the empty session this host was born with. */
   private async adoptStored(id: string): Promise<void> {
     const stored = await this.history.load(id);
-    if (stored) this.sessions.adopt(stored);
+    if (!stored) return;
+    this.sessions.adopt(stored);
+    this.applyStoredSettings(stored);
   }
 
   private async restoreLatestSession(): Promise<void> {
@@ -439,17 +460,71 @@ export class ConversationHost {
       if (!stored || !stored.timeline.some((e) => e.kind === "user")) return;
 
       this.sessions.adopt(stored);
+      this.applyStoredSettings(stored);
     } catch {
       // Restore is best-effort; on any failure we fall through to the
       // empty session created by the constructor.
     }
   }
 
-  /** Kept as a method because a dozen call sites re-publish auth after a
-   *  settings change; the state itself lives in `auth`, which owns the
-   *  definition of "authed". */
+  /**
+   * Publish this conversation's auth message: whether a turn can run, plus the
+   * posture the composer renders from.
+   *
+   * `auth` owns the first half and every conversation shares it; the second
+   * half belongs to this conversation alone, which is why the message is
+   * composed here rather than inside the shared service.
+   */
+  async publishAuthState(): Promise<void> {
+    this.post({
+      type: "auth",
+      authed: await this.auth.isAuthed(),
+      ...this.settings
+    });
+  }
+
+  /** Re-derive credential state and have every conversation republish. Used
+   *  when the credential itself may have changed, not when only this
+   *  conversation's posture did. */
   async broadcastAuthState() {
     await this.auth.broadcast();
+  }
+
+  /** Shift+Tab. Walks the cycle for this conversation only — the other chats
+   *  keep the posture they were left in. */
+  async cycleMode(): Promise<void> {
+    await this.applySetting(
+      "permissionMode",
+      nextCycleMode(this.settings.permissionMode)
+    );
+  }
+
+  /**
+   * Change one setting for this conversation, then republish and persist.
+   *
+   * Persisting matters: the posture is part of the conversation now, so
+   * reopening it from history has to bring it back rather than reset to the
+   * workspace default.
+   */
+  private async applySetting<K extends keyof ConversationSettings>(
+    key: K,
+    value: ConversationSettings[K]
+  ): Promise<void> {
+    this.settings = { ...this.settings, [key]: value };
+    await this.publishAuthState();
+    this.scheduleSave();
+  }
+
+  /** Restore the posture a stored conversation ran in, falling back to the
+   *  current defaults for sessions written before it was recorded. */
+  private applyStoredSettings(stored: StoredSession): void {
+    const fallback = defaultSettings();
+    this.settings = {
+      model: stored.model ?? fallback.model,
+      permissionMode: stored.permissionMode ?? fallback.permissionMode,
+      effort: stored.effort ?? fallback.effort,
+      thinking: stored.thinking ?? fallback.thinking
+    };
   }
 
   reveal() {
@@ -632,7 +707,7 @@ export class ConversationHost {
     // ── Settings ───────────────────────────────────────────────
     setModel: async (m) => {
       const model = str(m, "model");
-      if (model) await this.updateSetting("model", model);
+      if (model) await this.applySetting("model", model);
     },
     setPermissionMode: async (m) => {
       const mode = str(m, "mode");
@@ -646,16 +721,16 @@ export class ConversationHost {
         await this.auth.broadcast();
         return;
       }
-      await this.updateSetting("permissionMode", mode);
+      await this.applySetting("permissionMode", mode as PermissionMode);
     },
     setEffort: async (m) => {
       const effort = str(m, "effort");
-      if (effort) await this.updateSetting("effort", effort);
+      if (effort) await this.applySetting("effort", effort as EffortLevel);
     },
     setThinking: async (m) => {
       const thinking = bool(m, "thinking");
       if (thinking !== undefined) {
-        await this.updateSetting("thinking", thinking);
+        await this.applySetting("thinking", thinking);
       }
     },
 
@@ -922,36 +997,9 @@ export class ConversationHost {
     }
   };
 
-  /**
-   * Write a `luno.*` setting, then re-broadcast so the UI follows.
-   *
-   * Writes to **the scope the value is actually being read from**, not always
-   * Global. VS Code resolves narrowest-wins, so a `luno.effort` in
-   * `.vscode/settings.json` silently beats every Global write: the click
-   * dispatched, the write succeeded, the effective value never moved, and
-   * `broadcastAuthState` echoed the old one back — so the control snapped
-   * straight back to where it was and looked like a dead button.
-   *
-   * That is exactly what happened with a workspace pinning `effort: max` and
-   * `permissionMode: auto`: neither could be changed from the picker, with no
-   * error anywhere.
-   */
-  private async updateSetting(
-    key: string,
-    value: string | boolean
-  ): Promise<void> {
-    const cfg = vscode.workspace.getConfiguration("luno");
-    const TARGETS = {
-      workspaceFolder: vscode.ConfigurationTarget.WorkspaceFolder,
-      workspace: vscode.ConfigurationTarget.Workspace,
-      global: vscode.ConfigurationTarget.Global
-    } as const;
-
-    await cfg.update(key, value, TARGETS[scopeForWrite(cfg.inspect(key))]);
-    await this.broadcastAuthState();
-  }
-
   private async onMessage(msg: RawMessage) {
+    // Any inbound message means the user is working in this conversation.
+    this.shared.markActive(this);
     const handler = this.handlers[msg.type as InboundType];
     if (!handler) {
       // Previously silent. A type that reaches here is either a webview
@@ -1034,6 +1082,7 @@ export class ConversationHost {
     // second history entry — and drops the previous session's checkpoints.
     // `restoreLatestSession` used to carry its own copy of this.
     this.sessions.adopt(stored);
+    this.applyStoredSettings(stored);
 
     this.post({
       type: "loadedSession",
@@ -1073,20 +1122,8 @@ export class ConversationHost {
         const prevMode = meta.prePermissionMode;
         delete meta.proceeded;
         delete meta.prePermissionMode;
-        if (prevMode) {
-          const cfg = vscode.workspace.getConfiguration("luno");
-          const currentMode = cfg.get<PermissionMode>(
-            "permissionMode",
-            "default"
-          );
-          if (currentMode !== prevMode) {
-            await cfg.update(
-              "permissionMode",
-              prevMode,
-              vscode.ConfigurationTarget.Global
-            );
-            await this.broadcastAuthState();
-          }
+        if (prevMode && this.settings.permissionMode !== prevMode) {
+          await this.applySetting("permissionMode", prevMode);
         }
         this.scheduleSave();
       }
@@ -1171,12 +1208,12 @@ export class ConversationHost {
     if (workspaceRoot) {
       text = await extractInlineImages(text, workspaceRoot);
     }
+    // Posture comes from the conversation, not the workspace: another chat may
+    // be running under a different mode right now, and the `luno.*` settings
+    // are only what a new one starts with.
+    const { model, permissionMode: permMode, effort, thinking } = this.settings;
     const cfg = vscode.workspace.getConfiguration("luno");
-    const model = cfg.get<string>("model", "default");
     const maxTokens = cfg.get<number>("maxTokens", 4096);
-    const permMode = cfg.get<PermissionMode>("permissionMode", "default");
-    const effort = cfg.get<EffortLevel>("effort", "high");
-    const thinking = cfg.get<boolean>("thinking", true);
     const bashAllowlist = cfg.get<string[]>("allowedBashPatterns", []);
     // Skills the user toggled off in the picker. Passed through to the CLI
     // so it actually skips them at invocation time, not just visually.
@@ -1361,6 +1398,22 @@ export class ConversationHost {
  * and a path, both of which have to stay put, and a title is rewritten every
  * time the conversation's first message changes.
  */
+/**
+ * What a new conversation is born with.
+ *
+ * The `luno.*` settings are defaults here, not live state: changing one must
+ * not retarget a chat that is already running under a different posture.
+ */
+function defaultSettings(): ConversationSettings {
+  const cfg = vscode.workspace.getConfiguration("luno");
+  return {
+    model: cfg.get<string>("model", "default"),
+    permissionMode: cfg.get<PermissionMode>("permissionMode", "default"),
+    effort: cfg.get<EffortLevel>("effort", "high"),
+    thinking: cfg.get<boolean>("thinking", true)
+  };
+}
+
 function worktreeName(sessionId: string): string {
   return `luno-${sessionId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8)}`;
 }

@@ -70,6 +70,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.sidebar.sendSelectionToChat();
   }
 
+  /** Shift+Tab. Targets the conversation the user is working in, since each
+   *  now carries its own permission mode. */
+  async cycleMode() {
+    await this.registry.activeConversation()?.cycleMode();
+  }
+
   openConnectors() {
     this.sidebar.openConnectors();
   }

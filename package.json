@@ -2,7 +2,7 @@
   "name": "luno-for-cc",
   "displayName": "LUNO for CC",
   "description": "LUNO for CC — personal Claude Code chat for Cursor / VS Code.",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "publisher": "lunoweb",
   "license": "MIT",
   "icon": "assets/luno-icon-500.png",
@@ -135,7 +135,7 @@
         "luno.model": {
           "type": "string",
           "default": "default",
-          "description": "Model passed to 'claude -p --model'. Defaults to a CLI alias (sonnet, opus, haiku, opusplan, default) that always tracks the latest model for that tier; an explicit version (e.g. claude-sonnet-4-6) also works."
+          "description": "Model passed to 'claude -p --model'. Defaults to a CLI alias (sonnet, opus, haiku, opusplan, default) that always tracks the latest model for that tier; an explicit version (e.g. claude-sonnet-4-6) also works. Applies to new chats — each conversation then carries its own, so changing this never retargets a chat that is already open."
         },
         "luno.effort": {
           "type": "string",
@@ -147,12 +147,12 @@
             "max"
           ],
           "default": "high",
-          "description": "Reasoning effort passed to 'claude --effort'. Higher levels let the model reason longer (and spend more tokens) before answering. Set from the model picker in the chat composer."
+          "description": "Reasoning effort passed to 'claude --effort'. Higher levels let the model reason longer (and spend more tokens) before answering. Set from the model picker in the chat composer. Applies to new chats — each conversation then carries its own, so changing this never retargets a chat that is already open."
         },
         "luno.thinking": {
           "type": "boolean",
           "default": true,
-          "description": "Enable extended thinking (sets 'alwaysThinkingEnabled' for the session). When on, the model reasons step-by-step before answering — higher quality on complex work, at a higher token cost. Toggle from the model picker in the chat composer."
+          "description": "Enable extended thinking (sets 'alwaysThinkingEnabled' for the session). When on, the model reasons step-by-step before answering — higher quality on complex work, at a higher token cost. Toggle from the model picker in the chat composer. Applies to new chats — each conversation then carries its own, so changing this never retargets a chat that is already open."
         },
         "luno.claudeBinaryPath": {
           "type": "string",
@@ -184,7 +184,7 @@
             "Bypass — DANGEROUS. No approval prompt for anything, including rm, curl | bash and force-push."
           ],
           "default": "default",
-          "description": "Tool approval behavior. 'default' prompts before each action; 'plan' is read-only / no execution; 'auto' auto-approves reversible edits and bash commands matching allowedBashPatterns, while destructive and network commands still prompt. 'bypass' disables the approval gate entirely — the CLI runs every tool without asking, including deletes, arbitrary shell and force-push. Switching into 'bypass' from the panel requires an explicit confirmation, and Shift+Tab never cycles into it."
+          "description": "Tool approval behavior. 'default' prompts before each action; 'plan' is read-only / no execution; 'auto' auto-approves reversible edits and bash commands matching allowedBashPatterns, while destructive and network commands still prompt. 'bypass' disables the approval gate entirely — the CLI runs every tool without asking, including deletes, arbitrary shell and force-push. Switching into 'bypass' from the panel requires an explicit confirmation, and Shift+Tab never cycles into it. Applies to new chats — each conversation then carries its own, so changing this never retargets a chat that is already open."
         },
         "luno.maxTokens": {
           "type": "number",

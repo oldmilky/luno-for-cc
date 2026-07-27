@@ -16,6 +16,8 @@
 // ─────────────────────────────────────────────────────────────
 
 import { Session } from "../../core/session.js";
+import type { PermissionMode } from "../../core/types.js";
+import type { EffortLevel } from "../../providers/claude-cli.js";
 import type { CheckpointService } from "../../services/checkpoint.js";
 import {
   deriveTitle,
@@ -30,6 +32,21 @@ import type { Post } from "../messages.js";
 /** Coalesce a burst of timeline events into one write. */
 const SAVE_DEBOUNCE_MS = 400;
 
+/**
+ * The posture one conversation runs in.
+ *
+ * Per conversation rather than per workspace: with several chats open at once,
+ * one can be planning while another edits under Bypass, and a single global
+ * setting would retarget every running turn at once. The `luno.*` settings of
+ * the same names are what a *new* conversation is born with.
+ */
+export interface ConversationSettings {
+  model: string;
+  permissionMode: PermissionMode;
+  effort: EffortLevel;
+  thinking: boolean;
+}
+
 export class SessionStore {
   private session: Session;
   private checkpointService?: CheckpointService;
@@ -42,7 +59,10 @@ export class SessionStore {
   constructor(
     private readonly post: Post,
     private readonly history: HistoryService,
-    private readonly decorations: PlanDecorationService
+    private readonly decorations: PlanDecorationService,
+    /** Read at save time rather than held, because the user can change the
+     *  posture between the event that scheduled the write and the write. */
+    private readonly settingsFor: () => ConversationSettings
   ) {
     this.session = new Session();
     this.attachListeners();
@@ -126,7 +146,8 @@ export class SessionStore {
         updatedAt: Date.now(),
         messages: this.session.messages,
         timeline: this.session.timeline,
-        resumeId: this.resumeId
+        resumeId: this.resumeId,
+        ...this.settingsFor()
       });
     }, SAVE_DEBOUNCE_MS);
   }

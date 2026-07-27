@@ -69,6 +69,16 @@ export class ConversationRegistry {
   private primary?: ConversationHost;
 
   /**
+   * The conversation the user last interacted with.
+   *
+   * Tracked from inbound webview messages rather than from focus events: a
+   * message means the user typed, clicked or scrolled in that chat, which is a
+   * stronger and simpler signal than anything VS Code exposes about which
+   * webview holds the keyboard.
+   */
+  private active?: ConversationHost;
+
+  /**
    * Publish to every open conversation.
    *
    * An arrow property because the shared services take it as a value, and a
@@ -96,6 +106,12 @@ export class ConversationRegistry {
       // One credential backs every conversation, so losing it ends all of them.
       onSignOut: () => {
         for (const host of this.hosts) host.abandonTurnOnSignOut();
+      },
+      // The `auth` message carries each conversation's own model, mode and
+      // effort, so the shared service cannot compose it — every conversation
+      // republishes its own.
+      onPublish: () => {
+        for (const host of this.hosts) void host.publishAuthState();
       }
     });
     this.shared = {
@@ -105,7 +121,10 @@ export class ConversationRegistry {
       models,
       auth,
       conversationFor: (sessionId) => this.conversationFor(sessionId),
-      openConversationInTab: (sessionId) => void this.openInTab(sessionId)
+      openConversationInTab: (sessionId) => void this.openInTab(sessionId),
+      markActive: (host) => {
+        this.active = host;
+      }
     };
 
     // Pointing at a different `claude` binary changes which models the aliases
@@ -143,6 +162,12 @@ export class ConversationRegistry {
    *  off the files the editor is showing. */
   isolateSidebar(): boolean {
     return isolationWanted("sidebar");
+  }
+
+  /** The conversation a keybinding should act on: the one last worked in,
+   *  falling back to the first opened. */
+  activeConversation(): ConversationHost | undefined {
+    return this.active ?? this.primary;
   }
 
   /** Create a conversation. The first one becomes the primary. */

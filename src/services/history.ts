@@ -1,7 +1,8 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { Message, TimelineEvent } from "../core/types.js";
+import { Message, PermissionMode, TimelineEvent } from "../core/types.js";
+import type { EffortLevel } from "../providers/claude-cli.js";
 
 /**
  * Persists chat sessions under VS Code's per-extension globalStorage.
@@ -28,6 +29,18 @@ export interface StoredSession {
    * list scoped instead of merely reordered.
    */
   workspaceRoot?: string;
+  /**
+   * The posture the conversation was running in — model, permission mode,
+   * effort, extended thinking.
+   *
+   * Absent on sessions written before conversations carried their own settings.
+   * A reader must fall back to the `luno.*` defaults rather than assume, which
+   * is why every one of these is optional.
+   */
+  model?: string;
+  permissionMode?: PermissionMode;
+  effort?: EffortLevel;
+  thinking?: boolean;
 }
 
 export interface HistoryEntry {

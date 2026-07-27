@@ -1,0 +1,281 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+// Model, permission mode and effort used to be workspace settings, so every
+// chat shared one posture and changing it retargeted turns that were already
+// running. These assert the opposite: a conversation carries its own, and the
+// turn it spawns uses it.
+const disposable = { dispose: () => {} };
+const folder = vi.hoisted(() => ({ root: "" }));
+const spawned = vi.hoisted(
+  () => [] as { permissionMode: string; effort: string; model?: string }[]
+);
+
+vi.mock("../../src/providers/factory.js", () => ({
+  createProvider: (opts: { permissionMode: string; effort: string }) => {
+    spawned.push(opts);
+    return {
+      id: "fake",
+      // eslint-disable-next-line require-yield
+      async *stream() {
+        return;
+      }
+    };
+  },
+  resolveClaudeBinary: () => "claude"
+}));
+
+vi.mock("vscode", () => ({
+  workspace: {
+    get workspaceFolders() {
+      return folder.root
+        ? [{ uri: { fsPath: folder.root }, name: "ws" }]
+        : undefined;
+    },
+    getConfiguration: () => ({
+      get: (_key: string, fallback?: unknown) => fallback,
+      inspect: () => undefined,
+      update: async () => {}
+    }),
+    onDidChangeConfiguration: () => disposable,
+    asRelativePath: (p: unknown) => String(p),
+    createFileSystemWatcher: () => ({
+      onDidChange: () => disposable,
+      onDidCreate: () => disposable,
+      onDidDelete: () => disposable,
+      dispose: () => {}
+    })
+  },
+  window: {
+    activeTextEditor: undefined,
+    visibleTextEditors: [] as unknown[],
+    createTextEditorDecorationType: () => disposable,
+    onDidChangeActiveTextEditor: () => disposable,
+    onDidChangeTextEditorSelection: () => disposable,
+    showInformationMessage: async () => undefined,
+    showWarningMessage: async () => undefined,
+    createWebviewPanel: () => ({
+      webview: makeWebview(),
+      title: "",
+      iconPath: undefined as unknown,
+      reveal: () => {},
+      onDidDispose: () => disposable,
+      dispose: () => {}
+    })
+  },
+  ViewColumn: { Active: -1 },
+  RelativePattern: class {
+    constructor(
+      public base: unknown,
+      public pattern: string
+    ) {}
+  },
+  OverviewRulerLane: { Right: 2 },
+  ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
+  Uri: {
+    file: (p: string) => ({ fsPath: p, toString: () => p }),
+    joinPath: (base: { fsPath: string }, ...parts: string[]) => {
+      const joined = [base.fsPath, ...parts].join("/");
+      return { fsPath: joined, toString: () => joined };
+    }
+  }
+}));
+
+interface FakeWebview {
+  options: unknown;
+  html: string;
+  cspSource: string;
+  asWebviewUri(u: unknown): unknown;
+  postMessage(m: { type?: string }): Promise<boolean>;
+  onDidReceiveMessage(cb: (m: unknown) => void): { dispose(): void };
+  sent: { type?: string }[];
+  deliver(m: unknown): void;
+}
+
+const makeWebview = vi.hoisted(() => (): FakeWebview => {
+  const sent: { type?: string }[] = [];
+  let handler: ((m: unknown) => void) | undefined;
+  return {
+    options: {},
+    html: "",
+    cspSource: "vscode-webview:",
+    asWebviewUri: (u: unknown) => u,
+    postMessage: (m: { type?: string }) => {
+      sent.push(m);
+      return Promise.resolve(true);
+    },
+    onDidReceiveMessage: (cb: (m: unknown) => void) => {
+      handler = cb;
+      return disposable;
+    },
+    sent,
+    deliver: (m: unknown) => handler?.(m)
+  };
+});
+
+const { ConversationRegistry } =
+  await import("../../src/ui/conversation-registry.js");
+
+let storage: string;
+
+beforeEach(() => {
+  spawned.length = 0;
+  storage = fs.mkdtempSync(path.join(os.tmpdir(), "luno-settings-"));
+  // A turn refuses to start without an open folder, and these tests are about
+  // what it starts *with*. Deliberately not a git repository: isolation is a
+  // separate concern with its own file.
+  folder.root = fs.mkdtempSync(path.join(os.tmpdir(), "luno-settings-ws-"));
+});
+
+afterEach(() => {
+  fs.rmSync(storage, { recursive: true, force: true });
+  fs.rmSync(folder.root, { recursive: true, force: true });
+  folder.root = "";
+});
+
+function fakeContext() {
+  return {
+    subscriptions: [] as { dispose(): void }[],
+    extensionUri: { fsPath: "/ext", toString: () => "/ext" },
+    globalStorageUri: { fsPath: storage, toString: () => storage },
+    globalState: {
+      get: (key: string, d?: unknown) =>
+        key === "luno.claudeCredsReady.v1" ? true : d,
+      update: async () => {}
+    },
+    workspaceState: {
+      get: (_k: string, d?: unknown) => d,
+      update: async () => {}
+    },
+    secrets: {
+      get: async () => undefined,
+      store: async () => {},
+      delete: async () => {}
+    }
+  };
+}
+
+function fakeTarget() {
+  const webview = makeWebview();
+  return { webview, target: { webview, reveal: () => {} } };
+}
+
+/** The posture the webview was last told to render. */
+function lastAuth(sent: { type?: string }[]): Record<string, unknown> {
+  const auth = sent.filter((m) => m.type === "auth");
+  return auth[auth.length - 1] as Record<string, unknown>;
+}
+
+/** A turn reaches the spawn only after conventions and the MCP config are
+ *  resolved, so give the async chain room rather than racing it. */
+const settle = () => new Promise((r) => setTimeout(r, 350));
+
+describe("per-conversation settings", () => {
+  it("keeps one conversation's mode out of another's", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const first = fakeTarget();
+    const second = fakeTarget();
+    registry.create().attach(first.target as never);
+    registry.create().attach(second.target as never);
+
+    first.webview.deliver({ type: "setPermissionMode", mode: "plan" });
+    second.webview.deliver({ type: "setEffort", effort: "max" });
+    await settle();
+
+    expect(lastAuth(first.webview.sent).permissionMode).toBe("plan");
+    expect(lastAuth(second.webview.sent).permissionMode).toBe("default");
+    expect(lastAuth(second.webview.sent).effort).toBe("max");
+    expect(lastAuth(first.webview.sent).effort).toBe("high");
+  });
+
+  it("spawns each turn with its own conversation's posture", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const planning = fakeTarget();
+    const working = fakeTarget();
+    registry.create().attach(planning.target as never);
+    registry.create().attach(working.target as never);
+
+    planning.webview.deliver({ type: "setPermissionMode", mode: "plan" });
+    working.webview.deliver({ type: "setPermissionMode", mode: "auto" });
+    await settle();
+
+    planning.webview.deliver({ type: "prompt", text: "think" });
+    await settle();
+    working.webview.deliver({ type: "prompt", text: "do" });
+    await settle();
+
+    // The failure this guards is silent: one shared setting would have sent
+    // both turns out under whichever mode was written last.
+    expect(spawned.map((s) => s.permissionMode)).toEqual(["plan", "auto"]);
+  });
+
+  it("brings a conversation back in the posture it ran in", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const first = fakeTarget();
+    const host = registry.create();
+    host.attach(first.target as never);
+
+    first.webview.deliver({ type: "prompt", text: "hello" });
+    await settle();
+    first.webview.deliver({ type: "setEffort", effort: "low" });
+    await settle();
+    const sessionId = host.sessionId;
+    // Let the debounced write land.
+    await new Promise((r) => setTimeout(r, 700));
+
+    const reopened = registry.openInTab(sessionId);
+    await settle();
+
+    expect(reopened.sessionId).toBe(sessionId);
+    const panelSent = (
+      reopened as unknown as { target: { webview: FakeWebview } }
+    ).target.webview.sent;
+    expect(lastAuth(panelSent).effort).toBe("low");
+  });
+
+  it("falls back to the defaults for a chat stored before postures existed", async () => {
+    const dir = path.join(storage, "sessions");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "old.json"),
+      JSON.stringify({
+        id: "old",
+        title: "Old chat",
+        createdAt: 1,
+        updatedAt: 2,
+        messages: [],
+        timeline: [{ id: "u", ts: 1, kind: "user", title: "u", body: "hi" }]
+      })
+    );
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = fakeTarget();
+    const host = registry.create();
+    host.attach(surface.target as never, { adoptSessionId: "old" });
+    await settle();
+
+    // No `effort` in the file, and reading `undefined` back would have left the
+    // composer with an empty picker.
+    expect(host.sessionId).toBe("old");
+    expect(lastAuth(surface.webview.sent).effort).toBe("high");
+    expect(lastAuth(surface.webview.sent).permissionMode).toBe("default");
+  });
+
+  it("cycles the mode of the conversation last worked in", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const first = fakeTarget();
+    const second = fakeTarget();
+    registry.create().attach(first.target as never);
+    registry.create().attach(second.target as never);
+
+    // Interacting with the second one makes it the target of a keybinding.
+    second.webview.deliver({ type: "refreshAuth" });
+    await settle();
+    await registry.activeConversation()?.cycleMode();
+    await settle();
+
+    expect(lastAuth(second.webview.sent).permissionMode).toBe("plan");
+    expect(lastAuth(first.webview.sent).permissionMode).toBe("default");
+  });
+});

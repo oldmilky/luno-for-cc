@@ -23,8 +23,6 @@ import {
   setToken
 } from "../../secrets.js";
 import { resolveClaudeBinary } from "../../providers/factory.js";
-import type { PermissionMode } from "../../core/types.js";
-import type { EffortLevel } from "../../providers/claude-cli.js";
 import type { Post } from "../messages.js";
 
 const CREDS_READY_KEY = "luno.claudeCredsReady.v1";
@@ -41,6 +39,9 @@ export interface AuthHooks {
   onAuthed: () => Promise<void>;
   /** Signed out — stop the running turn and drop its continuation state. */
   onSignOut: () => void;
+  /** Have every conversation republish its `auth` message. The credential is
+   *  shared; the posture it carries alongside is not. */
+  onPublish: () => void;
 }
 
 export class AuthManager {
@@ -67,25 +68,27 @@ export class AuthManager {
     private readonly hooks: AuthHooks
   ) {}
 
-  /** Publish auth state plus the settings the composer renders from. */
-  async broadcast(): Promise<void> {
-    const cfg = vscode.workspace.getConfiguration("luno");
+  /** Whether a turn could run right now. */
+  async isAuthed(): Promise<boolean> {
     const token = await getToken(this.ctx);
     const credsReady = this.ctx.globalState.get<boolean>(
       CREDS_READY_KEY,
       false
     );
-    const authed = !this.signedOut && (!!token || credsReady);
+    return !this.signedOut && (!!token || credsReady);
+  }
 
-    this.post({
-      type: "auth",
-      authed,
-      model: cfg.get<string>("model", "default"),
-      permissionMode: cfg.get<PermissionMode>("permissionMode", "default"),
-      effort: cfg.get<EffortLevel>("effort", "high"),
-      thinking: cfg.get<boolean>("thinking", true)
-    });
-
+  /**
+   * Recompute and have every conversation republish.
+   *
+   * The `auth` message also carries the model, mode and effort the composer
+   * renders from, and those are per conversation — so this cannot post the
+   * message itself: one credential is shared by every chat, but one posture is
+   * not. Composing it is the conversation's job.
+   */
+  async broadcast(): Promise<void> {
+    const authed = await this.isAuthed();
+    this.hooks.onPublish();
     if (authed) await this.hooks.onAuthed();
   }
 
