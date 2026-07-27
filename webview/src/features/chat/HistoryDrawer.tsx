@@ -42,6 +42,10 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
     });
   }, []);
 
+  // Deliberately depends on `open` alone. `onClose` arrives as an inline arrow
+  // and so has a new identity on every parent render — with it in the deps this
+  // re-ran on every streamed delta, blanking the list to skeletons and
+  // refetching it several times a second while the agent was answering.
   useEffect(() => {
     if (!open) {
       setQuery("");
@@ -50,6 +54,10 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
     }
     setSessions(null);
     send({ type: "requestHistory" });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
