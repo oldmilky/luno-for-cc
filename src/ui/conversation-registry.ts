@@ -33,6 +33,23 @@ const USAGE_POLL_MS = 60_000;
  *  serialization and `retainContextWhenHidden` off it. */
 const TAB_VIEW_TYPE = "luno.conversation";
 
+/**
+ * Whether a surface gets its own git worktree.
+ *
+ * `tabs` is the default: the sidebar keeps working on the files the user has
+ * open — edits landing in a checkout they cannot see would be worse than the
+ * collisions isolation prevents — while every additional chat, which is where
+ * parallel work actually happens, gets a tree of its own.
+ */
+function isolationWanted(surface: "sidebar" | "tab"): boolean {
+  const mode = vscode.workspace
+    .getConfiguration("luno")
+    .get<string>("worktree", "tabs");
+  if (mode === "always") return true;
+  if (mode === "tabs") return surface === "tab";
+  return false;
+}
+
 export class ConversationRegistry {
   private readonly hosts = new Set<ConversationHost>();
   private readonly shared: SharedServices;
@@ -121,6 +138,13 @@ export class ConversationRegistry {
     return [...this.hosts].find((h) => h.sessionId === sessionId);
   }
 
+  /** Whether the sidebar conversation runs in its own checkout. Only under
+   *  `luno.worktree: "always"`, which is an explicit choice to keep every chat
+   *  off the files the editor is showing. */
+  isolateSidebar(): boolean {
+    return isolationWanted("sidebar");
+  }
+
   /** Create a conversation. The first one becomes the primary. */
   create(): ConversationHost {
     const host = new ConversationHost(this.shared);
@@ -152,8 +176,14 @@ export class ConversationRegistry {
       "luno-activitybar.png"
     );
     host.attach(
-      { webview: panel.webview, reveal: () => panel.reveal() },
-      { adoptSessionId: sessionId }
+      {
+        webview: panel.webview,
+        reveal: () => panel.reveal(),
+        setTitle: (title) => {
+          panel.title = title;
+        }
+      },
+      { adoptSessionId: sessionId, isolate: isolationWanted("tab") }
     );
     // Closing the tab ends the conversation: its CLI process must die with it
     // rather than keep streaming into a webview nobody can see.
@@ -161,9 +191,12 @@ export class ConversationRegistry {
     return host;
   }
 
-  /** Retire a conversation and release its CLI process. */
+  /** Retire a conversation, release its CLI process, and give back its
+   *  checkout — unless that checkout still holds work, which `removeWorktree`
+   *  decides. */
   close(host: ConversationHost): void {
     host.dispose();
+    void host.releaseWorktree();
     this.hosts.delete(host);
     if (this.primary === host) this.primary = this.hosts.values().next().value;
   }

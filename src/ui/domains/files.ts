@@ -42,17 +42,26 @@ function why(err: unknown): string {
  * workspace root. With a line range, the editor scrolls to it and selects the
  * span; without, it just opens.
  */
+/**
+ * @param workingRoot Where a relative path resolves. The conversation's own
+ * tree, which is not the open folder when that conversation is isolated —
+ * opening the main checkout's copy would show the user a file the agent never
+ * touched.
+ */
 export async function openFile(
   post: Post,
   pathOrRel: string,
   startLine: number,
-  endLine: number
+  endLine: number,
+  workingRoot?: string
 ): Promise<void> {
   let target: vscode.Uri;
   if (isAbsolutePath(pathOrRel)) {
     target = vscode.Uri.file(pathOrRel);
   } else {
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+    const root = workingRoot
+      ? vscode.Uri.file(workingRoot)
+      : vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!root) {
       post({ type: "error", message: "Open a workspace folder first." });
       return;

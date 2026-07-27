@@ -2,7 +2,7 @@
   "name": "luno-for-cc",
   "displayName": "LUNO for CC",
   "description": "LUNO for CC — personal Claude Code chat for Cursor / VS Code.",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "publisher": "lunoweb",
   "license": "MIT",
   "icon": "assets/luno-icon-500.png",
@@ -201,6 +201,21 @@
             "^npm (test|run test)$"
           ],
           "description": "Regex patterns of bash commands auto-approved in auto mode."
+        },
+        "luno.worktree": {
+          "type": "string",
+          "enum": [
+            "off",
+            "tabs",
+            "always"
+          ],
+          "enumDescriptions": [
+            "Every chat works in the folder you have open. Simplest, but parallel chats can overwrite each other and a rewind in one can undo another.",
+            "Each chat opened in a tab gets its own git worktree and branch; the sidebar keeps working on the files you have open.",
+            "Every chat, including the sidebar, works in its own git worktree. Nothing an agent does appears in your open files until you merge its branch."
+          ],
+          "default": "tabs",
+          "description": "Whether a chat gets its own git worktree. Isolation keeps parallel chats from colliding — separate files, separate branch, shared history — at the cost of the work not showing up in your open files until the branch is merged. Worktrees live in .claude/worktrees/ and are removed when the chat closes, unless they still hold uncommitted or unmerged work."
         }
       }
     }

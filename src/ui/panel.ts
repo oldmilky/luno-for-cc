@@ -37,8 +37,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       },
       // Only the sidebar resumes: it is the surface a window reload is expected
       // to bring back. A tab that did this would reopen a chat already on
-      // screen.
-      { resumeLastConversation: true }
+      // screen. Isolation is decided by the registry, which reads the setting.
+      { resumeLastConversation: true, isolate: this.registry.isolateSidebar() }
     );
   }
 

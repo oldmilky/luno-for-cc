@@ -71,6 +71,12 @@ import {
   type CustomDraft
 } from "./domains/connectors.js";
 import { loadConventions, ConventionsFile } from "../services/conventions.js";
+import {
+  createWorktree,
+  removeWorktree,
+  repoRoot,
+  type Worktree
+} from "../services/worktree.js";
 import { classifyTask } from "../core/task-classifier.js";
 import type { InstallTarget } from "../services/marketplace.js";
 // Only what the turn path still needs: the connector *handlers* live in
@@ -117,6 +123,9 @@ export interface SharedServices {
 export interface HostTarget {
   webview: vscode.Webview;
   reveal(): void;
+  /** Rename the surface. Only an editor tab can — the sidebar's title is the
+   *  view's, and VS Code owns it. */
+  setTitle?(title: string): void;
 }
 
 export interface AttachOptions {
@@ -139,6 +148,14 @@ export interface AttachOptions {
    * panels carry a `requestArtifactState` handshake for exactly that reason.
    */
   adoptSessionId?: string;
+  /**
+   * Give this conversation its own git worktree.
+   *
+   * Off for the sidebar: that is the chat working on the files the user has
+   * open, and edits landing in a checkout they cannot see would be worse than
+   * the collisions isolation prevents.
+   */
+  isolate?: boolean;
 }
 
 /**
@@ -169,6 +186,13 @@ export class ConversationHost {
   /** Plan artifacts open as editor tabs and mirror this conversation's plan, so
    *  they belong to it rather than to the extension. */
   private readonly artifacts: PlanArtifactManager;
+  /** Whether this conversation gets its own checkout. Cleared when isolation
+   *  turns out to be impossible, so it is asked for once rather than per turn. */
+  private isolate = false;
+  private worktree?: Worktree;
+  /** The repository the worktree belongs to — needed to remove it later, and
+   *  not the same path as the worktree itself. */
+  private repo?: string;
 
   // Delegating accessors for the shared services. Reading them through `shared`
   // at each of the ~58 call sites would have been the same change spelled out
@@ -257,6 +281,80 @@ export class ConversationHost {
     return this.session.id;
   }
 
+  /**
+   * Where this conversation's files live, creating its isolated checkout on
+   * first use.
+   *
+   * Lazy for the same reason checkpoints are: a chat that is opened and never
+   * prompted should not leave a checkout behind. Returns the folder VS Code has
+   * open when this conversation is not isolated, and undefined when there is no
+   * folder at all.
+   */
+  /** The tree as it stands, without creating one. Used by anything that only
+   *  needs to resolve a path — opening a file must not conjure a checkout. */
+  private get workingRoot(): string | undefined {
+    return (
+      this.worktree?.path ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+    );
+  }
+
+  private async ensureWorkingRoot(): Promise<string | undefined> {
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!folder || !this.isolate) return folder;
+    if (this.worktree) return this.worktree.path;
+
+    const root = await repoRoot(folder);
+    if (!root) {
+      this.isolate = false;
+      this.post({
+        type: "error",
+        message:
+          "This folder is not a git repository, so this chat shares the " +
+          "working tree with the others. Edits and rewinds can collide."
+      });
+      return folder;
+    }
+    try {
+      this.worktree = await createWorktree(root, worktreeName(this.session.id));
+      this.repo = root;
+      this.target?.setTitle?.(`Luno · ${this.worktree.name}`);
+      return this.worktree.path;
+    } catch (err) {
+      // Isolation was asked for and could not be given. Saying so and running
+      // anyway beats refusing to answer, but it must not be silent — the whole
+      // point of the mode is that the user believes their chats cannot collide.
+      this.isolate = false;
+      const message = err instanceof Error ? err.message : String(err);
+      this.post({
+        type: "error",
+        message: `Couldn't create an isolated worktree (${message}). This chat shares the working tree.`
+      });
+      return folder;
+    }
+  }
+
+  /**
+   * Give the conversation's checkout back, keeping it when that would destroy
+   * work. Called when the conversation is closed, since a headless CLI run has
+   * no exit prompt of its own to do it.
+   */
+  async releaseWorktree(): Promise<void> {
+    if (!this.worktree || !this.repo) return;
+    const tree = this.worktree;
+    this.worktree = undefined;
+    const result = await removeWorktree(this.repo, tree).catch(
+      (err: unknown) => ({
+        removed: false,
+        reason: err instanceof Error ? err.message : String(err)
+      })
+    );
+    if (!result.removed) {
+      void vscode.window.showInformationMessage(
+        `Luno kept ${tree.path} on branch ${tree.branch} because ${result.reason}.`
+      );
+    }
+  }
+
   /** Read by the registry to paint editor decorations for whichever
    *  conversation is in front. */
   get timeline() {
@@ -279,6 +377,7 @@ export class ConversationHost {
    */
   attach(target: HostTarget, opts: AttachOptions = {}) {
     this.target = target;
+    this.isolate = opts.isolate === true;
     const view = target;
     view.webview.options = {
       enableScripts: true,
@@ -572,7 +671,8 @@ export class ConversationHost {
           this.post,
           path,
           num(m, "startLine") ?? 0,
-          num(m, "endLine") ?? 0
+          num(m, "endLine") ?? 0,
+          this.workingRoot
         );
       }
     },
@@ -1063,10 +1163,13 @@ export class ConversationHost {
   }
 
   private async runPromptTurn(text: string) {
-    const workspaceForImages =
-      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (workspaceForImages) {
-      text = await extractInlineImages(text, workspaceForImages);
+    // Resolved once and used for everything downstream. In an isolated
+    // conversation this is the worktree, not the folder VS Code has open, and a
+    // path that misses it lands in the wrong tree: attachments the agent cannot
+    // read, checkpoints that restore someone else's file.
+    const workspaceRoot = await this.ensureWorkingRoot();
+    if (workspaceRoot) {
+      text = await extractInlineImages(text, workspaceRoot);
     }
     const cfg = vscode.workspace.getConfiguration("luno");
     const model = cfg.get<string>("model", "default");
@@ -1088,7 +1191,6 @@ export class ConversationHost {
     if (!credential.ok) return;
     const token = credential.token;
 
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!workspaceRoot) {
       this.post({ type: "error", message: "Open a folder to use Luno." });
       return;
@@ -1250,6 +1352,17 @@ export class ConversationHost {
       title: "Luno"
     });
   }
+}
+
+/**
+ * Directory name for a conversation's checkout.
+ *
+ * Derived from the session id rather than the title: it becomes a branch name
+ * and a path, both of which have to stay put, and a title is rewritten every
+ * time the conversation's first message changes.
+ */
+function worktreeName(sessionId: string): string {
+  return `luno-${sessionId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8)}`;
 }
 
 /** Strip stray slash prefixes and trailing whitespace from a captured selection. */
