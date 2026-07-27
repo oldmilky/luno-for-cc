@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-// User message — converted from Tailwind to an SCSS module in Ф1.
+// User message.
 // Reads design tokens only; see docs/TOKENS.md.
 //
 // The bubble keeps the global `md` class (shared markdown prose
@@ -44,7 +44,7 @@
   position: relative;
   flex: 1;
   min-width: 0;
-  padding: 10px 80px 10px 14px;
+  padding: 10px 14px;
   border: 1px solid var(--b2);
   border-radius: var(--round-lg);
   border-top-left-radius: 5px;
@@ -80,14 +80,6 @@
     opacity: 0.5;
     transition: opacity var(--motion-hover) var(--ease-out);
   }
-
-  > p {
-    margin: 0;
-  }
-
-  > p + p {
-    margin-top: 8px;
-  }
 }
 
 // Click-to-edit affordance: the whole bubble re-opens the prompt.
@@ -116,7 +108,19 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  // This gap is the only thing separating paragraphs, badges and images — see
+  // the paragraph reset in `.bubble`.
+  gap: 8px;
+}
+
+// `md` gives every paragraph `margin: 0 0 0.85em` (theme.css), and inside a user
+// bubble the `.content` gap above owns that rhythm instead. The reset used to
+// read `.bubble > p`, which matches nothing: the prose is wrapped in `.content`,
+// not in the bubble directly. So 11.5px hung under the last paragraph, and that
+// was most of the oversized gap above the actions row. Two class levels, because
+// `.md p` and a bare `.content > p` tie on specificity and theme.css loads last.
+.bubble .content > p {
+  margin: 0;
 }
 
 // A bold-only line (e.g. **myflow.py:18-19**) is a file label the user tagged
@@ -161,10 +165,25 @@
     color var(--motion-hover) var(--ease-out);
 }
 
+// Toggle and actions share one row under the prose. They used to be an absolute
+// layer in the bubble's top-right corner, which the text ran straight into as
+// soon as a message was long enough to fill the line — the 80px of reserved
+// right padding held two labels, and "Copy" plus "Rewind" need closer to 140.
+// The negative inset cancels %action-button's own padding so the first label
+// lines up with the prose above it rather than the button's edge.
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  // 2px, not 6: the prose's 1.65 line-height already leaves ~4px of half-leading
+  // under the last line and %action-button adds 3px of its own padding, so the
+  // visual gap is roughly 9px — the margin is the smallest of the three parts.
+  margin-top: 2px;
+  margin-left: -8px;
+}
+
 .toggle {
   @extend %action-button;
-  margin-top: 4px;
-  margin-left: -8px;
 
   &:hover {
     background: var(--s3);
@@ -174,9 +193,6 @@
 }
 
 .actions {
-  position: absolute;
-  top: 6px;
-  right: 4px;
   display: inline-flex;
   align-items: center;
   gap: 4px;

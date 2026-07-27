@@ -253,47 +253,49 @@ export function UserMessage({
             })}
             {overflowing && collapsed && <div className={s.fade} />}
           </div>
-          {overflowing && (
-            <button
-              type="button"
-              className={s.toggle}
-              onClick={(e) => {
-                e.stopPropagation();
-                setCollapsed((c) => !c);
-              }}
-              aria-expanded={!collapsed}
-            >
-              <Icon name={collapsed ? "chevronD" : "chevronU"} size={11} />
-              {collapsed ? "Show more" : "Show less"}
-            </button>
-          )}
-          <div className={s.actions}>
-            <Tooltip label="Copy message (including tagged code)">
+          <div className={s.footer}>
+            {overflowing && (
               <button
                 type="button"
-                className={s.action}
-                onClick={handleCopyButton}
-                aria-label="Copy message"
+                className={s.toggle}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCollapsed((c) => !c);
+                }}
+                aria-expanded={!collapsed}
               >
-                <Icon name={copied ? "check" : "copy"} size={11} />
-                {copied ? "Copied" : "Copy"}
+                <Icon name={collapsed ? "chevronD" : "chevronU"} size={11} />
+                {collapsed ? "Show more" : "Show less"}
               </button>
-            </Tooltip>
-            {canRewind && (
-              <Tooltip label="Rewind conversation to here">
+            )}
+            <div className={s.actions}>
+              <Tooltip label="Copy message (including tagged code)">
                 <button
                   type="button"
-                  className={s.rewind}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRewindRequest?.(id, messagesAfter);
-                  }}
+                  className={s.action}
+                  onClick={handleCopyButton}
+                  aria-label="Copy message"
                 >
-                  <Icon name="history" size={11} />
-                  Rewind
+                  <Icon name={copied ? "check" : "copy"} size={11} />
+                  {copied ? "Copied" : "Copy"}
                 </button>
               </Tooltip>
-            )}
+              {canRewind && (
+                <Tooltip label="Rewind conversation to here">
+                  <button
+                    type="button"
+                    className={s.rewind}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRewindRequest?.(id, messagesAfter);
+                    }}
+                  >
+                    <Icon name="history" size={11} />
+                    Rewind
+                  </button>
+                </Tooltip>
+              )}
+            </div>
           </div>
         </div>
       </Tooltip>

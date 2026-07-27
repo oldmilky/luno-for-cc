@@ -38,17 +38,15 @@
     0 0 0 1px var(--tint) inset;
 }
 
-.busy {
+// A streaming turn dims the input surface, never `.wrapper`. An opacity below 1
+// makes an element a stacking context, and on `.wrapper` that trapped the
+// pickers' popovers inside it — their z-index stopped competing with the chat
+// log, which then painted over them and swallowed every click aimed at one.
+// The rule this replaces tried to exempt the popovers with `opacity: 1`; that
+// could never have worked, because an ancestor's opacity multiplies and a
+// descendant cannot opt out of it.
+.busy .editorArea {
   opacity: 0.9;
-
-  // Popovers must stay fully legible while a turn streams. Targeted by role
-  // rather than class: the pickers own their own CSS modules now, so there is
-  // no shared class name to hook — but every popover here is a listbox or a
-  // dialog, and that contract is stable.
-  [role="listbox"],
-  [role="dialog"] {
-    opacity: 1;
-  }
 }
 
 .dropping {

@@ -71,7 +71,17 @@ export class Orchestrator {
     };
 
     for await (const delta of this.o.provider.stream(req)) {
-      if (this.cancelled) return;
+      // A cancelled turn keeps whatever the model already said. Text sits in
+      // `textBuf` until a tool call or the end of the stream flushes it, so
+      // returning straight out threw away a partial answer the user had already
+      // watched arrive — Stop, rewind, edit and switching session all land here.
+      // `messages` stays untouched on purpose, exactly as the `error` case
+      // below does: a half-finished block sequence is not safe to feed back as
+      // context for the next turn.
+      if (this.cancelled) {
+        flushText();
+        return;
+      }
       this.o.onDelta?.(delta);
       switch (delta.type) {
         case "text":

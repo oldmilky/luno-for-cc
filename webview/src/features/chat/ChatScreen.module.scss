@@ -1,7 +1,6 @@
 // ─────────────────────────────────────────────────────────────
 // Chat screen — the scroll column, the turn rail, the scroll-to-
-// bottom FAB, and the composer dock. Converted from Tailwind +
-// theme.css in Ф2а.
+// bottom FAB, and the composer dock.
 // ─────────────────────────────────────────────────────────────
 
 // Sits directly under `.app` next to the header. z-index lifts it clear of the
@@ -110,8 +109,17 @@
   box-shadow: 0 4px 16px -4px var(--accent-shadow);
 }
 
+// The dock declares its own layer, as every direct child of `.app` must — see
+// the note in theme.css. It is the one child that used to declare none, which is
+// why a picker's popover lost to the log: anything inside the composer that
+// becomes a stacking context (`.busy`'s opacity, a framer transform) traps the
+// popover's own z-index, and an undeclared layer then sits below the log's 1.
+// The popover did not just paint underneath — the log swallowed its clicks.
+// 20 keeps the dock above the log and the header while staying below every
+// overlay (50+), so a modal still covers the composer.
 .dock {
   position: relative;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   gap: 10px;
