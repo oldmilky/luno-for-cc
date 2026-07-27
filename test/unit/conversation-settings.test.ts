@@ -61,6 +61,7 @@ vi.mock("vscode", () => ({
       title: "",
       iconPath: undefined as unknown,
       reveal: () => {},
+      onDidChangeViewState: () => disposable,
       onDidDispose: () => disposable,
       dispose: () => {}
     })
@@ -277,5 +278,102 @@ describe("per-conversation settings", () => {
 
     expect(lastAuth(second.webview.sent).permissionMode).toBe("plan");
     expect(lastAuth(first.webview.sent).permissionMode).toBe("default");
+  });
+});
+
+describe("conversation status", () => {
+  /** A surface that records what it was named, the way a tab does. */
+  function titledTarget() {
+    const webview = makeWebview();
+    const titles: string[] = [];
+    return {
+      webview,
+      titles,
+      target: {
+        webview,
+        reveal: () => {},
+        setTitle: (t: string) => {
+          titles.push(t);
+        }
+      }
+    };
+  }
+
+  it("names a tab after the conversation rather than a number", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = titledTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+
+    surface.webview.deliver({
+      type: "prompt",
+      text: "Refactor the permission gate"
+    });
+    await settle();
+
+    expect(surface.titles.at(-1)).toContain("Refactor the permission gate");
+  });
+
+  it("marks a conversation that finished while the user was elsewhere", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = titledTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    host.setVisible(false);
+
+    surface.webview.deliver({ type: "prompt", text: "do the thing" });
+    await settle();
+
+    expect(host.attention).toBe("finished");
+    expect(surface.titles.at(-1)?.startsWith("●")).toBe(true);
+    expect(registry.attentionCount()).toBe(1);
+  });
+
+  it("clears the mark once the conversation is looked at", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = titledTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    host.setVisible(false);
+    surface.webview.deliver({ type: "prompt", text: "do the thing" });
+    await settle();
+
+    host.setVisible(true);
+
+    expect(host.attention).toBe("none");
+    expect(registry.attentionCount()).toBe(0);
+  });
+
+  it("leaves a visible conversation unmarked when its turn ends", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = titledTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+
+    surface.webview.deliver({ type: "prompt", text: "do the thing" });
+    await settle();
+
+    // The user watched it happen; there is nothing to come back to.
+    expect(host.attention).toBe("none");
+  });
+
+  it("counts every conversation waiting on the user", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const one = titledTarget();
+    const two = titledTarget();
+    const first = registry.create();
+    const second = registry.create();
+    first.attach(one.target as never);
+    second.attach(two.target as never);
+    first.setVisible(false);
+    second.setVisible(false);
+
+    one.webview.deliver({ type: "prompt", text: "a" });
+    await settle();
+    two.webview.deliver({ type: "prompt", text: "b" });
+    await settle();
+
+    // The sidebar badge is the only thing a user with five hidden tabs sees.
+    expect(registry.attentionCount()).toBe(2);
   });
 });

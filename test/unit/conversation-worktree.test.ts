@@ -60,6 +60,7 @@ vi.mock("vscode", () => ({
       title: "",
       iconPath: undefined as unknown,
       reveal: () => {},
+      onDidChangeViewState: () => disposable,
       onDidDispose: () => disposable,
       dispose: () => {}
     })

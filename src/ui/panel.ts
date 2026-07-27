@@ -28,6 +28,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   resolveWebviewView(view: vscode.WebviewView) {
+    // The sidebar is the one surface that is always reachable, so it carries
+    // the count for every conversation that is waiting off screen. Without it a
+    // tab parked on an approval is a chat that silently stopped.
+    this.registry.onAttentionChanged = () => {
+      const waiting = this.registry.attentionCount();
+      view.badge =
+        waiting > 0
+          ? { value: waiting, tooltip: `${waiting} chat(s) need you` }
+          : undefined;
+    };
+    view.onDidChangeVisibility(() => this.sidebar.setVisible(view.visible));
     this.sidebar.attach(
       {
         webview: view.webview,

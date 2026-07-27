@@ -79,6 +79,13 @@ export class ConversationRegistry {
   private active?: ConversationHost;
 
   /**
+   * Told when any conversation starts or stops wanting the user, so the sidebar
+   * can carry one badge for every chat that is off screen. Owned by whoever
+   * holds the view, since only it can set a badge.
+   */
+  onAttentionChanged?: () => void;
+
+  /**
    * Publish to every open conversation.
    *
    * An arrow property because the shared services take it as a value, and a
@@ -124,7 +131,8 @@ export class ConversationRegistry {
       openConversationInTab: (sessionId) => void this.openInTab(sessionId),
       markActive: (host) => {
         this.active = host;
-      }
+      },
+      attentionChanged: () => this.onAttentionChanged?.()
     };
 
     // Pointing at a different `claude` binary changes which models the aliases
@@ -170,6 +178,11 @@ export class ConversationRegistry {
     return this.active ?? this.primary;
   }
 
+  /** How many conversations are waiting on the user right now. */
+  attentionCount(): number {
+    return [...this.hosts].filter((h) => h.attention !== "none").length;
+  }
+
   /** Create a conversation. The first one becomes the primary. */
   create(): ConversationHost {
     const host = new ConversationHost(this.shared);
@@ -210,6 +223,9 @@ export class ConversationRegistry {
       },
       { adoptSessionId: sessionId, isolate: isolationWanted("tab") }
     );
+    // A hidden tab keeps running, so it has to be able to say it finished or
+    // needs an answer without being on screen.
+    panel.onDidChangeViewState(() => host.setVisible(panel.visible));
     // Closing the tab ends the conversation: its CLI process must die with it
     // rather than keep streaming into a webview nobody can see.
     panel.onDidDispose(() => this.close(host));

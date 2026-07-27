@@ -75,6 +75,7 @@ vi.mock("vscode", () => ({
         reveal() {
           panel.revealed++;
         },
+        onDidChangeViewState: () => disposable,
         onDidDispose: () => disposable,
         dispose: () => {}
       };

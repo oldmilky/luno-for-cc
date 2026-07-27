@@ -14,7 +14,11 @@ import { buildSystemPrompt } from "./system-prompt.js";
 import { createProvider } from "../providers/factory.js";
 import type { EffortLevel } from "../providers/claude-cli.js";
 import { CheckpointService } from "../services/checkpoint.js";
-import { HistoryService, type StoredSession } from "../services/history.js";
+import {
+  deriveTitle,
+  HistoryService,
+  type StoredSession
+} from "../services/history.js";
 import { PlanDecorationService } from "../services/plan-decorations.js";
 import { PlanArtifactManager } from "./plan-artifact-panel.js";
 import { buildWebviewHtml } from "./webview-html.js";
@@ -117,6 +121,9 @@ export interface SharedServices {
   /** Note which conversation the user is working in, so a keybinding lands on
    *  the chat in front of them rather than an arbitrary one. */
   markActive(host: ConversationHost): void;
+  /** A conversation now wants — or no longer wants — the user. Lets the
+   *  registry keep one badge for every chat that is off screen. */
+  attentionChanged(): void;
 }
 
 /**
@@ -195,6 +202,14 @@ export class ConversationHost {
   /** Whether this conversation gets its own checkout. Cleared when isolation
    *  turns out to be impossible, so it is asked for once rather than per turn. */
   private isolate = false;
+  /** Whether the user can currently see this conversation. A hidden one still
+   *  runs — that is the whole point — so it has to be able to say it needs
+   *  attention without being on screen. */
+  private visible = true;
+  /** A turn parked on an approval holds a live CLI process and will sit there
+   *  forever. Invisible, that reads as a chat that simply stopped. */
+  private awaitingApproval = false;
+  private finishedWhileHidden = false;
   /** The posture this conversation runs in. Born from the `luno.*` defaults,
    *  then owned here and saved with the session. */
   private settings: ConversationSettings = defaultSettings();
@@ -331,7 +346,7 @@ export class ConversationHost {
     try {
       this.worktree = await createWorktree(root, worktreeName(this.session.id));
       this.repo = root;
-      this.target?.setTitle?.(`Luno · ${this.worktree.name}`);
+      this.refreshSurface();
       return this.worktree.path;
     } catch (err) {
       // Isolation was asked for and could not be given. Saying so and running
@@ -367,6 +382,52 @@ export class ConversationHost {
         `Luno kept ${tree.path} on branch ${tree.branch} because ${result.reason}.`
       );
     }
+  }
+
+  /**
+   * What this conversation needs from the user, for a surface that can only
+   * show a glyph.
+   *
+   * `approval` outranks `finished`: one is a turn that cannot continue until
+   * someone answers, the other is an answer waiting to be read.
+   */
+  get attention(): "none" | "approval" | "finished" {
+    if (this.awaitingApproval) return "approval";
+    if (this.finishedWhileHidden) return "finished";
+    return "none";
+  }
+
+  /** Told by the surface when the user can or cannot see this conversation. */
+  setVisible(visible: boolean): void {
+    this.visible = visible;
+    // Seeing it is reading it. An approval still stands, because it needs an
+    // answer rather than an eye.
+    if (visible) this.finishedWhileHidden = false;
+    this.refreshSurface();
+  }
+
+  /**
+   * Re-label the surface: the conversation's own title, prefixed by whatever it
+   * needs from the user.
+   *
+   * A leading glyph rather than a coloured dot because VS Code exposes no
+   * per-tab badge — `iconPath` is a static image and the title is the only part
+   * a tab will render on demand.
+   */
+  private refreshSurface(): void {
+    const title = deriveTitle(this.session.timeline) || "New chat";
+    const prefix =
+      this.attention === "approval"
+        ? "⚠ "
+        : this.attention === "finished"
+          ? "● "
+          : "";
+    // An isolated conversation says so in its own title: its edits land on that
+    // branch and nowhere the user's open files can show them, which is the one
+    // thing about this mode that surprises people.
+    const branch = this.worktree ? ` · ${this.worktree.branch}` : "";
+    this.target?.setTitle?.(`${prefix}${title}${branch}`);
+    this.shared.attentionChanged();
   }
 
   /** Read by the registry to paint editor decorations for whichever
@@ -418,6 +479,9 @@ export class ConversationHost {
         : Promise.resolve();
     void booted.then(() => {
       this.replayTimeline();
+      // A reopened conversation has a title the moment it is adopted, so the
+      // surface should not sit on its placeholder until the next turn.
+      this.refreshSurface();
       // Again, after the boot chain: the first publish above went out with the
       // posture this host was born with, and adopting a stored conversation
       // replaces it with the one that conversation ran in. Without this the
@@ -666,6 +730,8 @@ export class ConversationHost {
       const requestId = str(m, "requestId");
       const behavior = oneOf(m, "behavior", ["allow", "deny"] as const);
       if (!requestId || !behavior) return;
+      this.awaitingApproval = false;
+      this.refreshSurface();
       if (!this.activeProvider?.respondToPermission) {
         console.warn(
           "[luno] permissionResponse arrived but no active provider to answer it"
@@ -1315,6 +1381,10 @@ export class ConversationHost {
         // message (an inline approval card in the webview) rather than a raw
         // delta the timeline doesn't know how to render.
         if (d.type === "permission_request" && d.permission) {
+          // The turn now cannot continue until someone answers. Off screen that
+          // reads as a chat that simply stopped, so it has to say so.
+          this.awaitingApproval = true;
+          this.refreshSurface();
           this.post({ type: "permissionRequest", request: d.permission });
           return;
         }
@@ -1352,6 +1422,11 @@ export class ConversationHost {
         await orchestrator.turn(text);
       } finally {
         this.activeProvider = undefined;
+        this.awaitingApproval = false;
+        // A turn that landed while the user was looking elsewhere is the other
+        // thing worth a glyph: the answer is sitting there unread.
+        if (!this.visible) this.finishedWhileHidden = true;
+        this.refreshSurface();
         this.post({ type: "turnEnd" });
         // Refresh authoritative usage after every turn — Claude Code writes
         // its session JSONL synchronously, so by this point the new tokens
