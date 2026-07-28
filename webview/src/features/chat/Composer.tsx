@@ -25,11 +25,15 @@ import {
   EffortLevel,
   ModelInfo,
   SkillInfo,
-  FileSearchResult,
   SlashCommand
 } from "../../lib/rpc";
+import { useWebviewSettings } from "../../lib/settings";
 import { MODES, findMode } from "./constants";
-import { MentionPopover } from "./MentionPopover";
+import {
+  MentionPopover,
+  TERMINAL_PREFIX,
+  type MentionPick
+} from "./MentionPopover";
 import { SlashPopover } from "./SlashPopover";
 import { slashQuery } from "./slash-filter";
 import { SkillsPicker } from "./SkillsPicker";
@@ -116,6 +120,7 @@ export function Composer({
 }: ComposerProps) {
   const editorRef = useRef<RichEditorHandle | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const { useCtrlEnterToSend } = useWebviewSettings();
   const [focused, setFocused] = useState(false);
   const [mention, setMention] = useState<MentionState>(NO_MENTION);
   const [slash, setSlash] = useState<MentionState>(NO_SLASH);
@@ -267,7 +272,7 @@ export function Composer({
   };
 
   const handleMentionPick = useCallback(
-    (result: FileSearchResult) => {
+    (pick: MentionPick) => {
       // Replace the trailing `@<query>` token immediately before the caret
       // with an atomic mention pill carrying the full path on data-path.
       // Falls back to plain `@basename ` text when something about the
@@ -286,8 +291,6 @@ export function Composer({
       const tokenStart = i + 1;
       if (text[tokenStart] !== "@") return;
 
-      const basename =
-        result.name || result.path.split("/").pop() || result.path;
       const before = text.slice(0, tokenStart);
       const after = text.slice(offset);
 
@@ -296,7 +299,7 @@ export function Composer({
       const parent = node.parentNode;
       if (!parent) return;
       node.textContent = before;
-      const pill = makeMentionBadge(result.path, basename);
+      const pill = makeMentionBadge(pick.path, pick.label, pick.token);
       parent.insertBefore(pill, node.nextSibling);
       const trailingSpace = document.createTextNode(" " + after);
       parent.insertBefore(trailingSpace, pill.nextSibling);
@@ -521,10 +524,16 @@ export function Composer({
           onInserted={onInserted}
           onChange={handleEditorChange}
           onSubmit={handleSubmit}
+          useCtrlEnterToSend={useCtrlEnterToSend}
           onOpenBadge={(file, startLine, endLine) =>
             send({ type: "openFile", path: file, startLine, endLine })
           }
-          onOpenMention={(path) => send({ type: "openFile", path })}
+          onOpenMention={(path) => {
+            // A terminal pill names no file. Clicking one used to ask the host
+            // to open `terminal:bash` and get an error toast for it.
+            if (path.startsWith(TERMINAL_PREFIX)) return;
+            send({ type: "openFile", path });
+          }}
           onImagePaste={addImageAttachments}
         />
       </div>

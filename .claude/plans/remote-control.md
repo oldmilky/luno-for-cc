@@ -270,11 +270,117 @@ nothing consumes it. The CLI answers one turn at a time, so in practice the
 replay lands after ours finishes; if it ever does not, the symptom is a remote
 prompt missing from the timeline rather than anything corrupted.
 
-**Ф5 — permissions.** The first half is already in: `control_cancel_request` is
-handled (`claude-cli.ts`, the session reader) and withdraws the card through a
-`permission_resolved` delta, so a prompt answered on the phone stops being
-answerable here. What remains is policy: LUNO's gate is deliberately stricter
-than upstream (see `remaining-features.md` §2 and `decidePermission`), and a
-phone is another surface that can press "allow". `luno.permissionMode: auto`
-together with Remote Control should simply be refused. Write that decision down
-before the code.
+**Ф5 — permissions. Done, 2026-07-28.**
+
+The Ф4 note above once said the first half was already in. It was not, and the
+correction is the interesting part: `control_cancel_request` was handled in the
+session reader and did emit a `permission_resolved` delta — and **nothing
+consumed it**. The host forwarded it to the webview inside the generic `delta`
+envelope, whose handler knows `text` and `error` and ignores the rest. The card
+stayed on screen and stayed answerable. Reading one end of a wire is not the
+same as reading both.
+
+**The withdrawal, end to end.** The delta now carries the payload it withdraws
+(`permission` on `permission_resolved`) — the CLI's cancel says only which id
+is gone, and by then the panel has nothing left that names the tool. The host
+takes the card off, clears the copy held for a surface it is not currently on
+(matched by id: a second prompt waiting here must not go with it), and writes
+the fact to the timeline. The webview drops that one card from the queue, not
+the queue — parallel tool calls mean others may still be waiting on someone.
+
+**What the timeline says: "Bash · answered on another device", not
+"approved".** The cancel carries no verdict — only the id. Rendering it as an
+approval would be inventing the half that matters. It is on the timeline rather
+than in a toast for the same reason compaction is: reopening the chat tomorrow,
+it is the only thing explaining why a tool ran with no approval here.
+
+**The policy, decided 2026-07-28: the ungated modes and the bridge are kept
+apart, and the bridge wins.** `bypass` turns the gate off outright; `auto`
+auto-allows edits with no card on either surface. Either one plus a connected
+device means a phone can make the agent write files with nobody approving it
+here. So switching to `auto` or `bypass` while Remote Control is on is refused
+(the picker snaps back and says why), and starting Remote Control from one of
+those modes is refused too — checked before anything is published, so a bridge
+that was never going to start does not flash "ready" first. `plan` is
+untouched: it gates harder, not less.
+
+The bridge wins rather than the mode, because it is the thing someone is
+actively using from elsewhere — silently dropping it would strand a phone
+mid-conversation to grant a convenience nobody asked for at that moment.
+
+Every path into the mode goes through one method (`changePermissionMode`), for
+the reason the Bypass confirmation already lives host-side: the picker, Shift+Tab
+and the plan-rewind restore all reach it, and a check on one of them is a check
+on none.
+
+Verified: gates clean (`lint`, 659 passed / 6 skipped), 13 host tests including
+the two failure modes worth naming — the Bypass test refuses _after_ its own
+confirmation says yes (with the modal stubbed to "no" it had been passing on the
+wrong refusal), and the mode test asserts the picker was re-published rather
+than merely unchanged. In the harness: the card disappears on
+`permissionResolved` and the line renders as a centred boundary with the divider
+rules, `--t3` at 11.5px, contrast 4.59:1 against the page — the same treatment
+the compaction boundary already has, sharing its rule rather than restating it.
+
+Still only a second device can prove the round trip: that answering on the phone
+is what produces the cancel we now act on.
+
+## Audit against the official implementation — 2026-07-28
+
+Read against `anthropic.claude-code` 2.1.220 (`extension.js` and its webview
+bundle) and probed against the 2.1.219 binary. Four changes came out of it.
+
+**The echo is identified by id, not by text.** The reference mints the message
+id itself — `{type:"user", uuid: crypto.randomUUID(), session_id:"",
+parent_tool_use_id:null, message:{…}}` — renders it optimistically, and on the
+replay drops anything whose uuid it already holds. Probed: the CLI **preserves a
+client-supplied uuid** and returns it on the replay. Ours matched on the text,
+which is a heuristic with one real failure: a phone sending the same words the
+panel had just sent would have been swallowed as our own echo. Now we mint the
+id too. This is the single most valuable thing the audit found.
+
+**A second prompt while a remote turn was open deadlocked the panel.** Ours,
+not theirs: the reference has no per-turn machinery at all — replayed user
+messages are spliced into the message list at a tracked index. We model a turn,
+so a second `remote_prompt` replaced `remoteTurn` with a new queue while the
+first orchestrator still awaited the old one — whose `done` was now being
+delivered to a queue nobody read. The new turn awaited a promise that could
+never settle. Reproduced in a test (only `["user","first"]` ever reaches the
+timeline, and the panel never leaves busy), then fixed by closing the previous
+queue first.
+
+**Cancel left approvals hanging on a turn we did not start.** The deny-all loop
+lived in `abortCurrent`, which only exists while _this_ panel is streaming. Stop
+during a remote turn interrupted the CLI and dropped the card, but never
+answered the `can_use_tool` it was blocked on. Now `cancel()` denies pending
+approvals on every path, and the three copies of that loop are one method.
+
+**`bridge_state.detail` was being dropped.** The reference reads it
+(`x.detail ?? "Bridge error"`); we set the state and nothing else, so an error
+pill said "error" with no reason. Now parsed by `bridgeStatus()`, which also
+clears a stale reason when the bridge recovers.
+
+Deliberate divergences, all in the stricter direction:
+
+- **The reference does not restrict permission modes with Remote Control.** We
+  refuse `auto`/`bypass` while the bridge is up. That follows LUNO's existing
+  decision that its gate is stricter than upstream, not from the reference.
+- **They consume `--session-mirror` / `transcript_mirror`; we use
+  `--replay-user-messages`.** Both flags exist and the extension passes the
+  replay flag too. The mirror carries the transcript file plus bookkeeping
+  entries (`attachment`, `queue-operation`, `file-history-snapshot`) we have no
+  use for.
+- **They accept `ready` only as a response, never from the event** — their
+  `bridge_state` handler acts only when already `connected`, downgrading to
+  disconnected/error. We accept the event's `ready` too, which is why the panel
+  can show a bridge that came up after a respawn without being asked again.
+- **They auto-enable Remote Control for all sessions behind a config flag**
+  (`remote_control_auto_on_by_default`, with a disclosure). LUNO has no such
+  setting and this audit does not propose one: it is a per-conversation choice
+  here.
+
+Known and not adopted: their `can_use_tool` handler also reads `blocked_path`,
+`decision_reason`, `title`, `matched_ask_rule` and `agent_id`. Ours ignores
+them, so an approval card cannot yet say _which rule_ asked for it or which
+subagent raised it. Worth doing when the card next gets attention; nothing is
+wrong without it.

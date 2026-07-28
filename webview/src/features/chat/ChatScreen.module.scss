@@ -166,7 +166,8 @@
 
 // The one place the conversation is cut without the user asking. Reads as a
 // boundary rather than a message: centred, dim, ruled on both sides.
-.compactBoundary {
+.compactBoundary,
+.remoteApproval {
   display: flex;
   align-items: center;
   gap: 8px;

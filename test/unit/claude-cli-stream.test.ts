@@ -253,6 +253,7 @@ describe("ClaudeCliProvider.stream — backgrounded subagents", () => {
       status: "completed",
       summary: "src/providers/claude-cli.ts"
     });
+    child.emitLine({ type: "result", subtype: "success" });
     await finished;
 
     const answer = collected.filter((d) => d.type === "task").pop();
@@ -260,6 +261,38 @@ describe("ClaudeCliProvider.stream — backgrounded subagents", () => {
       status: "completed",
       summary: "src/providers/claude-cli.ts"
     });
+  });
+
+  // The agent answering is not the end of the turn — the model picks the
+  // conversation back up and reports what came back. Ending on the last agent
+  // instead of on the `result` that follows it cut the answer mid-sentence,
+  // which is what shipped in 0.22.4.
+  it("lets the model report on an agent before ending the turn", async () => {
+    const { collected, finished } = await drive(provider());
+    child.emitLine(started);
+    child.emitLine({ type: "result", subtype: "success" });
+    child.emitLine({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "t1",
+      status: "completed",
+      summary: "found it"
+    });
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Nothing is running any more, but the turn is not over: the model has not
+    // said what the agent found.
+    expect(collected.some((d) => d.type === "done")).toBe(false);
+
+    child.emitLine({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "The first one came back:" }] }
+    });
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+
+    const text = collected.filter((d) => d.type === "text").pop();
+    expect(text!.text).toBe("The first one came back:");
   });
 
   it("ends the turn at `result` when nothing was backgrounded", async () => {

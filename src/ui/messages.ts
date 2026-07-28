@@ -47,6 +47,7 @@ export type InboundType =
   | "readAttachment"
   | "revertFile"
   | "requestFileSearch"
+  | "requestTerminals"
   | "captureSelection"
   | "refreshEditorContext"
   | "chatFocus"

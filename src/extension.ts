@@ -3,11 +3,16 @@ import { ChatPanelProvider } from "./ui/panel.js";
 import { generateConventionsCommand } from "./commands/init-conventions.js";
 import { registerDevAutoRestart } from "./dev-reload.js";
 import { registerOutputChannel, showLogs } from "./ui/output-channel.js";
+import { registerTerminalCapture } from "./ui/domains/terminal-capture.js";
+import { promptFromUri } from "./core/open-uri.js";
 
 export function activate(ctx: vscode.ExtensionContext) {
   // First, so anything logged during the rest of activation is captured.
   ctx.subscriptions.push(registerOutputChannel());
   registerDevAutoRestart(ctx);
+  // Before the panel: a terminal command run during startup is one the user
+  // may well be about to ask about.
+  ctx.subscriptions.push(registerTerminalCapture());
 
   const panel = new ChatPanelProvider(ctx);
   ctx.subscriptions.push(
@@ -40,6 +45,20 @@ export function activate(ctx: vscode.ExtensionContext) {
       panel.openConnectors()
     ),
     vscode.commands.registerCommand("luno.showLogs", () => showLogs())
+  );
+
+  // `vscode://<publisher>.<name>/open?prompt=…` — the integration path other
+  // tools use to hand work over. The prompt is put in the composer and left
+  // there: a link on a web page must not be able to start a turn in an agent
+  // that spawns processes and holds a subscription credential. The person at
+  // the keyboard presses send.
+  ctx.subscriptions.push(
+    vscode.window.registerUriHandler({
+      handleUri: (uri) => {
+        const prompt = promptFromUri(uri.path, uri.query);
+        if (prompt) panel.prefillComposer(prompt);
+      }
+    })
   );
 }
 

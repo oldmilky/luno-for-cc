@@ -259,7 +259,9 @@ export interface StreamDelta {
   model?: string;
   /** Carried on `type: "permission_request"` — the CLI is asking the user to
    *  approve a tool call before it runs (the `can_use_tool` control request
-   *  routed through `--permission-prompt-tool stdio`). */
+   *  routed through `--permission-prompt-tool stdio`). Carried again on
+   *  `type: "permission_resolved"`, where it names the request that was
+   *  withdrawn — the CLI's own cancel says only which id is gone. */
   permission?: PermissionRequestPayload;
   /** Carried on `type: "permission_resolved"` — the request with this id was
    *  answered somewhere else (a connected phone or browser) and the CLI has

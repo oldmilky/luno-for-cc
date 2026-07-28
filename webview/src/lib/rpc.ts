@@ -231,6 +231,17 @@ export interface SkillInfo {
 export interface FileSearchResult {
   path: string;
   name: string;
+  /** Folders carry a trailing slash on `path` and serialize as the whole
+   *  path — a basename alone would name a dozen `utils` directories. */
+  kind: "file" | "folder";
+}
+
+/** The last command a terminal ran, as `@terminal:` offers it. Captured while
+ *  it ran: VS Code exposes no way to read a terminal's scrollback after. */
+export interface TerminalRunView {
+  terminalName: string;
+  commandLine: string;
+  exitCode?: number;
 }
 
 /** Mirrors `SlashCommand` in src/services/slash-commands.ts. Expansion is the
@@ -523,7 +534,11 @@ export type Outbound =
   | { type: "connectorAddCustom"; draft: CustomConnectorDraft }
   | { type: "connectorRemoveCustom"; id: string }
   | { type: "connectorSetupViaClaudeCode"; id: string }
-  | { type: "connectorConnectWithApiKey"; id: string; apiKey: string };
+  | { type: "connectorConnectWithApiKey"; id: string; apiKey: string }
+  /** Terminals with a captured run, for the `@terminal:` half of the mention
+   *  popover. Asked for on every keystroke behind the same debounce as the
+   *  file search, because a command can finish while the popover is open. */
+  | { type: "requestTerminals"; id: string };
 
 // ── Inbound (extension → webview) ─────────────────────────────
 
@@ -566,6 +581,10 @@ export type Inbound =
    *  the timeline holds the dispatch and the result, this holds the middle. */
   | { type: "subagentProgress"; task: SubagentTaskView }
   | { type: "permissionRequest"; request: PermissionRequestView }
+  /** The prompt with this id was answered somewhere else — on a phone driving
+   *  the same session — and the CLI has withdrawn it. The card goes away; what
+   *  happened is on the timeline. */
+  | { type: "permissionResolved"; requestId: string }
   | { type: "error"; message: string }
   | { type: "editorContext"; context: EditorContext | null }
   | { type: "rewind"; events: TimelineEvent[] }
@@ -598,6 +617,13 @@ export type Inbound =
       error?: string;
     }
   | { type: "fileSearchResults"; id: string; results: FileSearchResult[] }
+  | { type: "terminalList"; id: string; terminals: TerminalRunView[] }
+  /** Settings the webview itself acts on, as opposed to the many the host
+   *  reads on its behalf. Sent on attach and whenever the user edits one. */
+  | { type: "settings"; useCtrlEnterToSend: boolean }
+  /** Text handed over from outside — a `vscode://` link. It lands in the
+   *  composer and stops there; nothing external gets to start a turn. */
+  | { type: "prefillComposer"; text: string }
   | {
       type: "attachmentData";
       id: string;

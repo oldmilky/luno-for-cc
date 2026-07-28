@@ -107,9 +107,18 @@ const shim = (revisionId) => `<!doctype html>
     postMessage: (msg) => {
       sent.push(msg);
       const reply = replies[msg && msg.type];
+      if (!reply) return;
+      // Carry the request's correlation id onto the answer. Without it every
+      // id-matched flow — the mention popover, attachments, skill detail —
+      // was unanswerable here: the reply arrived and the component dropped it
+      // for belonging to some other request.
+      const answer =
+        msg && typeof msg.id === "string" && "id" in reply
+          ? { ...reply, id: msg.id }
+          : reply;
       // Answer on a macrotask: the real host is out-of-process, and replying
       // synchronously inside postMessage would re-enter React's render.
-      if (reply) setTimeout(() => window.postMessage(reply, "*"), 0);
+      setTimeout(() => window.postMessage(answer, "*"), 0);
     },
     getState: readState,
     setState: (s) => sessionStorage.setItem(STATE_KEY, JSON.stringify(s))

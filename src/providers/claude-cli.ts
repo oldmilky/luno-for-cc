@@ -1,6 +1,7 @@
 import { log as logInfo } from "../services/logger.js";
 import { spawn, ChildProcess } from "node:child_process";
 import * as readline from "node:readline";
+import { randomUUID } from "node:crypto";
 import { ChatProvider, ProviderRequest } from "./base.js";
 import {
   ContentBlock,
@@ -165,6 +166,95 @@ export function isReadOnlyGitCommand(command: string): boolean {
   return sub !== null && GIT_READONLY_SUBCOMMANDS.has(sub);
 }
 
+/**
+ * Shell commands that only look at the workspace.
+ *
+ * Every one of these reads and prints; none writes a file, changes state, or
+ * reaches the network. Deliberately excludes tools that *can* write with a
+ * flag — `sed -i`, `awk`'s redirects, anything that evaluates a string
+ * (`node -e`, `python -c`, `xargs`) — because the head token alone cannot tell
+ * those apart from the harmless spelling.
+ */
+const SHELL_READONLY_HEADS: ReadonlySet<string> = new Set([
+  "ls",
+  "dir",
+  "cat",
+  "head",
+  "tail",
+  "wc",
+  "nl",
+  "find",
+  "tree",
+  "grep",
+  "rg",
+  "ag",
+  "ack",
+  "file",
+  "stat",
+  "du",
+  "df",
+  "pwd",
+  "basename",
+  "dirname",
+  "realpath",
+  "readlink",
+  "which",
+  "whereis",
+  "type",
+  "sort",
+  "uniq",
+  "cut",
+  "column",
+  "diff",
+  "cmp",
+  "date",
+  "whoami",
+  "hostname",
+  "echo",
+  "printf",
+  "true",
+  "false"
+]);
+
+/** Shell syntax that can smuggle a write or a network call past a head-token
+ *  check: redirects, command substitution, subshells, and a background `&`.
+ *  The background case is bounded on both sides — without the lookbehind the
+ *  second `&` of a perfectly ordinary `&&` chain matches. */
+const SHELL_ESCAPE_HATCHES = /[>`]|\$\(|<\(|(?<!&)&(?!&)/;
+
+/**
+ * True when every segment of a shell command only reads.
+ *
+ * Pipelines and `&&` chains are split and each segment checked on its own, so
+ * `ls src | head -20` passes while `ls && rm -rf .` cannot: `rm` is not in the
+ * set. Redirects and command substitution are refused outright rather than
+ * parsed — this is a permission gate, and the honest answer to syntax we do not
+ * fully model is to ask.
+ *
+ * Being wrong in the permissive direction here would auto-run something the
+ * user never saw, so the destructive and network gates still run first and this
+ * is only ever consulted when both said no.
+ */
+export function isReadOnlyShellCommand(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed || SHELL_ESCAPE_HATCHES.test(trimmed)) return false;
+
+  const segments = trimmed.split(/\|\||&&|[;|]/);
+  return segments.every((segment) => {
+    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return false;
+    // Leading `VAR=value` assignments change what the command sees; refuse
+    // rather than reason about them.
+    const head = tokens[0];
+    if (head.includes("=")) return false;
+    const name = head.replace(/^.*[\\/]/, "");
+    if (name === "git" || name.endsWith("/git")) {
+      return isReadOnlyGitCommand(segment);
+    }
+    return SHELL_READONLY_HEADS.has(name);
+  });
+}
+
 /** True for MCP tools that only read/observe (no writes, no network mutations).
  *  MCP tool names are `mcp__<server>__<tool>`; we key off the trailing tool
  *  segment matching read-ish verbs (get/list/read/search/fetch-but-local…).
@@ -316,10 +406,10 @@ interface CliSession {
   busy: boolean;
   /** Resolvers waiting for `busy` to clear. */
   idleWaiters: Array<() => void>;
-  /** Prompts written to stdin whose replay has not come back yet. The CLI
-   *  echoes our own messages alongside the phone's, and only we can tell them
-   *  apart — see takeEcho(). */
-  pendingEchoes: string[];
+  /** Message ids we put on our own prompts, still waiting for the CLI to play
+   *  them back. It echoes ours alongside the phone's, and this is what tells
+   *  them apart — see takeEcho(). */
+  pendingEchoes: Set<string>;
 }
 
 /** How long the next turn waits for an interrupted one to report its `result`
@@ -381,6 +471,11 @@ export class ClaudeCliProvider implements ChatProvider {
     // While a turn is paused on a permission prompt no deltas are flowing, so
     // the consumer's cancel check only re-runs once we push something.
     this.abortCurrent?.();
+    // A turn this panel did not start has no `abortCurrent` to do it, and the
+    // interrupt below is not documented to withdraw a `can_use_tool` the CLI is
+    // already blocked on. Left unanswered it blocks forever with no card left
+    // on screen to answer it.
+    this.denyPendingPermissions("Cancelled by the user.");
     // In session mode the process is the session: killing it would end the
     // conversation and drop any Remote Control bridge, when all the user asked
     // for was to stop this turn. Interrupt over the control channel instead.
@@ -392,6 +487,28 @@ export class ClaudeCliProvider implements ChatProvider {
       this.child.kill("SIGTERM");
       setTimeout(() => this.child?.kill("SIGKILL"), 2000);
     }
+  }
+
+  /**
+   * Deny every approval still outstanding, so the CLI stops waiting on a
+   * question nobody can answer any more.
+   *
+   * Called from all three cancel paths. A prompt left hanging blocks the tool
+   * call it guards for as long as the process lives, and the card carrying it
+   * is gone from the panel the moment the turn ends.
+   */
+  private denyPendingPermissions(message: string): void {
+    for (const id of this.pendingPermissions.keys()) {
+      this.writeControl({
+        type: "control_response",
+        response: {
+          subtype: "success",
+          request_id: id,
+          response: { behavior: "deny", message }
+        }
+      });
+    }
+    this.pendingPermissions.clear();
   }
 
   /**
@@ -627,17 +744,7 @@ export class ClaudeCliProvider implements ChatProvider {
     // unblocks gracefully, then push `done` so the generator returns on its
     // next tick regardless of when the child actually exits.
     this.abortCurrent = () => {
-      for (const id of this.pendingPermissions.keys()) {
-        this.writeControl({
-          type: "control_response",
-          response: {
-            subtype: "success",
-            request_id: id,
-            response: { behavior: "deny", message: "Cancelled by the user." }
-          }
-        });
-      }
-      this.pendingPermissions.clear();
+      this.denyPendingPermissions("Cancelled by the user.");
       stallWatch?.clearAll();
       // Routed through endTurn so a pending background-agent grace timer is
       // cleared too — Stop must not leave one armed to fire a minute later.
@@ -673,6 +780,7 @@ export class ClaudeCliProvider implements ChatProvider {
     /** (Re)start the countdown from this moment — the agent just showed a sign
      *  of life, so the budget it gets is measured from here. */
     const armGrace = () => {
+      if (turnEnded) return;
       if (graceTimer) clearTimeout(graceTimer);
       graceTimer = setTimeout(() => {
         logInfo(
@@ -710,29 +818,38 @@ export class ClaudeCliProvider implements ChatProvider {
         else if (phase === "notification" || isTerminalTaskStatus(status)) {
           openTasks.delete(taskId);
         }
-        // The last one just landed and the turn was only waiting on it.
-        if (sawResult && openTasks.size === 0) endTurn();
-        else if (sawResult) armGrace();
       }
       // Under stream-json input the CLI keeps the session open for more input
       // after the turn, so closing stdin is what actually ends it. Held while a
       // backgrounded agent is still running: closing here kills it mid-step and
       // throws away work the user is watching a card for.
+      //
+      // The CLI emits a `result` per stretch of work, not one per turn. When an
+      // agent answers, the model picks the conversation back up and reports what
+      // came back — measured on 2.1.220, a second `result` followed the first by
+      // ten seconds with a whole paragraph in between. Ending on the last agent
+      // rather than on that second `result` cut the model off mid-sentence.
+      // Set outside the `permissionProtocol` gate below: the text-input path
+      // gets a `result` too, and `onExit` reads this to tell a turn that failed
+      // from a process that exited after answering in full.
+      if (ev.type === "result") sawResult = true;
       if (permissionProtocol && ev.type === "result") {
-        sawResult = true;
         if (openTasks.size === 0) endTurn();
         else armGrace();
+        return;
       }
+      // Past the first `result` the turn stays alive for the agents and for
+      // whatever the model says once they answer. Any sign of either resets the
+      // budget, so only real silence ends it.
+      if (sawResult) armGrace();
     });
 
     const onExit = () => {
       clearTimeout(timeout);
       stallWatch?.clearAll();
       if (child.exitCode !== 0 && child.signalCode !== "SIGTERM") {
-        const msg =
-          stderrBuf.trim() ||
-          `claude exited with code ${child.exitCode ?? "?"}`;
-        push({ type: "error", error: msg });
+        const msg = exitFailure(stderrBuf, child.exitCode, sawResult);
+        if (msg) push({ type: "error", error: msg });
       }
       push({ type: "done" });
       done = true;
@@ -824,17 +941,7 @@ export class ClaudeCliProvider implements ChatProvider {
     });
 
     this.abortCurrent = () => {
-      for (const id of this.pendingPermissions.keys()) {
-        this.writeControl({
-          type: "control_response",
-          response: {
-            subtype: "success",
-            request_id: id,
-            response: { behavior: "deny", message: "Cancelled by the user." }
-          }
-        });
-      }
-      this.pendingPermissions.clear();
+      this.denyPendingPermissions("Cancelled by the user.");
       stallWatch?.clearAll();
       push({ type: "done" });
     };
@@ -848,18 +955,24 @@ export class ClaudeCliProvider implements ChatProvider {
     session.busy = true;
     const preamble = turnPreamble(this.opts);
     const sent = preamble ? preamble + userText : userText;
-    // Registered before the write, not after: the replay can be back before the
-    // next tick, and an unregistered echo would land on the timeline as a
-    // prompt the user never typed on the phone.
-    session.pendingEchoes.push(sent);
+    // Our own id on our own message. The CLI keeps it and returns it on the
+    // replay, which is how the echo is recognised without guessing from the
+    // text. Registered before the write, not after: the replay can be back
+    // before the next tick, and an unregistered echo would land on the timeline
+    // as a prompt the user never typed on the phone.
+    const uuid = randomUUID();
+    session.pendingEchoes.add(uuid);
     const wrote = this.writeToChild(session, {
       type: "user",
+      uuid,
+      session_id: "",
+      parent_tool_use_id: null,
       message: { role: "user", content: sent }
     });
     if (!wrote) {
       session.sink = null;
       this.abortCurrent = null;
-      takeEcho(session.pendingEchoes, sent);
+      takeEcho(session.pendingEchoes, uuid);
       yield {
         type: "error",
         error: "The Claude session is no longer accepting input."
@@ -930,7 +1043,7 @@ export class ClaudeCliProvider implements ChatProvider {
       permissionMode: this.opts.permissionMode ?? "default",
       busy: false,
       idleWaiters: [],
-      pendingEchoes: []
+      pendingEchoes: new Set()
     };
     this.session = session;
     this.child = child;
@@ -964,9 +1077,20 @@ export class ClaudeCliProvider implements ChatProvider {
       // A prompt answered on the phone cancels the request we are still
       // holding. Drop it, or the panel keeps showing a card whose answer would
       // be written against a request id the CLI has already forgotten.
+      //
+      // The withdrawn request rides along: the CLI says only which id is gone,
+      // and by the time the panel hears about it the payload naming the tool
+      // has been dropped here.
       if (ev.type === "control_cancel_request") {
+        const withdrawn = ev.request_id
+          ? this.pendingPermissions.get(ev.request_id)
+          : undefined;
         if (ev.request_id && this.pendingPermissions.delete(ev.request_id)) {
-          route({ type: "permission_resolved", requestId: ev.request_id });
+          route({
+            type: "permission_resolved",
+            requestId: ev.request_id,
+            permission: withdrawn
+          });
         }
         return;
       }
@@ -978,14 +1102,9 @@ export class ClaudeCliProvider implements ChatProvider {
       // disconnected/error when it goes. Session-level, not turn-level, so it
       // is read here rather than in the per-turn event processor.
       if (ev.type === "system" && ev.subtype === "bridge_state") {
-        const state = ev.state;
-        const known =
-          state === "ready" ||
-          state === "connected" ||
-          state === "disconnected" ||
-          state === "error";
-        if (!known || state === this.remoteControl.state) return;
-        this.remoteControl = { ...this.remoteControl, state };
+        const next = bridgeStatus(ev, this.remoteControl);
+        if (!next) return;
+        this.remoteControl = next;
         // While our own enable request is in flight the CLI's `ready` arrives
         // first but carries no URL; the reply does, a moment later. Announcing
         // both means the banner appears twice, the second time saying the same
@@ -1002,7 +1121,7 @@ export class ClaudeCliProvider implements ChatProvider {
       // envelope a tool_result travels in.
       const prompt = replayedPrompt(ev);
       if (prompt !== null) {
-        if (!takeEcho(session.pendingEchoes, prompt)) {
+        if (!takeEcho(session.pendingEchoes, ev.uuid)) {
           // The CLI is now working for the other surface. Marking the session
           // busy is what makes a prompt sent from here wait for that turn's
           // `result` instead of interleaving with it.
@@ -1027,12 +1146,10 @@ export class ClaudeCliProvider implements ChatProvider {
       }
       const unexpected = child.exitCode !== 0 && child.signalCode !== "SIGTERM";
       if (unexpected) {
-        route({
-          type: "error",
-          error:
-            session.stderr.trim() ||
-            `claude exited with code ${child.exitCode ?? "?"}`
-        });
+        // A session process has answered many turns by the time it exits, so a
+        // late non-zero code is never the current turn failing.
+        const msg = exitFailure(session.stderr, child.exitCode, true);
+        if (msg) route({ type: "error", error: msg });
       }
       route({ type: "done" });
     });
@@ -1745,10 +1862,15 @@ export function decidePermission(
     // checkout, commit, merge, reset, stash, restore, switch, …) is NOT in the
     // read-only set, so it falls through to the approval card below — no need
     // to enumerate every mutating subcommand.
+    // Inspecting the workspace through the shell is the same act as `Read` or
+    // `Grep`, and it was the one that still interrupted: `ls`, `cat`, `wc`,
+    // `find` and `rg` each asked, several times a turn, for permission to look
+    // at a file the agent could have read silently through a tool. Read-only
+    // git is a special case of this and stays silent for the same reason.
     if (
       isBashLike(toolName) &&
       typeof input?.command === "string" &&
-      isReadOnlyGitCommand(input.command)
+      isReadOnlyShellCommand(input.command)
     ) {
       return { action: "allow", destructive, network };
     }
@@ -1842,6 +1964,10 @@ export interface CliEvent {
    *  either the prompt we just wrote to stdin, or one typed on a connected
    *  phone. Only present with `--replay-user-messages`. */
   isReplay?: boolean;
+  /** Message id. The CLI mints one, or keeps the one the client supplied and
+   *  returns it on the replay — which is how our own prompt is recognised
+   *  coming back. */
+  uuid?: string;
   message?: {
     /** Resolved model id on each `assistant` message — the model that
      *  actually produced this turn's output. */
@@ -1962,6 +2088,8 @@ export interface CliEvent {
   /** Carried on `system`/`bridge_state` — the Remote Control bridge reporting
    *  on itself. */
   state?: string;
+  /** Why the bridge failed, on `bridge_state` with `state: "error"`. */
+  detail?: string;
 }
 
 type Processor = (ev: CliEvent) => StreamDelta[];
@@ -1997,15 +2125,48 @@ export function replayedPrompt(ev: CliEvent): string | null {
  * Whether this replayed prompt is the echo of one we wrote ourselves.
  *
  * The replay flag does not distinguish the two surfaces — our own stdin writes
- * come back exactly like a phone's do — so the only discriminator is that we
- * know what we sent. Consuming the match rather than merely testing it is what
- * makes the same text typed twice replay the second time.
+ * come back exactly like a phone's do. The discriminator is the id we put on
+ * the message before sending it: the CLI preserves a client-supplied `uuid` and
+ * returns it on the replay (measured against 2.1.219), which is how the
+ * official extension tells its own messages apart. Matching on the text instead
+ * would swallow a phone sending the same words we just did.
+ *
+ * Consumed rather than merely tested, so nothing accumulates for a session that
+ * runs all day.
  */
-export function takeEcho(pending: string[], text: string): boolean {
-  const i = pending.indexOf(text);
-  if (i === -1) return false;
-  pending.splice(i, 1);
-  return true;
+export function takeEcho(
+  pending: Set<string>,
+  uuid: string | undefined
+): boolean {
+  if (!uuid) return false;
+  return pending.delete(uuid);
+}
+
+/**
+ * What a `bridge_state` event makes of the status we hold, or null when it
+ * changes nothing.
+ *
+ * `detail` carries why the bridge failed and is the only account of it — a pill
+ * reading "error" with no reason is what the user would otherwise get. The
+ * official extension reads the same field.
+ */
+export function bridgeStatus(
+  ev: CliEvent,
+  current: RemoteControlStatus
+): RemoteControlStatus | null {
+  const state = ev.state;
+  const known =
+    state === "ready" ||
+    state === "connected" ||
+    state === "disconnected" ||
+    state === "error";
+  if (!known || state === current.state) return null;
+  if (state === "error") {
+    return { ...current, state, error: ev.detail ?? "Bridge error" };
+  }
+  // A recovered bridge must not keep describing the failure it recovered from.
+  const { error: _gone, ...rest } = current;
+  return { ...rest, state };
 }
 
 export function makeProcessor(
@@ -2013,6 +2174,9 @@ export function makeProcessor(
   onSlashCommands?: (names: string[]) => void
 ): Processor {
   let sawPartialText = false;
+  /** Whether this turn has already put text on the wire. Guards the paragraph
+   *  break below so the first message does not open with blank lines. */
+  let emittedText = false;
   const startedToolIds = new Set<string>();
   let currentBlockType: "text" | "tool_use" | "other" | null = null;
   // The CLI reports the *resolved* model (aliases like `opus` expand to a
@@ -2077,6 +2241,16 @@ export function makeProcessor(
 
     if (ev.type === "stream_event" && ev.event) {
       const inner = ev.event;
+      // A second assistant message in the same turn — the model picking the
+      // conversation back up after a backgrounded agent answered. Its text is
+      // appended to the same buffer, and with no tool call in between to flush
+      // it the two run together: "…I'll summarise." + "The first one is back —"
+      // rendered as one sentence with no break. Nothing downstream can tell
+      // where a message ended, so the break is made here, where it is visible.
+      if (inner.type === "message_start" && emittedText) {
+        out.push({ type: "text", text: "\n\n" });
+        return out;
+      }
       if (inner.type === "content_block_start" && inner.content_block) {
         if (inner.content_block.type === "text") {
           currentBlockType = "text";
@@ -2098,6 +2272,7 @@ export function makeProcessor(
           typeof inner.delta.text === "string"
         ) {
           sawPartialText = true;
+          emittedText = true;
           out.push({ type: "text", text: inner.delta.text });
         } else if (
           currentBlockType === "tool_use" &&
@@ -2125,7 +2300,13 @@ export function makeProcessor(
       emitModel(ev.message.model, out);
       for (const block of ev.message.content) {
         if (block.type === "text") {
-          if (!sawPartialText) out.push({ type: "text", text: block.text });
+          if (!sawPartialText) {
+            // Same boundary as `message_start` above, for the build that sends
+            // whole messages rather than partials.
+            if (emittedText) out.push({ type: "text", text: "\n\n" });
+            emittedText = true;
+            out.push({ type: "text", text: block.text });
+          }
         } else if (block.type === "tool_use") {
           if (!startedToolIds.has(block.id)) {
             startedToolIds.add(block.id);
@@ -2322,6 +2503,48 @@ export function createToolStallWatchdog(opts: {
  * correlate the update with, and a card that can never be closed is worse than
  * one that never opened.
  */
+/**
+ * Notices the CLI writes to stderr and then carries on from.
+ *
+ * The workspace-trust one is printed at startup, so it sits in the buffer for
+ * the whole run and became the stated cause of every later failure it had
+ * nothing to do with — including a turn that had already answered in full.
+ */
+const STDERR_ADVISORIES: ReadonlyArray<RegExp> = [
+  /permissions\.allow entries/i,
+  /has not been trusted/i,
+  /hasTrustDialogAccepted/i
+];
+
+/**
+ * What to tell the user when the CLI exits non-zero — often nothing.
+ *
+ * An exit that lands after the turn's own `result` is not that turn failing:
+ * the answer is on screen, and marking the chat red contradicts what the user
+ * is reading. Those go to the log instead, where a real diagnosis can find
+ * them.
+ */
+export function exitFailure(
+  stderr: string,
+  code: number | null,
+  answered: boolean
+): string | null {
+  const lines = stderr
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(
+      (line) => line && !STDERR_ADVISORIES.some((advice) => advice.test(line))
+    );
+  if (answered) {
+    logInfo(
+      `[luno] claude exited ${code ?? "?"} after answering` +
+        (lines.length ? `: ${lines.join(" ")}` : "")
+    );
+    return null;
+  }
+  return lines.join("\n") || `claude exited with code ${code ?? "?"}`;
+}
+
 function taskUpdate(ev: CliEvent, phase: SubagentPhase): SubagentUpdate | null {
   if (!ev.task_id) return null;
   const u = ev.usage;

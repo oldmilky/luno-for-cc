@@ -75,24 +75,33 @@ describe("replayedPrompt", () => {
 });
 
 describe("takeEcho", () => {
-  it("drops the replay of what we sent ourselves", () => {
-    const pending = ["hi there"];
-    expect(takeEcho(pending, "hi there")).toBe(true);
-    expect(pending).toEqual([]);
+  it("drops the replay carrying an id we sent", () => {
+    const pending = new Set(["u-1"]);
+    expect(takeEcho(pending, "u-1")).toBe(true);
+    expect(pending.size).toBe(0);
   });
 
-  it("consumes one match, so the same text sent twice replays the second time", () => {
-    // Merely testing membership would swallow a phone repeating a prompt the
-    // panel had sent earlier — the message would vanish instead of answering.
-    const pending = ["ping"];
-    expect(takeEcho(pending, "ping")).toBe(true);
-    expect(takeEcho(pending, "ping")).toBe(false);
+  it("keeps a prompt whose id we never sent, even with identical text", () => {
+    // The measured shape: the CLI marks our echo and the phone's prompt the
+    // same way, and the words may be the same too. Only the id we minted
+    // before sending separates them — matching on text would swallow a phone
+    // repeating what the panel had just asked.
+    const pending = new Set(["u-ours"]);
+    expect(takeEcho(pending, "u-theirs")).toBe(false);
+    expect(pending.has("u-ours")).toBe(true);
   });
 
-  it("leaves a prompt it never sent alone", () => {
-    const pending = ["ours"];
-    expect(takeEcho(pending, "theirs")).toBe(false);
-    expect(pending).toEqual(["ours"]);
+  it("consumes the match, so a resent id is not swallowed twice", () => {
+    const pending = new Set(["u-1"]);
+    expect(takeEcho(pending, "u-1")).toBe(true);
+    expect(takeEcho(pending, "u-1")).toBe(false);
+  });
+
+  it("treats a replay with no id as somebody else's", () => {
+    // Ours always carries one. Dropping an unidentified prompt would lose a
+    // message; showing it twice would only be untidy.
+    const pending = new Set(["u-1"]);
+    expect(takeEcho(pending, undefined)).toBe(false);
   });
 });
 

@@ -55,7 +55,12 @@ import {
   SessionStore,
   type ConversationSettings
 } from "./domains/session-store.js";
-import { confirmBypassMode } from "./domains/permission-modes.js";
+import {
+  confirmBypassMode,
+  isUngatedMode,
+  warnModeBlockedByRemoteControl,
+  warnRemoteControlBlockedByMode
+} from "./domains/permission-modes.js";
 import { nextCycleMode } from "../core/permission-cycle.js";
 import { AuthManager } from "./domains/auth.js";
 import { PlanHandlers } from "./domains/plan-handlers.js";
@@ -69,6 +74,8 @@ import {
   saveDirtyEditors,
   searchFiles
 } from "./domains/files.js";
+import { capturedRun, capturedRuns } from "./domains/terminal-capture.js";
+import { expandTerminalMentions } from "../core/terminal-output.js";
 import { collectDiagnostics } from "./domains/diagnostics.js";
 import { collectEditorContext } from "./domains/editor-context.js";
 import {
@@ -596,6 +603,14 @@ export class ConversationHost {
       if (kind === "assistant" || kind === "tool_call") this.streamed = "";
     } else if (m.type === "permissionRequest") {
       this.pendingRequest = (msg as { request?: unknown }).request;
+    } else if (m.type === "permissionResolved") {
+      // Matched by id: a withdrawn request must not take a *different* prompt
+      // off the surface with it. Answering the phone's question while another
+      // card waits here is an ordinary thing to do.
+      const gone = (msg as { requestId?: string }).requestId;
+      const held = (this.pendingRequest as { requestId?: string } | undefined)
+        ?.requestId;
+      if (gone && gone === held) this.pendingRequest = undefined;
     }
   }
 
@@ -751,6 +766,7 @@ export class ConversationHost {
     };
     view.webview.html = this.html(view.webview);
     this.post({ type: "hello", sessionId: this.session.id });
+    this.publishWebviewSettings();
     void this.broadcastAuthState();
     const booted = opts.adoptSessionId
       ? this.adoptStored(opts.adoptSessionId)
@@ -877,10 +893,33 @@ export class ConversationHost {
   /** Shift+Tab. Walks the cycle for this conversation only — the other chats
    *  keep the posture they were left in. */
   async cycleMode(): Promise<void> {
-    await this.applySetting(
-      "permissionMode",
+    await this.changePermissionMode(
       nextCycleMode(this.settings.permissionMode)
     );
+  }
+
+  /**
+   * The one way the permission mode changes.
+   *
+   * Every path goes through here for the same reason the Bypass confirmation
+   * does: the picker, Shift+Tab and a plan rewind all reach the mode, and a
+   * check on one of them is a check on none. An ungated mode plus Remote
+   * Control means a device that is not in the room can make the agent write
+   * files with nobody approving it, so the two are kept apart — and the bridge
+   * wins, because it is the thing someone is actively using from elsewhere.
+   *
+   * @returns whether the mode is now what was asked for.
+   */
+  private async changePermissionMode(mode: PermissionMode): Promise<boolean> {
+    if (this.remoteControl.state !== "off" && isUngatedMode(mode)) {
+      warnModeBlockedByRemoteControl(mode);
+      // The picker moved to the mode it could not have; put it back on the one
+      // that is actually in force.
+      await this.auth.broadcast();
+      return false;
+    }
+    await this.applySetting("permissionMode", mode);
+    return true;
   }
 
   /**
@@ -941,6 +980,26 @@ export class ConversationHost {
   async sendUserMessage(text: string) {
     this.reveal();
     await this.handlePrompt(text);
+  }
+
+  /** Put text in the composer without sending it. The way in from outside the
+   *  editor — a `vscode://` link — and deliberately the whole of what such a
+   *  link can do. */
+  prefillComposer(text: string) {
+    this.reveal();
+    this.post({ type: "prefillComposer", text });
+  }
+
+  /** The settings the webview acts on itself. Sent on attach and on every
+   *  change, because a setting that needs a window reload to take effect is
+   *  one the user reports as broken. */
+  publishWebviewSettings(): void {
+    this.post({
+      type: "settings",
+      useCtrlEnterToSend: vscode.workspace
+        .getConfiguration("luno")
+        .get<boolean>("useCtrlEnterToSend", false)
+    });
   }
 
   /**
@@ -1120,7 +1179,7 @@ export class ConversationHost {
         await this.auth.broadcast();
         return;
       }
-      await this.applySetting("permissionMode", mode as PermissionMode);
+      await this.changePermissionMode(mode as PermissionMode);
     },
     setEffort: async (m) => {
       const effort = str(m, "effort");
@@ -1147,6 +1206,14 @@ export class ConversationHost {
       const enabled = bool(m, "enabled") ?? false;
       if (!enabled) {
         await this.remoteProvider?.disableRemoteControl();
+        this.publishRemoteControl({ state: "off" });
+        return;
+      }
+      // The same rule as changePermissionMode, from the other side. Checked
+      // before anything is published: a bridge that was never going to start
+      // must not flash "ready" on the way to being refused.
+      if (isUngatedMode(this.settings.permissionMode)) {
+        warnRemoteControlBlockedByMode(this.settings.permissionMode);
         this.publishRemoteControl({ state: "off" });
         return;
       }
@@ -1203,6 +1270,13 @@ export class ConversationHost {
         str(m, "id") ?? "",
         this.workingRoot
       );
+    },
+    requestTerminals: (m) => {
+      this.post({
+        type: "terminalList",
+        id: str(m, "id") ?? "",
+        terminals: capturedRuns().map(({ output: _output, ...view }) => view)
+      });
     },
     captureSelection: () => this.sendSelectionToChat(),
     refreshEditorContext: () => broadcastEditorContext(this.post),
@@ -1644,7 +1718,9 @@ export class ConversationHost {
         delete meta.proceeded;
         delete meta.prePermissionMode;
         if (prevMode && this.settings.permissionMode !== prevMode) {
-          await this.applySetting("permissionMode", prevMode);
+          // Refusable like any other change: the mode this plan was drafted
+          // under may be one the bridge does not allow back.
+          await this.changePermissionMode(prevMode);
         }
         this.scheduleSave();
       }
@@ -1892,6 +1968,12 @@ export class ConversationHost {
     if (workspaceRoot) {
       text = await extractInlineImages(text, workspaceRoot);
     }
+    // `@terminal:name` becomes the output itself, here rather than in the CLI
+    // — it has no such token, and the recording only exists in this process.
+    // Expanded into the turn text, which puts it on the timeline too: a run
+    // that is not there is the only way to tell tomorrow what the model was
+    // actually shown.
+    text = expandTerminalMentions(text, capturedRun);
     // Posture comes from the conversation, not the workspace: another chat may
     // be running under a different mode right now, and the `luno.*` settings
     // are only what a new one starts with.
@@ -2075,6 +2157,12 @@ export class ConversationHost {
   private beginRemoteTurn(text: string): void {
     const provider = this.remoteProvider;
     if (!provider) return;
+    // Two prompts typed on the phone in quick succession: the CLI takes both
+    // and replays the second while the first turn is still open here. Ending
+    // the first explicitly is what keeps that from deadlocking — the new turn
+    // waits on the old one, and the old one would never finish, because its
+    // `done` is now arriving on a queue nothing is reading.
+    this.remoteTurn?.close();
     const queue = new DeltaQueue();
     this.remoteTurn = queue;
     const model = this.settings.model;
@@ -2146,6 +2234,25 @@ export class ConversationHost {
       this.awaitingApproval = true;
       this.refreshSurface();
       this.post({ type: "permissionRequest", request: d.permission });
+      return;
+    }
+    // The same prompt went to the phone, someone answered it there, and the CLI
+    // has withdrawn the request. The card has to go: answering it now would
+    // write against an id the CLI has already forgotten, and the turn it was
+    // blocking has moved on.
+    if (d.type === "permission_resolved" && d.requestId) {
+      this.awaitingApproval = false;
+      this.refreshSurface();
+      this.post({ type: "permissionResolved", requestId: d.requestId });
+      // A tool ran without anyone approving it *here*. Reopening this chat
+      // tomorrow, that is the only thing explaining why.
+      this.session.emit({
+        kind: "approval",
+        title: "Answered on another device",
+        body: d.permission?.toolName ?? "",
+        meta: { requestId: d.requestId, remote: true }
+      });
+      this.scheduleSave();
       return;
     }
     // Forward stream deltas to the webview verbatim (text, tool_use_*, etc.).

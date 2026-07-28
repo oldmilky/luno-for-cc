@@ -21,6 +21,7 @@ import {
   PermissionRequestView,
   SubagentTaskView
 } from "./lib/rpc";
+import { subscribeToSettings } from "./lib/settings";
 import { Spinner, type CodeInsert } from "./design/primitives";
 import { ChatScreen } from "./features/chat";
 import { WelcomeScreen } from "./features/auth/WelcomeScreen";
@@ -191,6 +192,10 @@ export function App() {
     };
   }, []);
 
+  // The webview-facing settings store keeps itself current; nothing renders
+  // from this effect, so it stays out of the handler below.
+  useEffect(() => subscribeToSettings(), []);
+
   // Single inbound message handler.
   useEffect(() => {
     const off = onMessage((m) => {
@@ -236,6 +241,14 @@ export function App() {
         case "returnToComposer":
           setQueued("");
           setPendingRestore(m.text);
+          break;
+        // A `vscode://` link's prompt. Same path as a handed-back follow-up:
+        // it lands in the composer, focuses it, and waits for a person. The
+        // focus bump is the only signal a link did anything, since the panel
+        // may already have been open.
+        case "prefillComposer":
+          setPendingRestore(m.text);
+          setComposerFocusKey((k) => k + 1);
           break;
         case "timeline":
           dispatchTimeline({ type: "append", event: m.event });
@@ -284,6 +297,14 @@ export function App() {
             q.some((p) => p.requestId === m.request.requestId)
               ? q
               : [...q, m.request]
+          );
+          break;
+        case "permissionResolved":
+          // Answered on another device. Only this one leaves — the queue can
+          // hold prompts the phone never saw, and dropping those would leave
+          // the CLI blocked on questions with no card left to answer them.
+          setPendingPermissions((q) =>
+            q.filter((p) => p.requestId !== m.requestId)
           );
           break;
         case "error":

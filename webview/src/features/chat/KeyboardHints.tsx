@@ -13,6 +13,7 @@ import { motion } from "framer-motion";
 import { Icon } from "../../design/icons";
 import { Tooltip } from "../../design/primitives";
 import { BACKDROP, OVERLAY_PANEL, enterAt } from "../../design/motion";
+import { useWebviewSettings } from "../../lib/settings";
 import s from "./KeyboardHints.module.scss";
 
 interface Group {
@@ -20,32 +21,46 @@ interface Group {
   rows: Array<{ keys: string[]; desc: string }>;
 }
 
-const GROUPS: Group[] = [
-  {
-    label: "In editor",
-    rows: [
-      { keys: ["⌘", "U"], desc: "Send selection to chat" },
-      { keys: ["⌘", "⇧", "I"], desc: "Toggle chat panel" }
-    ]
-  },
-  {
-    label: "In chat",
-    rows: [
-      { keys: ["⌘", "K"], desc: "Command palette" },
-      { keys: ["⇧", "Tab"], desc: "Cycle permission mode" },
-      { keys: ["@"], desc: "Mention a file" },
-      { keys: ["↵"], desc: "Send message" },
-      { keys: ["⇧", "↵"], desc: "New line" },
-      { keys: ["Esc"], desc: "Cancel / close modal" }
-    ]
-  },
-  {
-    label: "Navigation",
-    rows: [{ keys: ["?"], desc: "Open this help" }]
-  }
-];
+/** `luno.useCtrlEnterToSend` moves send onto a modifier and gives Enter back
+ *  to the line break. A panel advertising the other pair would be teaching the
+ *  shortcut that does nothing. */
+function groups(useCtrlEnterToSend: boolean): Group[] {
+  const sendRows = useCtrlEnterToSend
+    ? [
+        { keys: ["⌘/Ctrl", "↵"], desc: "Send message" },
+        { keys: ["↵"], desc: "New line" }
+      ]
+    : [
+        { keys: ["↵"], desc: "Send message" },
+        { keys: ["⇧", "↵"], desc: "New line" }
+      ];
+  return [
+    {
+      label: "In editor",
+      rows: [
+        { keys: ["⌘", "U"], desc: "Send selection to chat" },
+        { keys: ["⌘", "⇧", "I"], desc: "Toggle chat panel" }
+      ]
+    },
+    {
+      label: "In chat",
+      rows: [
+        { keys: ["⌘", "K"], desc: "Command palette" },
+        { keys: ["⇧", "Tab"], desc: "Cycle permission mode" },
+        { keys: ["@"], desc: "Mention a file, folder or terminal" },
+        ...sendRows,
+        { keys: ["Esc"], desc: "Cancel / close modal" }
+      ]
+    },
+    {
+      label: "Navigation",
+      rows: [{ keys: ["?"], desc: "Open this help" }]
+    }
+  ];
+}
 
 export function KeyboardHints({ onClose }: { onClose: () => void }) {
+  const { useCtrlEnterToSend } = useWebviewSettings();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" || e.key === "?") {
@@ -97,7 +112,7 @@ export function KeyboardHints({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className={s.body}>
-          {GROUPS.map((g, gi) => (
+          {groups(useCtrlEnterToSend).map((g, gi) => (
             <motion.section key={g.label} {...enterAt(gi)} className={s.group}>
               <div className={s.groupLabel}>{g.label}</div>
               <ul className={s.rows}>

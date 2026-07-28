@@ -78,6 +78,33 @@ export function harnessReplies(
       ]
     },
     requestSkills: { type: "skills", skills: [] },
+    // A fixed set, not a search: ranking is the host's job and is pinned by
+    // `test/unit/mention-match.test.ts`. What the harness is for here is that
+    // the two kinds render as two kinds. `id` is overwritten with the
+    // request's by the dispatcher.
+    requestFileSearch: {
+      type: "fileSearchResults",
+      id: "",
+      results: [
+        { path: "src/ui/", name: "ui", kind: "folder" },
+        { path: "src/ui/domains/", name: "domains", kind: "folder" },
+        { path: "src/ui/panel.ts", name: "panel.ts", kind: "file" },
+        {
+          path: "webview/src/features/chat/Composer.tsx",
+          name: "Composer.tsx",
+          kind: "file"
+        }
+      ]
+    },
+    requestTerminals: {
+      type: "terminalList",
+      id: "",
+      terminals: [
+        { terminalName: "bash", commandLine: "bun run lint", exitCode: 2 },
+        { terminalName: "pwsh", commandLine: "git push", exitCode: 0 },
+        { terminalName: "watch", commandLine: "vite dev" }
+      ]
+    },
     requestHistory: { type: "historyList", sessions: [] },
     requestConnectors: { type: "connectorsList", connectors: [] },
     refreshUsage: {

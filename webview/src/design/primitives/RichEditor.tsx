@@ -52,8 +52,12 @@ export interface RichEditorProps {
   onInserted: () => void;
   /** Fires on every input change with the current serialized markdown. */
   onChange: (text: string) => void;
-  /** Fires on Enter (without Shift) outside a code body. */
+  /** Fires on Enter (without Shift) outside a code body, or on Ctrl/Cmd+Enter
+   *  when `useCtrlEnterToSend` is on. */
   onSubmit: () => void;
+  /** Require Ctrl+Enter (Cmd+Enter on macOS) to send, leaving plain Enter to
+   *  break the line. `luno.useCtrlEnterToSend`. */
+  useCtrlEnterToSend?: boolean;
   /** Click on a code-badge pill — open the source range in the editor. */
   onOpenBadge?: (file: string, startLine: number, endLine: number) => void;
   /** Click on a @file mention pill — open the file in the editor. */
@@ -82,6 +86,7 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(
       onOpenBadge,
       onOpenMention,
       onImagePaste,
+      useCtrlEnterToSend = false,
       placeholder = "Ask, edit, or plan anything. Type @ to mention a file. ⌘U to insert selection."
     },
     forwardedRef
@@ -307,6 +312,12 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(
       if (e.key === "Enter" && !e.shiftKey) {
         // Newline inside a code body; submit otherwise.
         if (cursorInsideCodeBody()) return;
+        // With the setting on, a bare Enter is a line break and only the
+        // modifier sends. Both modifiers are accepted rather than switching on
+        // the platform: the webview cannot see which key the user calls Cmd,
+        // and offering the wrong one is a message that will not go.
+        const modifier = e.ctrlKey || e.metaKey;
+        if (useCtrlEnterToSend && !modifier) return;
         e.preventDefault();
         onSubmit();
         return;
@@ -468,10 +479,15 @@ function basename(file: string): string {
  *
  * `data-path` carries the workspace-relative path for paste/copy
  * round-trips and for any future "click to open" affordance.
+ *
+ * `token` is what the pill serializes to when the label is not enough on its
+ * own: a folder needs its whole path (`@src/ui/domains/` — a dozen projects
+ * have a `utils`), and `@terminal:bash` names something with no path at all.
  */
 export function makeMentionBadge(
   fullPath: string,
-  basename?: string
+  basename?: string,
+  token?: string
 ): HTMLSpanElement {
   const name = basename || fullPath.split("/").pop() || fullPath;
   const el = document.createElement("span");
@@ -479,6 +495,7 @@ export function makeMentionBadge(
   el.setAttribute("contenteditable", "false");
   el.dataset.path = fullPath;
   el.dataset.name = name;
+  if (token && token !== name) el.dataset.token = token;
   el.title = fullPath;
 
   const at = document.createElement("span");
@@ -595,11 +612,17 @@ function serialize(container: HTMLElement): string {
     }
 
     if (el.classList.contains(MENTION_CLASS)) {
-      const name = el.dataset.name ?? el.textContent?.replace(/^@/, "") ?? "";
-      // Serialize as plain `@basename ` so the rest of the pipeline sees
-      // the same token whether the user typed it or picked it. The full
-      // path (data-path) is preserved on the DOM for the next edit cycle.
-      if (name) out.push(`@${name} `);
+      // `data-token` when the pill carries one — a folder or a terminal, where
+      // the label alone does not identify the thing. Otherwise the basename,
+      // which is what a hand-typed `@` mention looks like, so the rest of the
+      // pipeline sees one shape either way. The full path stays on the DOM for
+      // the next edit cycle.
+      const token =
+        el.dataset.token ||
+        el.dataset.name ||
+        el.textContent?.replace(/^@/, "") ||
+        "";
+      if (token) out.push(`@${token} `);
       return;
     }
 

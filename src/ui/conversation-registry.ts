@@ -205,6 +205,7 @@ export class ConversationRegistry {
     );
 
     this.wireEditorContext();
+    this.wireWebviewSettings();
     this.usageTimer = setInterval(() => {
       void broadcastUsage(this.broadcast, rateLimits);
     }, USAGE_POLL_MS);
@@ -476,6 +477,17 @@ export class ConversationRegistry {
       vscode.window.onDidChangeTextEditorSelection(publish)
     );
     publish();
+  }
+
+  /** Settings the webview reads for itself. Every open conversation is told,
+   *  because each one owns its own composer. */
+  private wireWebviewSettings(): void {
+    this.disposables.push(
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (!e.affectsConfiguration("luno.useCtrlEnterToSend")) return;
+        for (const host of this.hosts) host.publishWebviewSettings();
+      })
+    );
   }
 
   private dispose(): void {

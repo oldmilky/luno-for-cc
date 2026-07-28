@@ -121,34 +121,77 @@ allowlist. Read `decidePermission` and the destructive/network gate in
 `src/providers/claude-cli.ts` before changing any of it. That strictness is a
 decision, not an oversight.
 
-## 3. `@` mentions: folders and fuzzy matching
+## 3. `@` mentions: folders and fuzzy matching — **DONE 2026-07-28**
 
-**Size: small.** Files only today. Upstream supports `@src/components/` with a
-trailing slash, and fuzzy matching; LUNO ranks prefix over substring and stops
-there. `searchFiles` in `src/ui/domains/files.ts` already lists through
-`git ls-files`, so folders are derivable from the same output.
+Folders come out of the same `git ls-files` output the files do
+(`foldersFromPaths`), and ranking moved to `src/core/mention-match.ts` where it
+can be tested: filename prefix → filename substring → filename subsequence →
+path substring → path subsequence, ties broken on path length. That last
+tie-break is what lifts `src/ui/` above the files inside it without a rule
+saying so.
 
-## 4. `@terminal:` — terminal output into the prompt
+Two things this cost:
 
-**Size: small–medium.** Zero occurrences in the codebase. Terminals are used
-only for LUNO's own errands (`src/ui/domains/terminal.ts`). Needs the VS Code
-shell-integration API to read a terminal's output.
+- **The query can no longer filter the listing.** `listTrackedFiles` used to
+  keep only `name.includes(query)`, which decided the answer before the ranker
+  was asked — a subsequence hit was thrown away before it could be scored. It
+  now lists everything (bounded at 20 000 paths) and the ranker cuts to 12.
+- **A folder cannot serialize as its basename.** The mention pill flattened to
+  `@name`, which for a folder names every `utils` in the tree. Pills now carry
+  an optional `data-token`; a folder's is its whole path with the trailing
+  slash, and files are unchanged.
 
-## 5. URI handler
+Subsequence matching is gated at 2 characters on a filename and 3 on a path:
+below that every path in a repository matches and the exact hits are buried.
 
-**Size: small.** `registerUriHandler` appears nowhere. Upstream exposes
-`vscode://anthropic.claude-code/open?prompt=…&session=…`, which is how people
-wire the extension into other tools. Without it there is no integration path at
-all.
+## 4. `@terminal:` — terminal output into the prompt — **DONE 2026-07-28**
 
-**Security note:** this is a new entry point into an extension that holds a
-subscription credential and spawns processes. Whatever it accepts must go
-through the same gate as everything else — see `decidePermission`.
+`@terminal:<name>` in a prompt is replaced with that terminal's last run —
+command, exit code and output — before the turn goes out. The expansion is
+inline in the turn text, so the timeline holds what the model was actually
+shown rather than a token that resolves to nothing tomorrow.
 
-## 6. `useCtrlEnterToSend`
+**The API constraint is the whole design, and it is worth reading before
+changing any of this.** `TerminalShellExecution.read()` yields only what is
+written _after_ the first call, and nothing exposes a terminal's scrollback. So
+this is a recorder, not a reader: `registerTerminalCapture()` subscribes at
+activation and keeps the last finished run per terminal. Two consequences that
+look like bugs and are not — commands run before LUNO activated are absent, and
+a terminal without shell integration (cmd.exe, a shell whose script did not
+load) never fires the events at all. The popover's empty state says so rather
+than implying nothing ran.
 
-**Size: trivial.** A setting to require Ctrl+Enter to send. Common request from
-people who type multi-line prompts.
+The raw stream is escape codes by weight; `src/core/terminal-output.ts` strips
+CSI/OSC, keeps the tail at 8 000 characters and says when it truncated.
+Off via `luno.terminalCapture`.
+
+## 5. URI handler — **DONE 2026-07-28**
+
+`vscode://<publisher>.<name>/open?prompt=…` puts the prompt in the composer and
+focuses it. **It does not send.** A link on any web page must not be able to
+start a turn in an extension that spawns processes and holds a subscription
+credential, and the person at the keyboard pressing send is the whole gate —
+`decidePermission` guards tools, not the decision to run a turn at all.
+
+Parsing is in `src/core/open-uri.ts` so the editor half has nothing to get
+wrong: unknown paths are ignored, control characters are stripped (a URI can
+carry an ANSI escape, and the composer renders what it is handed), and the
+prompt is capped at 4 000 characters. `session=` is **not** implemented — it was
+in the upstream shape this entry named, and nothing in LUNO maps to it yet.
+
+## 6. `useCtrlEnterToSend` — **DONE 2026-07-28**
+
+`luno.useCtrlEnterToSend`, default off. On, Enter breaks the line and
+Ctrl/Cmd+Enter sends. Both modifiers are accepted rather than switching on the
+platform: the webview cannot see which key the user calls Cmd, and offering the
+wrong one is a message that will not go.
+
+It arrives over a new `settings` message and a small store
+(`webview/src/lib/settings.ts`) rather than as a prop: the composer sits three
+components below the message handler and the inline edit composer sits
+elsewhere entirely. `KeyboardHints` reads the same store — a panel advertising
+`↵ Send` while the setting moved it would be teaching a shortcut that does
+nothing.
 
 ## 7. Plan caps in the meter are still guesses
 
@@ -171,9 +214,11 @@ default no.
 
 ## 9. Housekeeping
 
-- **42 files carry phase labels** (`Ф2а`, `Ф1`, `Ф0`) in comments, pointing at a
+- **39 files carry phase labels** (`Ф2а`, `Ф1`, `Ф0`) in comments, pointing at a
   document that is not in the published repository. Worth a scripted pass with
-  the gates behind it, not a hand edit. See `.claude/rules/comments.md`.
+  the gates behind it, not a hand edit. See `.claude/rules/comments.md`. All of
+  them are now in `webview/src` — `src/` is clear, and `docs/PLAN.md` still
+  says 53.
 - **`docs/PLAN.md` is stale** — its "Open, in rough order" list has items 1 and
   2 already done. It is gitignored, so it is working notes, but it misleads.
 - **Light palette variants (Ф2б)** — the oldest unchecked box. Large: `--lift`

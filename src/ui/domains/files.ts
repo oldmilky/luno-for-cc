@@ -14,6 +14,11 @@ import * as vscode from "vscode";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFile } from "node:child_process";
+import {
+  foldersFromPaths,
+  rankMentions,
+  type MentionEntry
+} from "../../core/mention-match.js";
 import type { CheckpointService } from "../../services/checkpoint.js";
 import type { Post } from "../messages.js";
 
@@ -248,13 +253,17 @@ export async function saveDirtyEditors(): Promise<void> {
 }
 
 /**
- * Filename matches for the composer's `@` mention popover.
+ * Files and folders for the composer's `@` mention popover.
  *
  * `workingRoot` is the checkout this conversation works in. It matters because
  * `vscode.workspace.findFiles` only ever searches the workspace folders, and a
  * conversation isolated in a git worktree works in a directory that is not one
  * of them: every mention it offered pointed into the main checkout, so the
  * agent was handed paths to files it was not editing.
+ *
+ * The query is no longer applied while listing. Fuzzy matching has to see
+ * every candidate to rank it, and a filter that only kept substring hits was
+ * deciding the answer before `rankMentions` was asked.
  */
 export async function searchFiles(
   post: Post,
@@ -278,19 +287,26 @@ export async function searchFiles(
   // offers up whatever the guess missed. `ghost.one/` in this very repo is
   // gitignored and was turned up by `@` regardless.
   const root = isolated ? workingRoot : folder!.uri.fsPath;
-  const viaGit = respectGitIgnore()
-    ? await listTrackedFiles(root, query)
-    : null;
-  const found =
+  const viaGit = respectGitIgnore() ? await listTrackedFiles(root) : null;
+  const files =
     viaGit ??
     (isolated
       ? // Nothing else can see a worktree: it is not a workspace folder, so
         // `findFiles` would answer with the main checkout's files instead.
         []
-      : await findInWorkspace(folder!, query));
+      : await findInWorkspace(folder!));
 
-  post({ type: "fileSearchResults", id, results: rankMatches(found, query) });
+  const entries = [...files, ...foldersFromPaths(files.map((f) => f.path))];
+  post({
+    type: "fileSearchResults",
+    id,
+    results: rankMentions(entries, query, MENTION_RESULTS)
+  });
 }
+
+/** What the popover shows at once. More than this and the list scrolls past
+ *  the composer it is anchored to. */
+const MENTION_RESULTS = 12;
 
 function respectGitIgnore(): boolean {
   return vscode.workspace
@@ -298,24 +314,25 @@ function respectGitIgnore(): boolean {
     .get<boolean>("respectGitIgnore", true);
 }
 
-interface FileMatch {
-  path: string;
-  name: string;
-}
+/**
+ * How many paths are held for ranking. Well past any repository someone
+ * mentions files in by hand, and low enough that a checkout of a monorepo
+ * cannot put a hundred thousand strings on the heap for one keystroke.
+ */
+const MAX_CANDIDATES = 20_000;
 
 async function findInWorkspace(
-  folder: vscode.WorkspaceFolder,
-  query: string
-): Promise<FileMatch[]> {
-  const glob = query ? `**/*${escapeGlob(query)}*` : "**/*";
+  folder: vscode.WorkspaceFolder
+): Promise<MentionEntry[]> {
   const found = await vscode.workspace.findFiles(
-    new vscode.RelativePattern(folder, glob),
+    new vscode.RelativePattern(folder, "**/*"),
     "**/{node_modules,.git,dist,build,out,.next,.venv,__pycache__}/**",
-    40
+    MAX_CANDIDATES
   );
   return found.map((u) => ({
     path: vscode.workspace.asRelativePath(u),
-    name: u.path.split("/").pop() ?? ""
+    name: u.path.split("/").pop() ?? "",
+    kind: "file" as const
   }));
 }
 
@@ -327,51 +344,28 @@ async function findInWorkspace(
  * not a repository" from "this repository has no matches" and fall back to the
  * workspace index rather than reporting an empty result.
  */
-function listTrackedFiles(
-  root: string,
-  query: string
-): Promise<FileMatch[] | null> {
-  return new Promise<FileMatch[] | null>((resolve) => {
+function listTrackedFiles(root: string): Promise<MentionEntry[] | null> {
+  return new Promise<MentionEntry[] | null>((resolve) => {
     execFile(
       "git",
       ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
       { cwd: root, maxBuffer: 16 * 1024 * 1024 },
       (err, stdout) => {
         if (err) return resolve(null);
-        const q = query.toLowerCase();
-        const out: FileMatch[] = [];
+        const out: MentionEntry[] = [];
         for (const rel of stdout.split("\0")) {
           if (!rel) continue;
-          const name = rel.split("/").pop() ?? "";
-          if (q && !name.toLowerCase().includes(q)) continue;
-          out.push({ path: rel, name });
-          // The ranking below only ever surfaces 12; this bound keeps a
-          // monorepo's worth of paths out of memory on an empty query.
-          if (out.length >= 500) break;
+          out.push({
+            path: rel,
+            name: rel.split("/").pop() ?? "",
+            kind: "file"
+          });
+          if (out.length >= MAX_CANDIDATES) break;
         }
         resolve(out);
       }
     );
   });
-}
-
-/** A prefix match beats a substring match beats the rest; ties go
- *  alphabetically. Typing "pan" should surface panel.ts, not
- *  company-panel-legacy.ts. */
-function rankMatches(found: FileMatch[], query: string): FileMatch[] {
-  const q = query.toLowerCase();
-  return [...found]
-    .sort((a, b) => {
-      const an = a.name.toLowerCase();
-      const bn = b.name.toLowerCase();
-      if (q) {
-        const aRank = an.startsWith(q) ? 0 : an.includes(q) ? 1 : 2;
-        const bRank = bn.startsWith(q) ? 0 : bn.includes(q) ? 1 : 2;
-        if (aRank !== bRank) return aRank - bRank;
-      }
-      return a.path.localeCompare(b.path);
-    })
-    .slice(0, 12);
 }
 
 /** Path equality that survives the separator and drive-letter case differences
@@ -383,10 +377,6 @@ function samePath(a: string, b: string): boolean {
       .replace(/\\/g, "/")
       .toLowerCase();
   return norm(a) === norm(b);
-}
-
-function escapeGlob(s: string): string {
-  return s.replace(/[[\]{}*?!()]/g, "\\$&");
 }
 
 /**

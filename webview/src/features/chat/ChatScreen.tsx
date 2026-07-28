@@ -664,6 +664,7 @@ type TurnBlock =
   | { kind: "toolGroup"; bucket: ToolBucket; items: ToolGroupItem[] }
   | { kind: "plan"; revisionId: string }
   | { kind: "compact"; text: string }
+  | { kind: "remoteApproval"; tool: string }
   | { kind: "subagent"; taskId: string };
 
 /**
@@ -932,6 +933,14 @@ function groupEvents(events: TimelineEvent[]): GroupingResult {
       continue;
     }
 
+    // A tool this panel never approved ran anyway, because the same prompt was
+    // answered on a phone driving the session. It stays on the timeline for the
+    // same reason compaction does: nothing else explains it later.
+    if (e.kind === "approval") {
+      turn.blocks.push({ kind: "remoteApproval", tool: e.body ?? "" });
+      continue;
+    }
+
     // Normally the card is already placed by the `Agent` tool call, which
     // lands first. This catches a timeline that has the task without the
     // dispatch — the tool call intercepted as a plan write, or a stored
@@ -1076,6 +1085,18 @@ function renderTurnBlock(
       <div key={`c-${i}`} className={s.compactBoundary}>
         <Icon name="layers" size={11} />
         <span>{b.text}</span>
+      </div>
+    );
+  }
+  if (b.kind === "remoteApproval") {
+    return (
+      <div key={`ra-${i}`} className={s.remoteApproval}>
+        <Icon name="shield" size={11} />
+        <span>
+          {b.tool
+            ? `${b.tool} · answered on another device`
+            : "Answered on another device"}
+        </span>
       </div>
     );
   }

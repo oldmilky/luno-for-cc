@@ -2,7 +2,7 @@
   "name": "luno-for-cc",
   "displayName": "LUNO for CC",
   "description": "LUNO for CC — personal Claude Code chat for Cursor / VS Code.",
-  "version": "0.22.3",
+  "version": "0.23.0",
   "publisher": "lunoweb",
   "license": "MIT",
   "icon": "assets/luno-icon-500.png",
@@ -38,7 +38,8 @@
   },
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onUri"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -219,6 +220,16 @@
           "type": "boolean",
           "default": true,
           "description": "Include the file you have open and any highlighted text with each turn, so 'why does this crash?' with a line selected has a subject. Only the selection is sent, capped in size — never the whole file. Off means the agent learns about a selection only when you press Ctrl+U."
+        },
+        "luno.useCtrlEnterToSend": {
+          "type": "boolean",
+          "default": false,
+          "description": "Require Ctrl+Enter (Cmd+Enter on macOS) to send, leaving plain Enter to insert a newline. For people who write multi-line prompts and lose them to a reflexive Enter. Off keeps Enter as send and Shift+Enter as newline."
+        },
+        "luno.terminalCapture": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep the output of the last command run in each terminal, so @terminal: can put it in a prompt. Only terminals with VS Code shell integration are captured, and only commands run after Luno started — the API cannot read a terminal's scrollback. Off captures nothing and leaves @terminal: with an empty list."
         },
         "luno.maxTokens": {
           "type": "number",

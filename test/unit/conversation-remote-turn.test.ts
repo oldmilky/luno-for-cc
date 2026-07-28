@@ -85,7 +85,11 @@ vi.mock("vscode", () => ({
     onDidChangeActiveTextEditor: () => disposable,
     onDidChangeTextEditorSelection: () => disposable,
     showInformationMessage: async () => undefined,
-    showWarningMessage: async () => undefined,
+    // The modal one is the Bypass confirmation, and it says yes: otherwise the
+    // Bypass test would pass on that refusal and never reach the rule it is
+    // supposed to be checking.
+    showWarningMessage: async (_message: string, opts?: { modal?: boolean }) =>
+      opts?.modal ? "Enable Bypass" : undefined,
     createWebviewPanel: () => ({
       webview: makeWebview(),
       title: "",
@@ -223,6 +227,14 @@ const timeline = (webview: FakeWebview) =>
     .filter((m) => m.type === "timeline")
     .map((m) => [m.event?.kind, m.event?.body]);
 
+/** The posture the composer would be rendering from right now. */
+const publishedMode = (webview: FakeWebview) =>
+  webview.sent.filter((m) => m.type === "auth").at(-1)?.permissionMode;
+
+const publishedBridge = (webview: FakeWebview) =>
+  webview.sent.filter((m) => m.type === "remoteControl").at(-1)?.status as
+    { state?: string } | undefined;
+
 describe("a turn started on another device", () => {
   it("puts the phone's prompt and the answer on the timeline", async () => {
     const { webview } = await openWithBridge();
@@ -307,6 +319,31 @@ describe("a turn started on another device", () => {
     expect(sentPrompts).toEqual(["and from the panel"]);
   });
 
+  it("survives a second prompt arriving while the first is still open", async () => {
+    // Two messages typed on the phone in a row. The CLI takes both and replays
+    // the second with the first turn still running here; before this, the new
+    // turn awaited an old one whose `done` was being delivered to a queue
+    // nobody read any more, and the panel stayed busy for good.
+    const { webview } = await openWithBridge();
+    remote.push!({ type: "remote_prompt", prompt: "first" });
+    remote.push!({ type: "text", text: "half an answer" });
+    await settle();
+
+    remote.push!({ type: "remote_prompt", prompt: "second" });
+    remote.push!({ type: "text", text: "the second answer" });
+    remote.push!({ type: "done" });
+    await settle();
+
+    expect(timeline(webview)).toEqual([
+      ["user", "first"],
+      ["assistant", "half an answer"],
+      ["user", "second"],
+      ["assistant", "the second answer"]
+    ]);
+    // And the panel is free again rather than parked on a turn that cannot end.
+    expect(webview.sent.filter((m) => m.type === "turnEnd")).toHaveLength(2);
+  });
+
   it("drops turn traffic that belongs to no turn", async () => {
     // A `result` tail from a turn that was already cancelled, arriving with
     // nothing on the timeline to attach it to.
@@ -315,5 +352,125 @@ describe("a turn started on another device", () => {
     remote.push!({ type: "done" });
     await settle();
     expect(timeline(webview)).toEqual([]);
+  });
+});
+
+describe("an approval answered on the other device", () => {
+  it("takes the card off this surface", async () => {
+    // Whoever answers first wins, and the CLI withdraws the request from the
+    // loser. A card left standing would be answered into an id the CLI has
+    // already forgotten.
+    const { webview } = await openWithBridge();
+    remote.push!({ type: "remote_prompt", prompt: "clean the branch" });
+    remote.push!({
+      type: "permission_request",
+      permission: { requestId: "req-9", toolName: "Bash", input: {} }
+    });
+    await settle();
+
+    remote.push!({
+      type: "permission_resolved",
+      requestId: "req-9",
+      permission: { requestId: "req-9", toolName: "Bash", input: {} }
+    });
+    await settle();
+
+    const resolved = webview.sent.filter(
+      (m) => m.type === "permissionResolved"
+    );
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].requestId).toBe("req-9");
+    remote.push!({ type: "done" });
+    await settle();
+  });
+
+  it("says on the timeline that a tool ran without being approved here", async () => {
+    const { webview } = await openWithBridge();
+    remote.push!({ type: "remote_prompt", prompt: "clean the branch" });
+    remote.push!({
+      type: "permission_resolved",
+      requestId: "req-9",
+      permission: { requestId: "req-9", toolName: "Bash", input: {} }
+    });
+    remote.push!({ type: "done" });
+    await settle();
+
+    expect(timeline(webview)).toContainEqual(["approval", "Bash"]);
+  });
+
+  it("does not restore the card when the panel is reopened", async () => {
+    // The host replays a pending approval onto a surface that was showing
+    // another chat. A withdrawn one must not come back with it.
+    const { host, webview } = await openWithBridge();
+    remote.push!({ type: "remote_prompt", prompt: "clean the branch" });
+    remote.push!({
+      type: "permission_request",
+      permission: { requestId: "req-9", toolName: "Bash", input: {} }
+    });
+    await settle();
+    remote.push!({ type: "permission_resolved", requestId: "req-9" });
+    await settle();
+
+    host.hide();
+    const second = makeWebview();
+    host.show({ webview: second, reveal: () => {} } as never);
+    await settle();
+    expect(second.sent.some((m) => m.type === "permissionRequest")).toBe(false);
+    remote.push!({ type: "done" });
+    await settle();
+    void webview;
+  });
+});
+
+describe("the ungated modes and the bridge are kept apart", () => {
+  it("refuses Agent mode while a phone is connected", async () => {
+    // `auto` auto-allows edits with no card on either surface: a device that is
+    // not in the room could make the agent write files unapproved.
+    const { webview } = await openWithBridge();
+    const before = webview.sent.filter((m) => m.type === "auth").length;
+    webview.deliver({ type: "setPermissionMode", mode: "auto" });
+    await settle();
+
+    expect(publishedMode(webview)).toBe("default");
+    // Republished, not merely unchanged: the picker had already moved to the
+    // mode it could not have and has to be put back.
+    expect(
+      webview.sent.filter((m) => m.type === "auth").length
+    ).toBeGreaterThan(before);
+    // And the refusal costs nothing else — the bridge is still up.
+    expect(publishedBridge(webview)?.state).toBe("ready");
+  });
+
+  it("refuses Bypass even once its own confirmation said yes", async () => {
+    const { webview } = await openWithBridge();
+    webview.deliver({ type: "setPermissionMode", mode: "bypass" });
+    await settle();
+
+    expect(publishedMode(webview)).toBe("default");
+  });
+
+  it("still allows Plan, which gates harder rather than less", async () => {
+    const { webview } = await openWithBridge();
+    webview.deliver({ type: "setPermissionMode", mode: "plan" });
+    await settle();
+
+    expect(publishedMode(webview)).toBe("plan");
+  });
+
+  it("refuses to start the bridge from Agent mode, without flashing ready", async () => {
+    settings.permissionMode = "auto";
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const host = registry.create();
+    const webview = makeWebview();
+    host.attach({ webview, reveal: () => {} } as never, {});
+    webview.route(() => host as never);
+    webview.deliver({ type: "toggleRemoteControl", enabled: true });
+    await settle();
+
+    const states = webview.sent
+      .filter((m) => m.type === "remoteControl")
+      .map((m) => (m.status as { state?: string }).state);
+    expect(states).toEqual(["off"]);
+    void registry;
   });
 });

@@ -103,6 +103,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     await this.current.sendUserMessage(text);
   }
 
+  /** A `vscode://` link's payload, into whichever chat the sidebar is showing.
+   *  It is put in the composer, never sent. */
+  prefillComposer(text: string) {
+    this.current.prefillComposer(text);
+  }
+
   commentOnEditorSelection() {
     this.current.commentOnEditorSelection();
   }
