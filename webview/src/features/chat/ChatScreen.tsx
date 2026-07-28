@@ -16,6 +16,7 @@ import {
   SkillInfo,
   ChatStatus,
   PermissionRequestView,
+  RemoteControlStatus,
   SubagentTaskView
 } from "../../lib/rpc";
 import { ConnectorsModal } from "../mcp";
@@ -28,6 +29,7 @@ import {
 } from "../../design/motion";
 import type { CodeInsert } from "../../design/primitives";
 import { Header } from "./Header";
+import { isRemoteControlCommand } from "./remote-control-command";
 import { Composer } from "./Composer";
 import { ContextStrip } from "./ContextStrip";
 import { QueuedPrompt } from "./QueuedPrompt";
@@ -181,6 +183,19 @@ export function ChatScreen({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [hintsOpen, setHintsOpen] = useState(false);
   const [connectorsOpen, setConnectorsOpen] = useState(false);
+  const [remoteControl, setRemoteControl] = useState<RemoteControlStatus>({
+    state: "off"
+  });
+
+  // The host is the only authority here: the bridge changes state without
+  // anyone in the panel asking, when a device joins or the network drops.
+  useEffect(
+    () =>
+      onMessage((m) => {
+        if (m.type === "remoteControl") setRemoteControl(m.status);
+      }),
+    []
+  );
 
   // Host-initiated "open connectors" command (from the `luno.openConnectors`
   // VS Code command). Listens for the RPC message and reveals the modal.
@@ -334,6 +349,7 @@ export function ChatScreen({
         streaming={streaming}
         onOpenHistory={() => setHistoryOpen(true)}
         onOpenConnectors={() => setConnectorsOpen(true)}
+        remoteControl={remoteControl}
       />
 
       {bannerVisible && <ConventionsBanner onHideForSession={onHideBanner} />}
@@ -576,6 +592,17 @@ export function ChatScreen({
           onChange={onInput}
           onSubmit={(text) => {
             userScrolled.current = false;
+            // `/rc` never reaches the model. It is a command to this panel, and
+            // the CLI does not expose it over stream-json anyway — it is absent
+            // from the slash-command list a headless session reports, so sending
+            // it as a prompt would just make the model read the words.
+            if (isRemoteControlCommand(text)) {
+              send({
+                type: "toggleRemoteControl",
+                enabled: remoteControl.state === "off"
+              });
+              return;
+            }
             onSubmit(text);
           }}
           onCancel={onCancel}

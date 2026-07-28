@@ -38,7 +38,9 @@ import type {
   TimelineEvent,
   UsageTotals,
   SessionWindow,
-  RateLimitStatus
+  RateLimitStatus,
+  UsageUtilization,
+  UtilizationLimit
 } from "../../lib/rpc";
 import s from "./TokenMeter.module.scss";
 
@@ -116,6 +118,10 @@ const SETTINGS_KEY = "luno.tokenMeter.v3";
 
 interface MeterSettings {
   plan: PlanKey;
+  /** Whether the plan above is the user's own choice. Until it is, the tier
+   *  read off the account wins: a picker left on its "Pro" default while the
+   *  account is Max 20× is a wrong answer, not a neutral one. */
+  planPicked?: boolean;
   /** Custom overrides keyed by plan (so editing Pro limits doesn't bleed into Max). */
   overrides: Partial<
     Record<PlanKey, { session?: number; weekAll?: number; weekSonnet?: number }>
@@ -123,7 +129,7 @@ interface MeterSettings {
 }
 
 function defaultSettings(): MeterSettings {
-  return { plan: "pro", overrides: {} };
+  return { plan: "pro", overrides: {}, planPicked: false };
 }
 
 function readSettings(): MeterSettings {
@@ -135,6 +141,7 @@ function readSettings(): MeterSettings {
       plan: PLAN_ORDER.includes(parsed.plan as PlanKey)
         ? (parsed.plan as PlanKey)
         : "pro",
+      planPicked: parsed.planPicked === true,
       overrides:
         parsed.overrides && typeof parsed.overrides === "object"
           ? (parsed.overrides as MeterSettings["overrides"])
@@ -217,6 +224,9 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
   // Server truth for the *boundaries* — it reports no amounts, so the bars
   // still come from the aggregated session files.
   const [limits, setLimits] = useState<RateLimitStatus[]>([]);
+  // The server's own verdict on the account, via the CLI's cache. Null until
+  // the host has read it — and on an API key, for good.
+  const [util, setUtil] = useState<UsageUtilization | null>(null);
   // How full the model's context was on the last request. The CLI reports both
   // halves, so this is the one row in this panel that is not an estimate.
   const [context, setContext] = useState<{
@@ -243,6 +253,7 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
           available: m.available
         });
         setLimits(m.limits ?? []);
+        setUtil(m.utilization ?? null);
       } else if (
         m.type === "tokenUsage" &&
         m.contextTokens !== undefined &&
@@ -258,8 +269,37 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
     [events, streaming]
   );
 
-  const caps = resolveLimits(settings);
-  const preset = PLAN_PRESETS[settings.plan];
+  // The account's tier, until the user says otherwise. `plan` in state stays
+  // whatever it was so the picker can still show a manual choice being made.
+  const effective: MeterSettings = useMemo(() => {
+    const detected = util?.plan;
+    if (settings.planPicked || !detected || detected === settings.plan) {
+      return settings;
+    }
+    return { ...settings, plan: detected };
+  }, [settings, util]);
+
+  const caps = resolveLimits(effective);
+  const preset = PLAN_PRESETS[effective.plan];
+
+  // The server's own figures, when the CLI has them. They outrank everything
+  // derived below: a percentage we compute needs a cap we guessed and a token
+  // count that matches Anthropic's accounting, and on a live account both were
+  // wrong at once — the meter read "over" where the server said 11%.
+  const server = useMemo(() => {
+    const rows = util?.limits ?? [];
+    const pick = (kind: string) => rows.find((r) => r.kind === kind);
+    const session = pick("session");
+    const weekly = pick("weekly_all");
+    const scoped = pick("weekly_scoped");
+    const worst = [session, weekly, scoped]
+      .filter((r): r is UtilizationLimit => Boolean(r))
+      .reduce<UtilizationLimit | undefined>(
+        (a, b) => (!a || b.percent > a.percent ? b : a),
+        undefined
+      );
+    return rows.length > 0 ? { session, weekly, scoped, worst } : null;
+  }, [util]);
 
   const sessionTotal = auth.available
     ? totalOf(auth.session.usage)
@@ -273,7 +313,7 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
 
   // For the chip: show whichever bucket has the highest pressure. If the
   // currently-active plan has no caps (API) just show session total.
-  const noCaps = settings.plan === "api";
+  const noCaps = effective.plan === "api";
   const {
     primaryLabel,
     primaryShort,
@@ -289,6 +329,35 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
     weekSonnetTotal,
     weekSonnetPct
   );
+
+  // The chip repeats whatever the panel would say, so it has to take the same
+  // source. This is the line that had it reading "5H over" while the account
+  // sat at 11%.
+  const chip = server?.worst
+    ? {
+        label:
+          server.worst.kind === "session"
+            ? "5-hour limit"
+            : server.worst.scopeLabel
+              ? `Weekly (${server.worst.scopeLabel})`
+              : "Weekly (all models)",
+        short: server.worst.group === "session" ? "5H" : "WK",
+        value: server.worst.percent,
+        display: `${server.worst.percent}%`,
+        tone: (server.worst.severity === "critical" ||
+        server.worst.percent >= 90
+          ? "err"
+          : server.worst.severity === "warning" || server.worst.percent >= 75
+            ? "warn"
+            : "ok") as ToneKey
+      }
+    : {
+        label: primaryLabel,
+        short: primaryShort,
+        value: primaryValue,
+        display: primaryDisplay,
+        tone: primaryTone
+      };
 
   const setLimitOverride = (
     key: "session" | "weekAll" | "weekSonnet",
@@ -307,7 +376,10 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
 
   const setPlan = (p: PlanKey) => {
     setSettings((prev) => {
-      const next = { ...prev, plan: p };
+      // Picking one is what makes it the user's, and from then on the detected
+      // tier stops overriding it. Someone on a seat whose tier reads wrong has
+      // to be able to say so once and be believed.
+      const next = { ...prev, plan: p, planPicked: true };
       writeSettings(next);
       return next;
     });
@@ -316,7 +388,7 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
 
   return (
     <div ref={rootRef} className={s.root}>
-      <Tooltip label={`${primaryLabel}: ${primaryDisplay}`}>
+      <Tooltip label={`${chip.label}: ${chip.display}`}>
         <motion.button
           type="button"
           onClick={() => {
@@ -327,19 +399,19 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
           }}
           {...PRESS}
           whileHover={{ y: -1 }}
-          className={`${s.chip} ${TONE_CLASS[primaryTone]}`}
+          className={`${s.chip} ${TONE_CLASS[chip.tone]}`}
         >
           <Icon name="bolt" size={9} />
-          <span className={s.chipShort}>{primaryShort}</span>
+          <span className={s.chipShort}>{chip.short}</span>
           {/* Two branches rather than one counter with a switchable formatter:
               the number means different things either side of `noCaps` — a
               percentage against a cap, a raw token total without one — so a
               single spring would count between the two when the plan changes.
               Separate elements mount at their own value instead. */}
-          {noCaps ? (
-            <CountUp value={primaryValue} format={formatCompact} />
+          {noCaps && !server ? (
+            <CountUp value={chip.value} format={formatCompact} />
           ) : (
-            <ChipGauge pct={primaryValue} />
+            <ChipGauge pct={chip.value} />
           )}
         </motion.button>
       </Tooltip>
@@ -360,6 +432,7 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
               <div className={s.headLeft}>
                 <span className={s.headTitle}>Your usage limits</span>
                 <SourceBadge
+                  fromAccount={Boolean(server)}
                   available={auth.available}
                   anchored={auth.session.authoritative === true}
                 />
@@ -400,7 +473,7 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                   >
                     {PLAN_ORDER.map((k) => {
                       const p = PLAN_PRESETS[k];
-                      const active = k === settings.plan;
+                      const active = k === effective.plan;
                       return (
                         <button
                           key={k}
@@ -425,31 +498,37 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
             </div>
 
             <div className={s.body}>
-              {/* Current session. The countdown says where its boundary came
-                  from: the CLI's own verdict, or a guess from message
-                  timestamps that can be hours out. */}
-              <UsageRow
-                label="Current session"
-                pct={sessionPct}
-                used={sessionTotal}
-                limit={caps.session}
-                sub={
-                  auth.available && auth.session.resetsAt > 0
-                    ? `Resets in ${formatCountdown(auth.session.resetsAt, tick)}${
-                        auth.session.authoritative ? "" : " (estimated)"
-                      }`
-                    : auth.available
-                      ? "No activity in the last 5 hours"
-                      : "Estimated · resets per Anthropic's 5-hour window"
-                }
-                tooltip={
-                  auth.session.authoritative
-                    ? "Window boundary reported by the Claude CLI itself. Tokens are summed from the session files inside that window."
-                    : "No quota verdict seen yet — the CLI reports one during a turn. Until then the window is inferred from message timestamps and can be hours out."
-                }
-                noCap={caps.session === 0}
-                onLimitChange={(v) => setLimitOverride("session", v)}
-              />
+              {/* The account's real 5-hour figure when the server has spoken,
+                  and only then our own arithmetic. The two are not variations
+                  on one number: the server reports a percentage of a quota it
+                  alone knows, while ours divides tokens we counted by a cap we
+                  guessed. */}
+              {server?.session ? (
+                <ServerRow
+                  limit={server.session}
+                  label="5-hour limit"
+                  tick={tick}
+                />
+              ) : (
+                <UsageRow
+                  label="Current session"
+                  pct={sessionPct}
+                  used={sessionTotal}
+                  limit={caps.session}
+                  sub={
+                    auth.available && auth.session.resetsAt > 0
+                      ? `Resets in ${formatCountdown(auth.session.resetsAt, tick)}${
+                          auth.session.authoritative ? "" : " (estimated)"
+                        }`
+                      : auth.available
+                        ? "No activity in the last 5 hours"
+                        : "Estimated · resets per Anthropic's 5-hour window"
+                  }
+                  tooltip="Estimated: no figures from the server yet. Tokens counted here, against a cap taken from the plan above."
+                  noCap={caps.session === 0}
+                  onLimitChange={(v) => setLimitOverride("session", v)}
+                />
+              )}
 
               {/* The model's context, as opposed to the account's quota. The
                   two are unrelated and users conflate them: a full context is
@@ -478,34 +557,61 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                   <span className={s.sectionTitle}>Weekly limits</span>
                 </div>
 
-                <UsageRow
-                  label="All models"
-                  pct={weekAllPct}
-                  used={weekAllTotal}
-                  limit={caps.weekAll}
-                  sub={weeklyReset("seven_day", limits, tick)}
-                  noCap={caps.weekAll === 0}
-                  onLimitChange={(v) => setLimitOverride("weekAll", v)}
-                />
+                {server?.weekly ? (
+                  <ServerRow
+                    limit={server.weekly}
+                    label="All models"
+                    tick={tick}
+                  />
+                ) : (
+                  <UsageRow
+                    label="All models"
+                    pct={weekAllPct}
+                    used={weekAllTotal}
+                    limit={caps.weekAll}
+                    sub={weeklyReset("seven_day", limits, tick)}
+                    noCap={caps.weekAll === 0}
+                    onLimitChange={(v) => setLimitOverride("weekAll", v)}
+                  />
+                )}
 
-                <UsageRow
-                  label="Sonnet only"
-                  pct={weekSonnetPct}
-                  used={weekSonnetTotal}
-                  limit={caps.weekSonnet}
-                  sub={weeklyReset("seven_day_sonnet", limits, tick)}
-                  tooltip="Counts every assistant message produced by any Claude Sonnet model this week."
-                  noCap={caps.weekSonnet === 0}
-                  onLimitChange={(v) => setLimitOverride("weekSonnet", v)}
-                />
+                {/* The server names the model this one is scoped to, so the row
+                    does too. It used to be hard-coded to Sonnet; on this
+                    account the scoped limit is Fable's. */}
+                {server?.scoped ? (
+                  <ServerRow
+                    limit={server.scoped}
+                    label={
+                      server.scoped.scopeLabel
+                        ? `${server.scoped.scopeLabel} only`
+                        : "Model-scoped"
+                    }
+                    tick={tick}
+                  />
+                ) : server ? null : (
+                  <UsageRow
+                    label="Sonnet only"
+                    pct={weekSonnetPct}
+                    used={weekSonnetTotal}
+                    limit={caps.weekSonnet}
+                    sub={weeklyReset("seven_day_sonnet", limits, tick)}
+                    noCap={caps.weekSonnet === 0}
+                    onLimitChange={(v) => setLimitOverride("weekSonnet", v)}
+                  />
+                )}
               </div>
 
               {/* Footer: last updated + refresh */}
               <div className={s.footer}>
+                {/* Whose clock this is matters: the server figures are only as
+                    fresh as the CLI's last refresh of them, and we do not get
+                    to ask on our own. */}
                 <span className={s.footerStamp}>
-                  {auth.generatedAt
-                    ? `Last updated: ${formatAgo(auth.generatedAt, tick)}`
-                    : "No data yet"}
+                  {server && util?.fetchedAt
+                    ? `From your account: ${formatAgo(util.fetchedAt, tick)}`
+                    : auth.generatedAt
+                      ? `Counted here: ${formatAgo(auth.generatedAt, tick)}`
+                      : "No data yet"}
                 </span>
                 <button
                   type="button"
@@ -518,15 +624,17 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                 </button>
               </div>
 
-              {/* Disclaimer */}
-              <div className={s.disclaimer}>
-                Limits are best-guesses of Anthropic's published per-plan caps —
-                they may not match your account exactly. Click any limit number
-                to set a custom value, or change plan above.
-                {auth.available
-                  ? " Totals come from Claude Code's session files on this machine; claude.ai browser activity isn't visible to the extension."
-                  : " Token counts are client-side estimates until Claude Code session files are present."}
-              </div>
+              {/* The disclaimer that stood here apologised for guessing at the
+                  caps. With the account's own figures on screen there is
+                  nothing left to apologise for, and the one caveat that
+                  survives — how fresh they are — is in the footer above. */}
+              {!server && (
+                <div className={s.disclaimer}>
+                  Estimated from this machine&apos;s session files against the
+                  plan above. Your account&apos;s own figures appear here once
+                  the CLI has fetched them — run a turn.
+                </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -642,12 +750,26 @@ function ChipGauge({ pct }: { pct: number }) {
  * "(estimated)" on every line.
  */
 function SourceBadge({
+  fromAccount,
   available,
   anchored
 }: {
+  /** The figures on screen are the account's own. Nothing else in this panel
+   *  outranks that, so nothing else gets to label it. */
+  fromAccount: boolean;
   available: boolean;
   anchored: boolean;
 }) {
+  if (fromAccount) {
+    return (
+      <Tooltip label="Percentages reported by your Claude account, read from the CLI's cache of them">
+        <span className={s.badgeOk}>
+          <Icon name="check" size={8} />
+          Your account
+        </span>
+      </Tooltip>
+    );
+  }
   if (available && anchored) {
     return (
       <Tooltip label="Amounts from Claude Code's session files, window boundaries reported by the CLI itself">
@@ -669,6 +791,55 @@ function SourceBadge({
     <Tooltip label="Client-side estimate (no Claude Code session files for this workspace)">
       <span className={s.badgeMuted}>Estimate</span>
     </Tooltip>
+  );
+}
+
+/**
+ * One quota exactly as the account reports it.
+ *
+ * No token counts and no cap: the server gives a percentage of a limit it does
+ * not disclose, and inventing a denominator to show alongside it would put the
+ * old guesswork back on screen next to the truth. Severity is the server's too
+ * — a second opinion computed from a threshold we chose is how the previous
+ * meter ended up calling 11% "over".
+ */
+function ServerRow({
+  limit,
+  label,
+  tick
+}: {
+  limit: UtilizationLimit;
+  label: string;
+  tick: number;
+}) {
+  const tone: ToneKey =
+    limit.severity === "critical" || limit.percent >= 90
+      ? "err"
+      : limit.severity === "warning" || limit.percent >= 75
+        ? "warn"
+        : "ok";
+  return (
+    <div className={s.row}>
+      <div className={s.rowHead}>
+        <div className={s.rowLabelWrap}>
+          <span className={s.rowLabel}>{label}</span>
+        </div>
+        <span className={s.rowPct}>{limit.percent}% used</span>
+      </div>
+      <div className={s.bar}>
+        <div
+          className={`${s.barFill} ${TONE_CLASS[tone]}`}
+          style={{ width: `${Math.min(100, Math.max(0, limit.percent))}%` }}
+        />
+      </div>
+      <div className={s.rowFoot}>
+        <span>
+          {hasReset(limit.resetsAt, tick)
+            ? "Resets shortly"
+            : `Resets in ${formatCountdown(limit.resetsAt, tick)}`}
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -908,6 +1079,13 @@ function pickChipPrimary(
     primaryDisplay: top.pct >= 100 ? "over" : `${Math.round(top.pct)}%`,
     primaryTone: toneFor(top.pct)
   };
+}
+
+/** Whether the window has already rolled over. A function rather than an
+ *  inline comparison because reading the clock during render is impure — the
+ *  `_tick` argument is what re-runs it, exactly as for the two below. */
+function hasReset(resetsAt: number, _tick: number): boolean {
+  return resetsAt <= Date.now();
 }
 
 function formatCountdown(resetsAt: number, _tick: number): string {

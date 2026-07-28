@@ -14,12 +14,16 @@ import {
   isTerminalTaskStatus,
   PermissionMode,
   PermissionBehavior,
+  RemoteControlStatus,
   StreamDelta,
   SubagentUpdate
 } from "../core/types.js";
 import type { ChatProvider } from "../providers/base.js";
 import { createProvider } from "../providers/factory.js";
-import type { EffortLevel } from "../providers/claude-cli.js";
+import type {
+  ClaudeCliProvider,
+  EffortLevel
+} from "../providers/claude-cli.js";
 import {
   CheckpointService,
   checkpointStoreDir
@@ -237,6 +241,16 @@ export class ConversationHost {
   /** The provider running the current turn. Held so the `permissionResponse`
    *  message can route the user's allow/deny back to the live CLI process. */
   private activeProvider?: ChatProvider;
+  /**
+   * The provider kept alive between turns while Remote Control is on.
+   *
+   * Everywhere else a provider is built per turn and thrown away, which is
+   * what makes per-turn options simple. The bridge cannot live that way — it
+   * ends with its process — so this one persists and is handed the turn's
+   * options through `updateOptions()` instead of being rebuilt.
+   */
+  private remoteProvider: ClaudeCliProvider | null = null;
+  private remoteControl: RemoteControlStatus = { state: "off" };
   // In-flight turn; awaited before starting a new one so turns never overlap.
   private activeTurn?: Promise<void>;
   /** Owns the current session, its timeline listeners, debounced persistence,
@@ -755,6 +769,11 @@ export class ConversationHost {
       // composer shows the defaults while the turn would use something else.
       void this.publishAuthState();
       void broadcastUsage(this.post, this.shared.rateLimits);
+      // The bridge outlives the surface: reloading the panel must not make a
+      // conversation the user's phone is connected to look disconnected.
+      if (this.remoteControl.state !== "off") {
+        this.post({ type: "remoteControl", status: this.remoteControl });
+      }
     });
   }
 
@@ -1112,6 +1131,30 @@ export class ConversationHost {
       const thinking = bool(m, "thinking");
       if (thinking !== undefined) {
         await this.applySetting("thinking", thinking);
+      }
+    },
+    toggleRemoteControl: async (m) => {
+      const enabled = bool(m, "enabled") ?? false;
+      if (!enabled) {
+        await this.remoteProvider?.disableRemoteControl();
+        this.publishRemoteControl({ state: "off" });
+        return;
+      }
+      // Say so before the round-trip: enabling reaches the Anthropic API and
+      // can take a moment, and a control that does nothing visible for two
+      // seconds reads as broken.
+      this.publishRemoteControl({ state: "ready" });
+      try {
+        const provider = await this.ensureRemoteProvider();
+        const status = await provider.enableRemoteControl(
+          this.session.title || undefined
+        );
+        this.publishRemoteControl(status);
+      } catch (err) {
+        this.publishRemoteControl({
+          state: "error",
+          error: err instanceof Error ? err.message : String(err)
+        });
       }
     },
 
@@ -1742,6 +1785,63 @@ export class ConversationHost {
     this.post({ type: "queued", text: "" });
   }
 
+  /** Remember it as well as send it: the webview is rebuilt on reload and asks
+   *  for the current surface, and a bridge that is up must not look off. */
+  private publishRemoteControl(status: RemoteControlStatus): void {
+    this.remoteControl = status;
+    this.post({ type: "remoteControl", status });
+  }
+
+  /**
+   * The long-lived provider Remote Control needs, built on demand.
+   *
+   * Per-turn options are deliberately absent: `runPromptTurn` pushes them in
+   * through `updateOptions()` every turn, which is the only way they stay
+   * fresh on a provider that is no longer rebuilt.
+   */
+  private async ensureRemoteProvider(): Promise<ClaudeCliProvider> {
+    const live = this.remoteProvider;
+    if (live) return live;
+    const workspaceRoot = await this.ensureWorkingRoot();
+    if (!workspaceRoot) {
+      throw new Error("Open a folder before starting Remote Control.");
+    }
+    const credential = await this.auth.ensureAuthedForTurn();
+    if (!credential.ok) {
+      throw new Error("Sign in to Claude Code before starting Remote Control.");
+    }
+    const cfg = vscode.workspace.getConfiguration("luno");
+    const provider = createProvider({
+      cwd: workspaceRoot,
+      permissionMode: this.settings.permissionMode,
+      allowedBashPatterns: cfg.get<string[]>("allowedBashPatterns", []),
+      disabledSkills: disabledSkillIds(this.ctx),
+      conventions: await loadConventions(workspaceRoot),
+      getResumeSessionId: () => this.resumeId,
+      setResumeSessionId: (id) => {
+        this.resumeId = id;
+      },
+      onSlashCommands: (names) => {
+        rememberCliCommands(this.ctx, names);
+        void broadcastSlashCommands(this.post, this.ctx, this.workingRoot);
+      },
+      token: credential.token,
+      effort: this.settings.effort,
+      thinking: this.settings.thinking,
+      sessionMode: true,
+      onOutOfTurn: (d) => {
+        // The other device talking while the panel is not driving the turn.
+        // Only the bridge's own state is handled here; carrying the rest onto
+        // the timeline needs the turn model to accept work it did not start.
+        if (d.type === "remote_control" && d.remoteControl) {
+          this.publishRemoteControl(d.remoteControl);
+        }
+      }
+    });
+    this.remoteProvider = provider;
+    return provider;
+  }
+
   private async runPromptTurn(text: string) {
     await saveDirtyEditors();
     // Resolved once and used for everything downstream. In an isolated
@@ -1812,9 +1912,12 @@ export class ConversationHost {
     }
 
     let providerInstance;
-    try {
-      providerInstance = createProvider({
-        cwd: workspaceRoot,
+    // With the bridge up the process has to survive the turn, so the provider
+    // is reused rather than rebuilt — and handed everything that changed since
+    // the last one. Without that, diagnostics and the editor's selection would
+    // stay frozen at whatever they were when Remote Control was switched on.
+    if (this.remoteProvider) {
+      this.remoteProvider.updateOptions({
         permissionMode: permMode,
         allowedBashPatterns: bashAllowlist,
         disabledSkills,
@@ -1822,14 +1925,6 @@ export class ConversationHost {
         conventions,
         diagnostics: collectDiagnostics(workspaceRoot),
         editorContext: collectEditorContext(workspaceRoot),
-        getResumeSessionId: () => this.resumeId,
-        setResumeSessionId: (id) => {
-          this.resumeId = id;
-        },
-        onSlashCommands: (names) => {
-          rememberCliCommands(this.ctx, names);
-          void broadcastSlashCommands(this.post, this.ctx, this.workingRoot);
-        },
         token,
         mcpConfigPath: mcpConfig?.path,
         mcpServerNames: mcpConfig?.serverNames,
@@ -1837,11 +1932,39 @@ export class ConversationHost {
         thinking,
         ultracode
       });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.post({ type: "error", message: msg });
-      void mcpConfig?.cleanup();
-      return;
+      providerInstance = this.remoteProvider;
+    } else {
+      try {
+        providerInstance = createProvider({
+          cwd: workspaceRoot,
+          permissionMode: permMode,
+          allowedBashPatterns: bashAllowlist,
+          disabledSkills,
+          taskType,
+          conventions,
+          diagnostics: collectDiagnostics(workspaceRoot),
+          editorContext: collectEditorContext(workspaceRoot),
+          getResumeSessionId: () => this.resumeId,
+          setResumeSessionId: (id) => {
+            this.resumeId = id;
+          },
+          onSlashCommands: (names) => {
+            rememberCliCommands(this.ctx, names);
+            void broadcastSlashCommands(this.post, this.ctx, this.workingRoot);
+          },
+          token,
+          mcpConfigPath: mcpConfig?.path,
+          mcpServerNames: mcpConfig?.serverNames,
+          effort,
+          thinking,
+          ultracode
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.post({ type: "error", message: msg });
+        void mcpConfig?.cleanup();
+        return;
+      }
     }
 
     // In `default`/`auto` the provider routes each mutating tool call back to

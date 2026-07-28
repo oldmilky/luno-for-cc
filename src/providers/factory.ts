@@ -13,9 +13,8 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as vscode from "vscode";
-import { ChatProvider } from "./base.js";
 import { ClaudeCliProvider, EffortLevel } from "./claude-cli.js";
-import { PermissionMode, TaskType } from "../core/types.js";
+import { PermissionMode, StreamDelta, TaskType } from "../core/types.js";
 import { ConventionsFile } from "../services/conventions.js";
 import { warn as logWarn } from "../services/logger.js";
 
@@ -50,6 +49,12 @@ export interface ProviderContext {
   effort?: EffortLevel;
   /** Extended-thinking toggle (`alwaysThinkingEnabled` via `--settings`). */
   thinking?: boolean;
+  /** Keep one CLI process alive across turns. Required by Remote Control,
+   *  whose bridge ends when the process does. */
+  sessionMode?: boolean;
+  /** Session mode only: deltas that arrive while no turn is streaming — the
+   *  other device talking to a conversation the panel is not driving. */
+  onOutOfTurn?: (delta: StreamDelta) => void;
   /** Ultracode (`ultracode` via `--settings`): xhigh plus standing workflow
    *  orchestration. Pins the effort it runs at, so it travels with `effort`
    *  rather than replacing it. */
@@ -263,8 +268,13 @@ export function resolveClaudeBinary(): string {
   return discoverClaudeBinary() ?? bundledClaudeBinary();
 }
 
-export function createProvider(ctx: ProviderContext): ChatProvider {
+// Concrete on purpose: Remote Control is a CLI-provider capability, and the
+// caller that turns it on needs to reach it. Every existing use still sees a
+// ChatProvider, which this implements.
+export function createProvider(ctx: ProviderContext): ClaudeCliProvider {
   return new ClaudeCliProvider({
+    sessionMode: ctx.sessionMode,
+    onOutOfTurn: ctx.onOutOfTurn,
     binary: resolveClaudeBinary(),
     cwd: ctx.cwd,
     permissionMode: ctx.permissionMode,

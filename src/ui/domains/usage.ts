@@ -8,6 +8,7 @@
 
 import * as vscode from "vscode";
 import { aggregateClaudeCodeUsage } from "../../services/claude-code-usage.js";
+import { readUsageUtilization } from "../../services/usage-utilization.js";
 import type { RateLimitTracker } from "../../services/rate-limit.js";
 import type { Post } from "../messages.js";
 
@@ -30,9 +31,15 @@ export async function broadcastUsage(
   if (!root) return;
 
   try {
-    const agg = await aggregateClaudeCodeUsage(root, new Date(), {
-      sessionWindowStart: rateLimits?.sessionWindowStart()
-    });
+    // Read on every broadcast rather than caching: the CLI rewrites the file
+    // when it refreshes the account's figures, and a meter holding the copy it
+    // read at startup is exactly the stale-number problem this replaced.
+    const [agg, utilization] = await Promise.all([
+      aggregateClaudeCodeUsage(root, new Date(), {
+        sessionWindowStart: rateLimits?.sessionWindowStart()
+      }),
+      readUsageUtilization()
+    ]);
     post({
       type: "claudeCodeUsage",
       session: agg.session,
@@ -42,7 +49,8 @@ export async function broadcastUsage(
       total: agg.total,
       generatedAt: agg.generatedAt,
       available: agg.available,
-      limits: rateLimits?.live() ?? []
+      limits: rateLimits?.live() ?? [],
+      utilization: utilization ?? undefined
     });
   } catch {
     // best-effort; the chip falls back to its estimate

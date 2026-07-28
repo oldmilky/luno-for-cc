@@ -9,6 +9,7 @@ import {
   PermissionMode,
   PermissionRequestPayload,
   PermissionSuggestion,
+  RemoteControlStatus,
   StreamDelta,
   SubagentPhase,
   SubagentUpdate,
@@ -226,6 +227,21 @@ export interface ClaudeCliOpts {
    *  doesn't return a result within this window the turn is stopped cleanly.
    *  Defaults to WEB_TOOL_STALL_MS. */
   toolStallMs?: number;
+  /**
+   * Keep one CLI process alive across turns instead of spawning per turn.
+   * Required by Remote Control, which lives exactly as long as its process.
+   *
+   * What this costs: options baked into argv can no longer be rebuilt each
+   * turn. `model`, `permissionMode` and the working directory are changed live
+   * over the control channel; **`effort` has no control-protocol equivalent**
+   * (there is no `set_effort`), so changing it respawns the session — which
+   * drops the Remote Control bridge and needs it re-established.
+   */
+  sessionMode?: boolean;
+  /** Called with events that arrive while no turn is streaming — the phone
+   *  talking to a session the panel is not currently driving. Session mode
+   *  only; without it those deltas would be read off the pipe and dropped. */
+  onOutOfTurn?: (delta: StreamDelta) => void;
 }
 
 /** Effort levels accepted by `claude --effort`. */
@@ -261,9 +277,67 @@ const EFFORT_LEVELS: ReadonlyArray<EffortLevel> = [
   "max"
 ];
 
+/** A CLI process that outlives the turn, plus the state needed to decide
+ *  whether the next turn can reuse it or has to replace it. */
+interface CliSession {
+  child: ChildProcess;
+  /** argv it was spawned with, compared through respawnFingerprint(). */
+  args: string[];
+  stderr: string;
+  /** Where deltas go right now: the streaming turn, or nothing (out-of-turn). */
+  sink: ((d: StreamDelta) => void) | null;
+  processor: (ev: CliEvent) => StreamDelta[];
+  exited: boolean;
+  /** Last values pushed over the control channel, so a turn that changes
+   *  neither sends nothing. */
+  model: string | undefined;
+  permissionMode: PermissionMode;
+  /** True from the moment a turn is written until its `result` lands. An
+   *  interrupted turn still emits one, later — writing the next turn before it
+   *  arrives makes that stale `result` end the new turn instead. */
+  busy: boolean;
+  /** Resolvers waiting for `busy` to clear. */
+  idleWaiters: Array<() => void>;
+}
+
+/** How long the next turn waits for an interrupted one to report its `result`
+ *  before going ahead anyway. Long enough for an interrupt to land, short
+ *  enough that a wedged CLI doesn't look like a frozen panel. */
+const TURN_DRAIN_TIMEOUT_MS = 10_000;
+
+/** An outbound control request waiting for its answer. */
+interface PendingControl {
+  resolve: (response: Record<string, unknown>) => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+/** How long a control request waits for its response. Enabling Remote Control
+ *  is a round-trip to the Anthropic API, so this is generous — but bounded, or
+ *  a lost response leaves the caller awaiting forever. */
+const CONTROL_TIMEOUT_MS = 30_000;
+
 export class ClaudeCliProvider implements ChatProvider {
   readonly id = "claude-cli";
   private child: ChildProcess | null = null;
+  /** The long-lived process in session mode; null in the per-turn path. */
+  private session: CliSession | null = null;
+  /** Control requests *we* sent, awaiting their response. */
+  private pendingControls = new Map<string, PendingControl>();
+  /** What the user asked for. Deliberately outlives any one process: replacing
+   *  the CLI drops the bridge (measured), so the next one has to re-establish
+   *  it rather than come up silently disconnected. */
+  private remoteControl: RemoteControlStatus = { state: "off" };
+  private remoteControlName: string | undefined;
+  /** What the user asked for, as opposed to what the bridge is currently
+   *  doing. A dropped connection is still "wanted", which is what makes a
+   *  replaced process bring the bridge back instead of coming up silent. */
+  private remoteControlWanted = false;
+  /** The enable request currently in flight. Shared rather than duplicated:
+   *  spawning a session with the bridge already wanted fires one, and a caller
+   *  asking to enable at the same moment must join it instead of sending a
+   *  second — two requests mean two remote sessions for one conversation. */
+  private remoteControlInFlight: Promise<RemoteControlStatus> | null = null;
   /** In-flight `can_use_tool` prompts keyed by control-request id. Holds the
    *  proposed input + suggestions so respondToPermission() can echo the input
    *  back on "allow" and honor the CLI's "accept this session" suggestion. */
@@ -285,6 +359,13 @@ export class ClaudeCliProvider implements ChatProvider {
     // While a turn is paused on a permission prompt no deltas are flowing, so
     // the consumer's cancel check only re-runs once we push something.
     this.abortCurrent?.();
+    // In session mode the process is the session: killing it would end the
+    // conversation and drop any Remote Control bridge, when all the user asked
+    // for was to stop this turn. Interrupt over the control channel instead.
+    if (this.session && !this.session.exited) {
+      this.interrupt();
+      return;
+    }
     if (this.child && !this.child.killed) {
       this.child.kill("SIGTERM");
       setTimeout(() => this.child?.kill("SIGKILL"), 2000);
@@ -426,6 +507,12 @@ export class ClaudeCliProvider implements ChatProvider {
     const permissionProtocol = usesPermissionProtocol(mode);
     // Fresh per turn: a prior "allow edits this turn" must not leak into the next.
     this.autoAllowEdits = false;
+
+    if (this.opts.sessionMode) {
+      yield* this.streamInSession(req, userText);
+      return;
+    }
+
     const args = buildArgs(userText, req.model, this.opts);
 
     // Inject the user's token as ANTHROPIC_API_KEY when present. The CLI
@@ -617,6 +704,574 @@ export class ClaudeCliProvider implements ChatProvider {
       this.child = null;
     }
   }
+
+  /**
+   * One turn inside a process that outlives it.
+   *
+   * The reader is attached to the session rather than to the turn, so anything
+   * the CLI emits between turns — a phone driving the same session — is still
+   * read off the pipe and handed to `onOutOfTurn` instead of being dropped on
+   * the floor or, worse, left to fill the pipe buffer.
+   */
+  private async *streamInSession(
+    req: ProviderRequest,
+    userText: string
+  ): AsyncIterable<StreamDelta> {
+    const args = buildArgs(userText, req.model, this.opts);
+    let session: CliSession;
+    try {
+      session = this.ensureSession(args, req);
+    } catch (err) {
+      yield {
+        type: "error",
+        error: err instanceof Error ? err.message : String(err)
+      };
+      return;
+    }
+
+    const queue: StreamDelta[] = [];
+    let resolver: (() => void) | null = null;
+    let ended = false;
+    let stallWatch: ToolStallWatchdog | null = null;
+    const push = (d: StreamDelta) => {
+      stallWatch?.observe(d);
+      if (d.type === "done") ended = true;
+      queue.push(d);
+      resolver?.();
+      resolver = null;
+    };
+
+    // Same contract as the per-turn watchdog, one difference: a wedged tool
+    // must not take the process with it. Killing the child here would end the
+    // session and drop any Remote Control bridge, so the turn is interrupted
+    // over the control channel instead.
+    stallWatch = createToolStallWatchdog({
+      timeoutMs: this.opts.toolStallMs ?? WEB_TOOL_STALL_MS,
+      onStall: (toolId, toolName, ms) => {
+        const secs = Math.round(ms / 1000);
+        push({
+          type: "tool_result",
+          toolUseId: toolId,
+          resultContent: `${toolName} did not respond within ${secs}s and was stopped. Try again, or use a more specific URL.`,
+          resultIsError: true
+        });
+        this.interrupt();
+        push({ type: "done" });
+      }
+    });
+
+    this.abortCurrent = () => {
+      for (const id of this.pendingPermissions.keys()) {
+        this.writeControl({
+          type: "control_response",
+          response: {
+            subtype: "success",
+            request_id: id,
+            response: { behavior: "deny", message: "Cancelled by the user." }
+          }
+        });
+      }
+      this.pendingPermissions.clear();
+      stallWatch?.clearAll();
+      push({ type: "done" });
+    };
+
+    // A turn the user cancelled is over for us but not yet for the CLI: its
+    // `result` is still on the way. Writing now would let that stale result
+    // end this turn before it has said anything.
+    await waitUntilIdle(session);
+
+    session.sink = push;
+    session.busy = true;
+    const preamble = turnPreamble(this.opts);
+    const wrote = this.writeToChild(session, {
+      type: "user",
+      message: {
+        role: "user",
+        content: preamble ? preamble + userText : userText
+      }
+    });
+    if (!wrote) {
+      session.sink = null;
+      this.abortCurrent = null;
+      yield {
+        type: "error",
+        error: "The Claude session is no longer accepting input."
+      };
+      return;
+    }
+
+    try {
+      while (true) {
+        while (queue.length > 0) {
+          const d = queue.shift()!;
+          yield d;
+          if (d.type === "done") return;
+        }
+        if (ended) return;
+        await new Promise<void>((res) => {
+          resolver = res;
+        });
+      }
+    } finally {
+      stallWatch?.clearAll();
+      this.abortCurrent = null;
+      this.pendingPermissions.clear();
+      // Hand the reader back to the out-of-turn sink. Guarded because a turn
+      // that overlapped a replacement session must not detach the new one.
+      if (session.sink === push) session.sink = null;
+    }
+  }
+
+  /**
+   * The live session, spawning or replacing it as needed.
+   *
+   * A process is replaced when argv changes in a way the control protocol
+   * cannot express — `--effort` above all, which has no `set_effort`. The
+   * conversation survives that (`--resume` carries it), but a Remote Control
+   * bridge does not: it has to be re-established afterwards.
+   */
+  private ensureSession(
+    args: string[],
+    req: ProviderRequest | undefined
+  ): CliSession {
+    const live = this.session;
+    if (live && !live.exited) {
+      if (respawnFingerprint(live.args) === respawnFingerprint(args)) {
+        if (req) this.applyLiveOptions(live, req);
+        return live;
+      }
+      logInfo("[luno] session options changed — replacing the CLI process");
+      this.disposeSession();
+    }
+
+    const child = spawn(this.opts.binary, args, {
+      cwd: this.opts.cwd,
+      env: this.childEnv(req?.maxTokens),
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    const session: CliSession = {
+      child,
+      args,
+      stderr: "",
+      sink: null,
+      processor: makeProcessor(
+        this.opts.setResumeSessionId,
+        this.opts.onSlashCommands
+      ),
+      exited: false,
+      model: req?.model,
+      permissionMode: this.opts.permissionMode ?? "default",
+      busy: false,
+      idleWaiters: []
+    };
+    this.session = session;
+    this.child = child;
+
+    child.stderr?.on("data", (b: Buffer) => {
+      session.stderr += b.toString("utf8");
+    });
+
+    const route = (d: StreamDelta) => {
+      if (session.sink) session.sink(d);
+      else this.opts.onOutOfTurn?.(d);
+    };
+
+    const rl = readline.createInterface({
+      input: child.stdout!,
+      crlfDelay: Infinity
+    });
+    rl.on("line", (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      let ev: CliEvent;
+      try {
+        ev = JSON.parse(trimmed) as CliEvent;
+      } catch {
+        return;
+      }
+      if (ev.type === "control_request") {
+        this.handleControlRequest(ev, route);
+        return;
+      }
+      // A prompt answered on the phone cancels the request we are still
+      // holding. Drop it, or the panel keeps showing a card whose answer would
+      // be written against a request id the CLI has already forgotten.
+      if (ev.type === "control_cancel_request") {
+        if (ev.request_id && this.pendingPermissions.delete(ev.request_id)) {
+          route({ type: "permission_resolved", requestId: ev.request_id });
+        }
+        return;
+      }
+      if (ev.type === "control_response") {
+        this.resolveControl(ev);
+        return;
+      }
+      // The bridge reporting on itself: ready → connected when a device joins,
+      // disconnected/error when it goes. Session-level, not turn-level, so it
+      // is read here rather than in the per-turn event processor.
+      if (ev.type === "system" && ev.subtype === "bridge_state") {
+        const state = ev.state;
+        const known =
+          state === "ready" ||
+          state === "connected" ||
+          state === "disconnected" ||
+          state === "error";
+        if (!known || state === this.remoteControl.state) return;
+        this.remoteControl = { ...this.remoteControl, state };
+        // While our own enable request is in flight the CLI's `ready` arrives
+        // first but carries no URL; the reply does, a moment later. Announcing
+        // both means the banner appears twice, the second time saying the same
+        // thing with a link. Let the reply speak.
+        if (!this.remoteControlInFlight) {
+          route({ type: "remote_control", remoteControl: this.remoteControl });
+        }
+        return;
+      }
+      for (const d of session.processor(ev)) route(d);
+      if (ev.type === "result") {
+        session.busy = false;
+        for (const wake of session.idleWaiters.splice(0)) wake();
+        route({ type: "done" });
+      }
+    });
+
+    child.once("exit", () => {
+      session.exited = true;
+      if (this.session === session) {
+        this.session = null;
+        this.child = null;
+      }
+      const unexpected = child.exitCode !== 0 && child.signalCode !== "SIGTERM";
+      if (unexpected) {
+        route({
+          type: "error",
+          error:
+            session.stderr.trim() ||
+            `claude exited with code ${child.exitCode ?? "?"}`
+        });
+      }
+      route({ type: "done" });
+    });
+    child.once("error", (err) => {
+      session.exited = true;
+      route({ type: "error", error: err.message });
+    });
+
+    // A replaced process comes up with no bridge — measured: `--resume` brings
+    // the conversation back and leaves Remote Control off. Re-establish it, or
+    // changing the effort level would quietly disconnect the user's phone.
+    if (this.remoteControlWanted) {
+      void this.establishRemoteControl(session, route).catch(() => {
+        /* state and delta already carry the failure */
+      });
+    }
+
+    return session;
+  }
+
+  /** Push the options the control protocol *can* change onto a live session. */
+  private applyLiveOptions(session: CliSession, req: ProviderRequest): void {
+    const mode = this.opts.permissionMode ?? "default";
+    if (req.model && req.model !== session.model) {
+      this.writeControl({
+        request_id: nextControlId(),
+        type: "control_request",
+        request: { subtype: "set_model", model: req.model }
+      });
+      session.model = req.model;
+    }
+    if (mode !== session.permissionMode) {
+      this.writeControl({
+        request_id: nextControlId(),
+        type: "control_request",
+        request: {
+          subtype: "set_permission_mode",
+          mode: mapPermissionMode(mode)
+        }
+      });
+      session.permissionMode = mode;
+    }
+  }
+
+  /**
+   * Hand this conversation to claude.ai/code and the Claude mobile app.
+   *
+   * Session mode only, and not by accident: the bridge lives exactly as long
+   * as the process behind it, so the per-turn path could offer a URL that
+   * stops working the moment the answer finishes.
+   *
+   * Returns the session URL the other device connects to. Rejects with the
+   * CLI's own message when it refuses — no claude.ai login, an API key in the
+   * environment, a non-Anthropic base URL, or an organisation policy.
+   */
+  async enableRemoteControl(name?: string): Promise<RemoteControlStatus> {
+    if (!this.opts.sessionMode) {
+      throw new Error(
+        "Remote Control needs a session-mode conversation: the bridge ends when the process does."
+      );
+    }
+    this.remoteControlName = name;
+    // Set before the process is spawned, not after the CLI confirms: childEnv
+    // reads it to decide whether to stand aside on ANTHROPIC_API_KEY, and a
+    // respawn racing this request re-establishes on the strength of it.
+    this.remoteControlWanted = true;
+    // Spawning with the bridge already wanted starts the request itself, so
+    // this joins whatever is in flight rather than sending a second one.
+    const session = this.ensureSession(
+      buildArgs("", undefined, this.opts),
+      undefined
+    );
+    try {
+      return await this.establishRemoteControl(session);
+    } catch (err) {
+      this.remoteControlName = undefined;
+      this.remoteControlWanted = false;
+      throw err;
+    }
+  }
+
+  /** Ask the CLI for a bridge, or join the request already asking. */
+  private establishRemoteControl(
+    session: CliSession,
+    route?: (d: StreamDelta) => void
+  ): Promise<RemoteControlStatus> {
+    const existing = this.remoteControlInFlight;
+    if (existing) return existing;
+    const name = this.remoteControlName;
+    const attempt = this.sendControl(session, {
+      subtype: "remote_control",
+      enabled: true,
+      ...(name !== undefined && { name })
+    })
+      .then((response) => {
+        this.remoteControl = {
+          state: "ready",
+          sessionUrl: asString(response.session_url),
+          connectUrl: asString(response.connect_url)
+        };
+        logInfo(`[luno] remote control on: ${this.remoteControl.sessionUrl}`);
+        route?.({ type: "remote_control", remoteControl: this.remoteControl });
+        return this.remoteControl;
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.remoteControl = { state: "error", error: message };
+        route?.({ type: "remote_control", remoteControl: this.remoteControl });
+        throw err instanceof Error ? err : new Error(message);
+      })
+      .finally(() => {
+        if (this.remoteControlInFlight === attempt) {
+          this.remoteControlInFlight = null;
+        }
+      });
+    this.remoteControlInFlight = attempt;
+    return attempt;
+  }
+
+  /** Stop accepting input from other devices. The conversation itself carries
+   *  on locally. */
+  async disableRemoteControl(): Promise<void> {
+    this.remoteControlName = undefined;
+    const wanted = this.remoteControlWanted;
+    this.remoteControlWanted = false;
+    this.remoteControl = { state: "off" };
+    const session = this.session;
+    if (!wanted || !session || session.exited) return;
+    try {
+      await this.sendControl(session, {
+        subtype: "remote_control",
+        enabled: false
+      });
+    } catch (err) {
+      // The bridge is off either way as far as this panel is concerned; a
+      // failure here means the CLI never heard us, and the process is about to
+      // be replaced or is already gone.
+      logInfo(
+        `[luno] remote control off (CLI did not confirm): ${String(err)}`
+      );
+    }
+  }
+
+  /** What the panel should be showing right now. */
+  remoteControlStatus(): RemoteControlStatus {
+    return this.remoteControl;
+  }
+
+  /**
+   * Refresh the options a turn depends on, without discarding the process.
+   *
+   * The per-turn path rebuilds the whole provider every turn and needs none
+   * of this. A session-mode provider outlives its turns, so the caller has to
+   * hand it what changed — the editor's diagnostics and selection above all,
+   * which describe the moment the message was sent and are worthless stale.
+   *
+   * Whether the change can be applied to the running process or needs a new
+   * one is not decided here: the next turn's argv is compared through
+   * `respawnFingerprint()`, so an option that only exists in argv replaces the
+   * process by itself.
+   */
+  updateOptions(patch: Partial<ClaudeCliOpts>): void {
+    this.opts = { ...this.opts, ...patch };
+  }
+
+  /** Send a control request and wait for the CLI's answer. */
+  private sendControl(
+    session: CliSession,
+    request: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    const requestId = nextControlId();
+    return new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingControls.delete(requestId);
+        reject(
+          new Error(
+            `The Claude CLI did not answer '${String(request.subtype)}' within ${CONTROL_TIMEOUT_MS / 1000}s.`
+          )
+        );
+      }, CONTROL_TIMEOUT_MS);
+      this.pendingControls.set(requestId, { resolve, reject, timer });
+      const wrote = this.writeToChild(session, {
+        request_id: requestId,
+        type: "control_request",
+        request
+      });
+      if (!wrote) {
+        clearTimeout(timer);
+        this.pendingControls.delete(requestId);
+        reject(new Error("The Claude session is no longer accepting input."));
+      }
+    });
+  }
+
+  /** Settle the promise for a control request we sent. */
+  private resolveControl(ev: CliEvent): void {
+    const response = ev.response;
+    const requestId = response?.request_id;
+    if (!requestId) return;
+    const pending = this.pendingControls.get(requestId);
+    if (!pending) return;
+    this.pendingControls.delete(requestId);
+    clearTimeout(pending.timer);
+    if (response?.subtype === "success") {
+      pending.resolve(
+        (response.response as Record<string, unknown> | undefined) ?? {}
+      );
+    } else {
+      pending.reject(new Error(response?.error ?? "The Claude CLI refused."));
+    }
+  }
+
+  /** Stop the current turn without ending the session. */
+  private interrupt(): void {
+    this.writeControl({
+      request_id: nextControlId(),
+      type: "control_request",
+      request: { subtype: "interrupt" }
+    });
+  }
+
+  private writeToChild(session: CliSession, obj: unknown): boolean {
+    const stdin = session.child.stdin;
+    // Deliberately not the return value of write(): `false` there means the
+    // buffer is above its high-water mark, not that the write failed. Right
+    // after spawn it is routinely false while the pipe is still connecting,
+    // and the data is queued and delivered regardless.
+    if (session.exited || !stdin || stdin.destroyed || stdin.writableEnded) {
+      return false;
+    }
+    try {
+      stdin.write(JSON.stringify(obj) + "\n");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private childEnv(maxTokens?: number): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    // Remote Control requires a claude.ai OAuth login and refuses to start
+    // under an API key — and the CLI prefers an env-supplied key over its own
+    // credentials, so injecting ours is exactly what would break it. When the
+    // bridge is wanted, stand aside and let the CLI use `/login`.
+    const wantsBridge = this.remoteControlWanted;
+    if (wantsBridge && env.ANTHROPIC_API_KEY) delete env.ANTHROPIC_API_KEY;
+    if (this.opts.token && !wantsBridge)
+      env.ANTHROPIC_API_KEY = this.opts.token;
+    if (Number.isFinite(maxTokens) && (maxTokens ?? 0) > 0) {
+      env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(Math.floor(maxTokens!));
+    }
+    return env;
+  }
+
+  /** End the long-lived process. Safe to call when there is none. */
+  disposeSession(): void {
+    const session = this.session;
+    if (!session) return;
+    this.session = null;
+    if (this.child === session.child) this.child = null;
+    session.exited = true;
+    session.sink = null;
+    void terminateChild(session.child);
+  }
+}
+
+/** Diagnostics and editor context as a block that rides with the turn text.
+ *  Session mode only: there the system prompt is fixed at spawn, and these two
+ *  describe the moment the message was sent. */
+export function turnPreamble(opts: ClaudeCliOpts): string {
+  const parts = [opts.diagnostics, opts.editorContext].filter(
+    (p): p is string => Boolean(p && p.trim())
+  );
+  return parts.length ? parts.join("\n\n") + "\n\n" : "";
+}
+
+/** argv reduced to what forces a respawn. `--resume` is dropped: it only
+ *  matters at spawn, and it changes as soon as the first turn reports a
+ *  session id, which would otherwise replace the process every turn. */
+export function respawnFingerprint(args: ReadonlyArray<string>): string {
+  const kept: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--resume") {
+      i++;
+      continue;
+    }
+    kept.push(args[i]);
+  }
+  return JSON.stringify(kept);
+}
+
+/** Read a string out of a CLI response without trusting its shape. */
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
+}
+
+let controlSeq = 0;
+function nextControlId(): string {
+  controlSeq += 1;
+  return `luno-${controlSeq}`;
+}
+
+/** Resolve once the CLI has finished the turn it is on, or after
+ *  TURN_DRAIN_TIMEOUT_MS — a wedged CLI must not leave the panel unable to
+ *  send anything ever again. */
+function waitUntilIdle(session: CliSession): Promise<void> {
+  if (!session.busy || session.exited) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      logInfo("[luno] previous turn never reported a result — sending anyway");
+      session.busy = false;
+      finish();
+    }, TURN_DRAIN_TIMEOUT_MS);
+    session.idleWaiters.push(finish);
+  });
 }
 
 /** Resolve once the child has exited; SIGTERM, then SIGKILL after a grace period. */
@@ -659,23 +1314,35 @@ export function buildArgs(
   const mode = opts.permissionMode ?? "default";
   const permissionProtocol = usesPermissionProtocol(mode);
 
-  const args = ["-p"];
+  // Session mode drops `--print`, matching how the official extension spawns
+  // the CLI: the process outlives the turn and keeps taking input. `-p` would
+  // also stay alive under stream-json input, but Remote Control is only ever
+  // exercised upstream in the no-print configuration, so we run the one that
+  // is known to work rather than the one that merely should.
+  const args = opts.sessionMode ? [] : ["-p"];
   // In the permission-protocol path the prompt is delivered as a stream-json
   // message on stdin (see stream()); only the legacy text path passes it as a
-  // positional argument.
-  if (!permissionProtocol) args.push(userText);
+  // positional argument. A session has no prompt at spawn time at all.
+  if (!permissionProtocol && !opts.sessionMode) args.push(userText);
   args.push(
     "--output-format",
     "stream-json",
     "--include-partial-messages",
     "--verbose"
   );
-  if (permissionProtocol) {
+  if (permissionProtocol || opts.sessionMode) {
     // Accept the prompt + control responses on stdin, and route per-tool
     // approval back to us over the control channel instead of the CLI's own
-    // interactive prompt (which a headless `-p` run can't service).
+    // interactive prompt (which a headless run can't service).
     args.push("--input-format", "stream-json");
     args.push("--permission-prompt-tool", "stdio");
+  }
+  if (opts.sessionMode) {
+    // Without this a prompt typed on a connected phone or browser reaches
+    // stdout nowhere — measured — and the panel would render an answer to a
+    // question it never saw. It echoes our own stdin messages back too, so the
+    // reader drops anything carrying `isReplay` that it just sent itself.
+    args.push("--replay-user-messages");
   }
   if (model) args.push("--model", model);
 
@@ -797,12 +1464,18 @@ export function buildArgs(
 
   // What the language servers already know. Sent as its own append so it can
   // be dropped without disturbing the mode or conventions prompts.
-  if (opts.diagnostics) {
+  //
+  // Both of these describe the tree and the cursor *as of this message*, so
+  // they change every turn. A session-mode process is spawned once and cannot
+  // have its system prompt rewritten, so there they travel with the turn text
+  // instead (see turnPreamble) rather than being frozen at spawn — stale
+  // diagnostics are worse than none.
+  if (opts.diagnostics && !opts.sessionMode) {
     args.push("--append-system-prompt", opts.diagnostics);
   }
 
   // What the user has open and highlighted as they send the message.
-  if (opts.editorContext) {
+  if (opts.editorContext && !opts.sessionMode) {
     args.push("--append-system-prompt", opts.editorContext);
   }
 
@@ -1188,6 +1861,16 @@ export interface CliEvent {
     input?: Record<string, unknown>;
     permission_suggestions?: Array<Record<string, unknown>>;
   };
+  /** The CLI's answer to a control request we sent. */
+  response?: {
+    subtype?: string;
+    request_id?: string;
+    error?: string;
+    response?: Record<string, unknown>;
+  };
+  /** Carried on `system`/`bridge_state` — the Remote Control bridge reporting
+   *  on itself. */
+  state?: string;
 }
 
 type Processor = (ev: CliEvent) => StreamDelta[];

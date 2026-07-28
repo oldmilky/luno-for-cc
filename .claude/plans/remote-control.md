@@ -106,24 +106,118 @@ runs Bash without asking anyone. LUNO passes the flag on every spawn today
 (`claude-cli.ts:726`); in session mode that has to stay an invariant, with a
 test pinning it.
 
-**Ф1 — session mode.** A long-lived process behind a flag, used only where
-Remote Control is on; the per-turn path stays the default until the new one has
-earned it. Entry point is `stream()` in `src/providers/claude-cli.ts`: instead
-of spawn → one message → death, spawn once and queue turns into the open stdin.
-Same place, drop `ANTHROPIC_API_KEY` when RC is on. This is most of the work.
+**Ф1 — session mode. Done, 2026-07-28.** `ClaudeCliOpts.sessionMode` keeps one
+CLI process alive across turns. The per-turn path is untouched and still the
+default; nothing turns the flag on yet — Ф2 does, for conversations with Remote
+Control enabled. Verified against the real CLI, not only in unit tests: two
+turns in one process (same pid), context carried across them, a cancel that
+interrupts the turn without ending the session, and the session still answering
+afterwards.
 
-**Ф2 — the toggle.** An outbound `control_request`. Today LUNO only _answers_
-the control protocol and never initiates, so this needs a `request_id`
-generator and response matching. Plus a `bridge_state` branch in
-`makeProcessor`, next to `compact_boundary`, which is the closest worked
-example.
+How it is shaped:
 
-**Ф3 — UI.** A status pill in `webview/src/features/chat/Header.tsx` beside
-`TokenMeter` (line 110): connection state, the session URL, a QR code. `/rc`
-and `/remote-control` intercepted in the composer before the prompt is sent.
-A message shape in `lib/rpc.ts` plus a handler in `ui/conversation-host.ts`; the
-icon goes in `design/icons.tsx`. The QR has to be generated as SVG — it is not
-an icon and does not belong in the registry.
+- The reader is attached to the **session**, not the turn, so events arriving
+  between turns reach `onOutOfTurn` instead of being dropped. The live check
+  saw the interrupted turn's `usage,done` tail land there — which is exactly
+  the seam Ф4 needs.
+- `cancel()` sends an `interrupt` control request instead of killing the child.
+  Killing it would end the conversation and drop the bridge when all the user
+  asked was to stop the turn.
+- Options split in two. `set_model` and `set_permission_mode` are pushed onto
+  the live session; anything argv-only replaces the process, decided by
+  `respawnFingerprint()`, which ignores `--resume` (it changes after the first
+  turn and would otherwise respawn on every turn).
+- Per-turn context (`diagnostics`, `editorContext`) can no longer be a system
+  append, because the system prompt is fixed at spawn. It rides with the turn
+  text via `turnPreamble()`. Stale diagnostics would be worse than none.
+
+Two traps this cost, both invisible to the compiler:
+
+- **`stdin.write()` returning `false` is backpressure, not failure.** Right
+  after spawn it is routinely false while the pipe connects, and the data is
+  delivered anyway. Treating it as a failed write made every turn report "the
+  session is no longer accepting input" while the CLI sat there perfectly
+  healthy. Check `destroyed`/`writableEnded` instead.
+- **An interrupted turn still emits its `result`, later.** Send the next turn
+  before it arrives and that stale `result` ends the new turn instead — the
+  panel shows an empty answer. The session now tracks `busy` and the next turn
+  waits for the drain (`TURN_DRAIN_TIMEOUT_MS`, then proceeds anyway so a
+  wedged CLI cannot freeze the panel permanently).
+
+**Ф2 — the toggle. Done, 2026-07-28.** `enableRemoteControl(name?)` /
+`disableRemoteControl()` / `remoteControlStatus()` on the provider. LUNO now
+initiates control requests as well as answering them: `sendControl()` matches
+replies by `request_id` with a 30s bound, because a lost reply would otherwise
+leave the caller awaiting forever.
+
+- Enabling **refuses outside session mode**, and that is the point: the bridge
+  ends with the process, so the per-turn path would hand out a link that dies
+  with the current answer.
+- `bridge_state` becomes a `remote_control` delta on the same seam as
+  everything else. It is read in the session reader rather than in
+  `makeProcessor` — it describes the session, not the turn.
+- **`ANTHROPIC_API_KEY` is withheld while the bridge is wanted.** Remote
+  Control refuses to run under an API key, and the CLI prefers an env-supplied
+  key over its own credentials, so injecting LUNO's token is precisely what
+  would break it. Decided by `remoteControlWanted`, which is set _before_ the
+  spawn — reading the observed state instead would inject the key and then ask
+  for a bridge that cannot start.
+- A replaced process re-establishes the bridge by itself.
+
+Verified live: URL returned, `ready → connected` when a device joined, a turn
+answered with the bridge up, an effort change replaced the process and the
+bridge came back on a **new** URL.
+
+**That last part is a real edge, not a detail:** the session URL changes when
+the process is replaced, so a phone sitting on the old link is left on a dead
+session. Ф3's banner must always show the current URL, and changing effort
+mid-conversation deserves to say what it will do.
+
+Two bugs this cost, both found by measuring rather than reading:
+
+- **Two remote sessions for one conversation.** `enableRemoteControl` set "the
+  bridge is wanted" before spawning, and the fresh spawn fired its own enable
+  request on the strength of that flag — while the caller sent a second. The
+  user would have seen two entries in the claude.ai session list. Both paths
+  now go through `establishRemoteControl()`, which shares one in-flight request.
+- **The banner announced itself twice.** The CLI sends exactly one `ready`
+  (checked against the raw stream, with LUNO out of the loop); the duplicate was
+  ours — once from the `bridge_state` event, once from the reply that carries
+  the URL. Bridge events are suppressed while our own enable is in flight; the
+  reply is the authoritative first status.
+
+**Ф3 — UI. Done, 2026-07-28.** A pill in the header beside `TokenMeter`,
+`/rc` and `/remote-control` intercepted before the prompt is sent, and the host
+wiring underneath.
+
+**No QR code, deliberately.** The CLI draws one in a terminal; the official VS
+Code extension does not, and that is the shape being matched. The pill links to
+the session instead.
+
+The host half was the real work. Everywhere else a provider is built per turn
+and discarded — `runPromptTurn` did exactly that — which would have ended the
+bridge on the first answer. `ConversationHost` now keeps a `remoteProvider`
+alive while Remote Control is on and hands it the turn's options through
+`updateOptions()` instead of rebuilding it. Without that, diagnostics and the
+editor selection would stay frozen at whatever they were when the bridge was
+switched on.
+
+- `/rc` never reaches the model: `isRemoteControlCommand()` matches the whole
+  message only, so asking _about_ the command is still answered.
+- The pill is absent when the bridge is off — a control for something nobody
+  switched on is noise in a header that already drops items at narrow widths.
+- Blue for both live states, with the pulse rather than the hue separating
+  `connected` from `ready`: green in this header means "finished well", and a
+  standing connection is not an outcome.
+- The click always opens the URL currently held, never a remembered one — the
+  session changes when the process is replaced.
+- The status is re-sent when the panel reattaches, so reloading does not make a
+  conversation someone's phone is driving look disconnected.
+
+Measured in the harness: absent when off; four distinct tones; contrast against
+the page 7.69 / 7.69 / 11.71 / 7.07 for ready / connected / disconnected /
+error, all above AA; the pill adds nothing to the header's width
+(`scrollWidth` identical with and without it).
 
 **Ф4 — sync.** Smaller than it looked: `--replay-user-messages` plus dropping
 the echo of what we sent ourselves. The rest of a remote turn — assistant text,

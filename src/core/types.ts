@@ -181,6 +181,12 @@ export function isTerminalTaskStatus(status: string | undefined): boolean {
     status === "error" ||
     status === "cancelled" ||
     status === "canceled" ||
+    // What the CLI reports for a backgrounded agent whose process was killed
+    // under it. Observed on resume: a session whose turn ended while three
+    // `async_launched` agents were still running replayed three
+    // `task_notification`s with exactly this status. Without it the card was
+    // relabelled `interrupted` — the same thing in this case, but by accident.
+    status === "stopped" ||
     status === "interrupted"
   );
 }
@@ -226,8 +232,10 @@ export interface StreamDelta {
     | "rate_limit"
     | "model"
     | "permission_request"
+    | "permission_resolved"
     | "compact"
     | "task"
+    | "remote_control"
     | "done"
     | "error";
   text?: string;
@@ -252,6 +260,28 @@ export interface StreamDelta {
    *  approve a tool call before it runs (the `can_use_tool` control request
    *  routed through `--permission-prompt-tool stdio`). */
   permission?: PermissionRequestPayload;
+  /** Carried on `type: "permission_resolved"` — the request with this id was
+   *  answered somewhere else (a connected phone or browser) and the CLI has
+   *  withdrawn it. The card for it must go away; answering it now would write
+   *  against an id the CLI has already forgotten. */
+  requestId?: string;
+  /** Carried on `type: "remote_control"` — the state of the bridge to
+   *  claude.ai/code and the Claude mobile app. */
+  remoteControl?: RemoteControlStatus;
+}
+
+/** Whether this conversation can currently be driven from another device.
+ *
+ * `state` mirrors the CLI's own `bridge_state` event, with `off` for "we never
+ * asked". The URLs arrive with the reply to the request that turned it on and
+ * are the same ones the CLI would print in a terminal. */
+export interface RemoteControlStatus {
+  state: "off" | "ready" | "connected" | "disconnected" | "error";
+  /** The session on claude.ai/code — what a QR code encodes. */
+  sessionUrl?: string;
+  connectUrl?: string;
+  /** Why the bridge failed, when `state` is "error". */
+  error?: string;
 }
 
 /** A single approval the CLI suggests alongside a permission request — e.g.

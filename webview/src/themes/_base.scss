@@ -81,7 +81,7 @@
 
   // ── Derived: borders / elevation tints ─────────────────────
   // All keyed off `--lift` — the color a theme lifts its surfaces with
-  // (white on dark palettes; a light variant would flip it to black in Ф2).
+  // (white on every palette so far; a light one would flip it to black).
   --b1: color-mix(in srgb, var(--lift) 5.5%, transparent);
   --b2: color-mix(in srgb, var(--lift) 8.5%, transparent);
   --b3: color-mix(in srgb, var(--lift) 13%, transparent);
@@ -90,8 +90,11 @@
   --tint: color-mix(in srgb, var(--lift) 4%, transparent);
   --tint-strong: color-mix(in srgb, var(--lift) 6%, transparent);
 
-  --scrollbar-thumb: color-mix(in srgb, var(--lift) 8%, transparent);
-  --scrollbar-thumb-hover: color-mix(in srgb, var(--lift) 18%, transparent);
+  // A step up from the 8%/18% these were: the thumb is 4px wide now, and a
+  // hairline that thin needs the extra contrast to be findable at all. Still
+  // below `--b3` (13%), so it never reads as a border.
+  --scrollbar-thumb: color-mix(in srgb, var(--lift) 12%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--lift) 24%, transparent);
 
   // ── Derived: accent tints ──────────────────────────────────
   --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);

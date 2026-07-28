@@ -14,7 +14,9 @@ import {
   gitSubcommand,
   isReadOnlyGitCommand,
   ClaudeCliProvider,
-  createToolStallWatchdog
+  createToolStallWatchdog,
+  turnPreamble,
+  respawnFingerprint
 } from "../../src/providers/claude-cli.js";
 
 describe("claude-cli mapEvent (single event)", () => {
@@ -111,6 +113,122 @@ describe("claude-cli mapEvent (single event)", () => {
     });
     expect(out).toContainEqual({ type: "model", model: "claude-sonnet-4-6" });
     expect(out).toContainEqual({ type: "text", text: "hi" });
+  });
+});
+
+describe("claude-cli session mode", () => {
+  const base = {
+    binary: "claude",
+    cwd: "/tmp",
+    permissionMode: "default" as const,
+    sessionMode: true
+  };
+
+  it("drops --print and the positional prompt: the process outlives the turn", () => {
+    const args = buildArgs("hi", "", base);
+    expect(args).not.toContain("-p");
+    expect(args).not.toContain("hi");
+    expect(args).toContain("--input-format");
+    expect(args).toContain("--permission-prompt-tool");
+  });
+
+  it("asks for user messages to be replayed, or a phone's prompt is invisible", () => {
+    // Measured against 2.1.219: without this flag a prompt typed on a
+    // connected device reaches stdout nowhere, and the panel would render an
+    // answer to a question it never saw.
+    expect(buildArgs("hi", "", base)).toContain("--replay-user-messages");
+    expect(buildArgs("hi", "", { ...base, sessionMode: false })).not.toContain(
+      "--replay-user-messages"
+    );
+  });
+
+  it("always pins --permission-mode explicitly", () => {
+    // The CLI falls back to its own `auto` when the flag is absent, reading
+    // permissions.defaultMode from the user's settings.json. A long-lived
+    // process that inherited that would run Bash without asking anyone.
+    for (const mode of ["default", "auto", "plan"] as const) {
+      const args = buildArgs("hi", "", { ...base, permissionMode: mode });
+      expect(args).toContain("--permission-mode");
+    }
+  });
+
+  it("keeps per-turn context out of argv and puts it in the turn instead", () => {
+    const opts = {
+      ...base,
+      diagnostics: "2 problems in App.tsx",
+      editorContext: "Open: src/index.ts"
+    };
+    const args = buildArgs("hi", "", opts);
+    expect(args).not.toContain("2 problems in App.tsx");
+    expect(args).not.toContain("Open: src/index.ts");
+
+    const preamble = turnPreamble(opts);
+    expect(preamble).toContain("2 problems in App.tsx");
+    expect(preamble).toContain("Open: src/index.ts");
+    expect(preamble.endsWith("\n\n")).toBe(true);
+  });
+
+  it("still sends per-turn context as a system append outside session mode", () => {
+    const args = buildArgs("hi", "", {
+      ...base,
+      sessionMode: false,
+      diagnostics: "2 problems in App.tsx"
+    });
+    expect(args).toContain("2 problems in App.tsx");
+    expect(turnPreamble({ ...base, sessionMode: false })).toBe("");
+  });
+});
+
+describe("claude-cli remote control", () => {
+  it("starts off", () => {
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true
+    });
+    expect(provider.remoteControlStatus().state).toBe("off");
+  });
+
+  it("refuses to hand out a URL the per-turn path cannot keep alive", async () => {
+    // The bridge lives exactly as long as its process. Offering it on the
+    // per-turn path would print a link that dies with the current answer.
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default"
+    });
+    await expect(provider.enableRemoteControl()).rejects.toThrow(
+      /session-mode/
+    );
+    expect(provider.remoteControlStatus().state).toBe("off");
+  });
+
+  it("turning it off when it was never on touches no process", async () => {
+    const provider = new ClaudeCliProvider({
+      binary: "does-not-exist",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true
+    });
+    await expect(provider.disableRemoteControl()).resolves.toBeUndefined();
+  });
+});
+
+describe("claude-cli respawnFingerprint", () => {
+  it("ignores --resume, which changes as soon as the first turn lands", () => {
+    const a = ["--verbose", "--resume", "abc"];
+    const b = ["--verbose", "--resume", "def"];
+    expect(respawnFingerprint(a)).toBe(respawnFingerprint(b));
+    expect(respawnFingerprint(a)).toBe(respawnFingerprint(["--verbose"]));
+  });
+
+  it("reacts to --effort, which no control request can change", () => {
+    // There is no set_effort in the control protocol — verified against the
+    // binary — so a changed effort level has to replace the process.
+    expect(respawnFingerprint(["--effort", "high"])).not.toBe(
+      respawnFingerprint(["--effort", "max"])
+    );
   });
 });
 

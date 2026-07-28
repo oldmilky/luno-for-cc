@@ -50,19 +50,42 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* Scrollbars — ours on every surface in the panel.
+ *
+ * The reset is the load-bearing line. `scrollbar-color` is an inherited
+ * property, and while it holds any value Chromium renders the platform
+ * scrollbar and ignores every `::-webkit-scrollbar` rule under it. The webview
+ * host sets it, so without this the panel wore Windows' 15px bar — measured:
+ * 8px with our rules, 15px once the property is set anywhere up the tree, 8px
+ * again after resetting it to `auto`.
+ *
+ * Deliberately neutral: a scrollbar is chrome. The accent means "this is what
+ * you are doing", and a bar that colour would claim to be part of the content. */
+* {
+  scrollbar-color: auto;
+  scrollbar-width: auto;
 }
-::-webkit-scrollbar-track {
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
   background: transparent;
 }
+/* 10px of track, 3px of transparent border each side: a 4px thumb that floats
+   clear of the content instead of butting against it. `padding-box` is what
+   makes the border read as a gutter rather than as part of the thumb. */
 ::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
   background: var(--scrollbar-thumb);
-  border-radius: 4px;
+  background-clip: padding-box;
+  transition: background-color var(--motion-hover) var(--ease-out);
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
 }
 
 /* ═══════════════════════════════════════════════════════════════

@@ -57,3 +57,8 @@ assets/**
 # Dev-only, and at the root where the bare `tsconfig.json` rule does not reach.
 tsconfig.test.json
 TESTING.md
+
+# Per-workspace LUNO state — chat attachments the user pasted. Gitignored
+# too, but vsce reads this file, not .gitignore, so it shipped a 185 kB
+# screenshot inside 0.22.2 before this line existed.
+.luno/

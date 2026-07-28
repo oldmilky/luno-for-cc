@@ -42,3 +42,4 @@ TESTING.md
 
 # Playwright MCP scratch — screenshots and console logs from the harness.
 .playwright-mcp/
+.luno/

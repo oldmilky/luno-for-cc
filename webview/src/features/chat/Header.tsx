@@ -24,7 +24,9 @@ import {
 import { send, ChatStatus, TimelineEvent } from "../../lib/rpc";
 import { HEADER_LABEL, headerStatus } from "./chat-status";
 import { TokenMeter } from "./TokenMeter";
+import { RemoteControlPill } from "./RemoteControlPill";
 import { ThemePicker } from "../theme/ThemePicker";
+import type { RemoteControlStatus } from "../../lib/rpc";
 import type { IconName } from "../../design/icons";
 import type { ChipTone } from "../../design/primitives";
 import s from "./Header.module.scss";
@@ -41,6 +43,8 @@ interface HeaderProps {
   streaming: string;
   onOpenHistory: () => void;
   onOpenConnectors: () => void;
+  /** Whether this conversation is reachable from another device. */
+  remoteControl: RemoteControlStatus;
 }
 
 /** Icon and tone per state; the words come from `chat-status.ts`. `working`
@@ -63,7 +67,8 @@ export function Header({
   events,
   streaming,
   onOpenHistory,
-  onOpenConnectors
+  onOpenConnectors,
+  remoteControl
 }: HeaderProps) {
   const [newChatTick, setNewChatTick] = useState(0);
   const handleNewChat = () => {
@@ -107,6 +112,7 @@ export function Header({
               </Chip>
             </Tooltip>
           </span>
+          <RemoteControlPill status={remoteControl} />
           <TokenMeter events={events} streaming={streaming} />
         </div>
 

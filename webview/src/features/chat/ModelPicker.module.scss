@@ -56,6 +56,19 @@
   overflow: hidden;
 }
 
+// The panel AnimatePresence mounts between this menu and its scroller. Left as
+// a plain block it breaks the scroll chain: `.scroll` asks for `flex: 1;
+// min-height: 0`, which needs a flex parent, and without one the list grows to
+// its full content height and the menu clips it. That is why the older-models
+// list ended mid-row with nothing to scroll while the short front page — which
+// happened to fit — looked fine.
+.menu.menu > * {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .head {
   flex-shrink: 0;
   padding: 12px 14px 10px;

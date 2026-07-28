@@ -40,6 +40,7 @@ export type InboundType =
   | "setPermissionMode"
   | "setEffort"
   | "setThinking"
+  | "toggleRemoteControl"
   // editor + files
   | "openExternal"
   | "openFile"

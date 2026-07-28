@@ -21,6 +21,19 @@ export type PermissionMode = "default" | "auto" | "plan" | "bypass";
 /** Reasoning effort levels — mirror the CLI's `--effort` choices. */
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
+/** Whether this conversation can be driven from another device.
+ *
+ * Mirrors `RemoteControlStatus` in `src/core/types.ts`; the webview cannot
+ * import from the host half, so the shape is restated rather than shared. */
+export interface RemoteControlStatus {
+  state: "off" | "ready" | "connected" | "disconnected" | "error";
+  /** The session on claude.ai/code. Changes if the CLI process is replaced,
+   *  so the banner must show this rather than a remembered link. */
+  sessionUrl?: string;
+  connectUrl?: string;
+  error?: string;
+}
+
 export interface TimelineEvent {
   id: string;
   ts: number;
@@ -407,6 +420,10 @@ export type Outbound =
    *  between the level landing and the flag landing. */
   | { type: "setEffort"; effort: EffortLevel; ultracode: boolean }
   | { type: "setThinking"; thinking: boolean }
+  /** Hand this conversation to claude.ai/code and the Claude app, or take it
+   *  back. Enabling switches the conversation onto a long-lived CLI process,
+   *  because the bridge lives exactly as long as that process. */
+  | { type: "toggleRemoteControl"; enabled: boolean }
   | { type: "rewindTo"; turnId: string }
   | { type: "editAt"; turnId: string; text: string; revertFiles: boolean }
   | { type: "openExternal"; url: string }
@@ -563,6 +580,10 @@ export type Inbound =
   | { type: "activeModel"; model: string; alias: string }
   | { type: "skills"; skills: SkillInfo[] }
   | { type: "slashCommands"; commands: SlashCommand[] }
+  /** State of the bridge to claude.ai/code and the Claude app. Sent on every
+   *  change, including the ones LUNO did not ask for: the CLI reports the
+   *  connection dropping and coming back on its own. */
+  | { type: "remoteControl"; status: RemoteControlStatus }
   | { type: "tokenResult"; ok: boolean; error?: string }
   | {
       type: "setupProgress";
@@ -683,7 +704,33 @@ export type Inbound =
       /** Live quota verdicts the CLI reported, newest per window. Empty until
        *  a turn has run — the CLI is the only source for these. */
       limits: RateLimitStatus[];
+      /** The account's real figures, as the server told Claude Code. Absent on
+       *  a fresh install or an API key, where the meter falls back to its own
+       *  estimate and says so. */
+      utilization?: UsageUtilization;
     };
+
+/** One quota the account is subject to. Mirrors `UtilizationLimit` in
+ *  src/services/usage-utilization.ts. */
+export interface UtilizationLimit {
+  kind: string;
+  group: string;
+  /** 0-100, from the server. Not derived from any cap we hold. */
+  percent: number;
+  severity: string;
+  resetsAt: number;
+  /** Model a scoped weekly limit applies to. */
+  scopeLabel?: string;
+  isActive: boolean;
+}
+
+export interface UsageUtilization {
+  /** When the CLI last refreshed this from the server. */
+  fetchedAt: number;
+  limits: UtilizationLimit[];
+  plan: "pro" | "max5" | "max20" | "team" | "api" | null;
+  tier?: string;
+}
 
 export interface UsageTotals {
   inputTokens: number;
