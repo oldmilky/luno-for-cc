@@ -66,8 +66,8 @@ catches it.
 
 ```js
 const cs = getComputedStyle(document.documentElement);
-cs.getPropertyValue("--motion-enter"); // ".18s"
-cs.getPropertyValue("--accent"); // "#d37350"
+cs.getPropertyValue("--motion-enter"); // "180ms" — as declared, not normalised
+cs.getPropertyValue("--accent"); // "#d37350" on copper, the default
 ```
 
 **Drive a state you cannot reach by hand.** Inject a timeline, a permission

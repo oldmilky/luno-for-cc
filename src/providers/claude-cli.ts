@@ -176,6 +176,13 @@ export function isReadOnlyGitCommand(command: string): boolean {
  * those apart from the harmless spelling.
  */
 const SHELL_READONLY_HEADS: ReadonlySet<string> = new Set([
+  // Reaches nothing and changes nothing, but almost every command the agent
+  // writes opens with `cd <somewhere> && …`. Leaving it out meant the segment
+  // check failed on the first token and practically nothing was ever allowed —
+  // which is what "it asks about every little thing" was.
+  "cd",
+  "pushd",
+  "popd",
   "ls",
   "dir",
   "cat",
@@ -204,9 +211,19 @@ const SHELL_READONLY_HEADS: ReadonlySet<string> = new Set([
   "sort",
   "uniq",
   "cut",
+  "tr",
+  "tac",
+  "rev",
+  "paste",
+  "join",
+  "comm",
+  "jq",
   "column",
   "diff",
   "cmp",
+  "md5sum",
+  "sha1sum",
+  "sha256sum",
   "date",
   "whoami",
   "hostname",
@@ -604,7 +621,8 @@ export class ClaudeCliProvider implements ChatProvider {
       toolName,
       req.input,
       {
-        autoAllowEdits: this.autoAllowEdits
+        autoAllowEdits: this.autoAllowEdits,
+        agentMode: (this.opts.permissionMode ?? "default") === "auto"
       }
     );
     if (action === "allow") {
@@ -1830,26 +1848,36 @@ export interface PermissionDecision {
  * Decide what to do with a `can_use_tool` request. Pure (no I/O) so the policy
  * is unit-testable in isolation.
  *
- *  - Plan/answer helper tools auto-allow (they have their own UI) — unless
- *    somehow destructive/network.
+ * The gate that matters is the first one: destructive and network calls prompt
+ * in every mode, and nothing below can reach past it. What the modes change is
+ * only how much of the harmless remainder still interrupts.
+ *
+ * **Agent (`auto`)** — everything that is neither destructive nor network runs
+ * without asking. Reading a file and editing one are the work; a tool that
+ * stops to ask permission for them is not an agent, it is a prompt with extra
+ * steps. This is a deliberate loosening, made by the user for their own tool,
+ * and it is exactly what the mode's own description in package.json has always
+ * claimed it did.
+ *
+ * **Ask (`default`)** — the conservative list, unchanged:
+ *  - Plan/answer helper tools auto-allow (they have their own UI).
  *  - Read-only inspection tools (Read/Glob/Grep/LS/NotebookRead and read-only
  *    MCP queries) always auto-allow — they only observe, never mutate.
- *  - Read-only git commands (status/log/diff/…) auto-allow; mutating git
- *    (add/checkout/commit/…) falls through to a prompt. All git is routed here
- *    via an `ask` rule so a project allowlist can't silently auto-run it.
+ *  - Shell commands that only read (`ls`, `cat`, `rg`, read-only `git`, …)
+ *    auto-allow; every segment of the command has to qualify on its own.
  *  - When the user has opted into "allow edits this turn", reversible edit
- *    tools auto-allow — but Bash, deletes, and network calls STILL prompt, so
- *    that opt-in can never silently disable the destructive/network gate.
+ *    tools auto-allow — but Bash, deletes, and network calls STILL prompt.
  *  - Everything else prompts, carrying the destructive/network flags.
  */
 export function decidePermission(
   toolName: string,
   input: Record<string, unknown> | undefined,
-  ctx: { autoAllowEdits: boolean }
+  ctx: { autoAllowEdits: boolean; agentMode?: boolean }
 ): PermissionDecision {
   const destructive = isDestructiveRequest(toolName, input);
   const network = isNetworkRequest(toolName, input);
   if (!destructive && !network) {
+    if (ctx.agentMode) return { action: "allow", destructive, network };
     if (PERMISSION_AUTO_ALLOW.has(toolName))
       return { action: "allow", destructive, network };
     // Read-only inspection (file reads, globs, greps, read-only MCP queries)

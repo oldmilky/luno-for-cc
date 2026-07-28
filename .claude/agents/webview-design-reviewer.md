@@ -46,7 +46,7 @@ what you are here to catch.
 ## The design system
 
 - **No literals.** No hex, no rgba, no px shadow, no raw ms. Every one is a
-  token. `docs/TOKENS.md` is the contract, and a theme declares 15 core tokens
+  token. `docs/TOKENS.md` is the contract, and a theme declares 14 core tokens
   from which the rest derive.
 - **Motion comes from `design/motion.ts`** as a spread preset. A hand-written
   `transition={{ duration: 0.2 }}` is a finding even when the number matches —

@@ -24,7 +24,7 @@ Run all three and read the output:
 
 ```bash
 bun run lint          # tsc over BOTH projects, then eslint, then stylelint
-bun run test          # expect 357 passed, 6 skipped or better
+bun run test          # the count in CLAUDE.md, or better
 bun run format:check
 ```
 

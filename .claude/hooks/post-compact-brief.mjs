@@ -16,7 +16,7 @@ A VS Code / Cursor extension in two halves that talk over postMessage:
 
 DEFINITION OF DONE — do not claim completion without all four:
   1. \`bun run lint\` clean (tsc over BOTH projects, then eslint, then stylelint)
-  2. \`bun run test\` at 357 passed / 6 skipped or better
+  2. \`bun run test\` at the count in CLAUDE.md, or better — never below
   3. behaviour verified where it runs — the browser harness for UI, tests for host logic
   4. every claim tied to output actually seen
 

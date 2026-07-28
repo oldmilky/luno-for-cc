@@ -15,16 +15,23 @@ The toolchain is **bun**. npm is not used: the lockfiles are `bun.lock` /
 `webview/bun.lock` and npm lockfiles are gitignored on purpose — if one
 reappears, something ran `npm install` and the two will drift.
 
-| Task               | Command                                                 |
-| ------------------ | ------------------------------------------------------- |
-| All gates          | `bun run lint` (tsc ×2 → eslint → stylelint)            |
-| Types only         | `bun run lint:types`                                    |
-| Tests              | `bun run test` — expect `572 passed, 6 skipped`         |
-| Build              | `bun run build` (esbuild → dist/, vite → webview/dist/) |
-| Package            | `bun run package` → `luno-for-cc-<ver>.vsix`, ~589 kB   |
-| Format             | `bun run format` · check with `format:check`            |
-| Autofix everything | `bun run fix`                                           |
-| Webview dev server | `bun run dev:webview` → http://localhost:5173           |
+| Task                | Command                                                      |
+| ------------------- | ------------------------------------------------------------ |
+| All gates           | `bun run lint` (tsc ×2 → eslint → stylelint)                 |
+| Types only          | `bun run lint:types`                                         |
+| Tests               | `bun run test` — expect `761 passed, 6 skipped`              |
+| Build               | `bun run build` (esbuild → dist/, vite → webview/dist/)      |
+| Package             | `bun run package` → `luno-for-cc-<ver>.vsix`, ~610 kB        |
+| Format              | `bun run format` · check with `format:check`                 |
+| Autofix everything  | `bun run fix`                                                |
+| Browser harness     | `bun run harness` — the webview on localhost, see `/browser` |
+| Webview dev server  | `bun run dev:webview` → http://localhost:5173                |
+| Install both halves | `bun run install:all` · watch the host with `bun run watch`  |
+| Vendored skills     | `bun run skills:verify` — fails if one was edited in place   |
+
+`bun run test` is the number to beat, and it is the only place it is written
+down. The gate is "this many or better"; anything less is a regression to
+explain, not a floor to lower.
 
 ## Architecture — three layers
 
@@ -65,7 +72,7 @@ Fire these without being asked. Each row is a trip-wire, not a suggestion.
 Never report work as complete without all four:
 
 1. `bun run lint` clean — that is tsc over **both** projects, eslint, stylelint
-2. `bun run test` at `572 passed, 6 skipped` or better
+2. `bun run test` at `761 passed, 6 skipped` or better
 3. Behaviour verified where it runs — the harness for UI, tests for host logic
 4. Every claim tied to evidence actually seen: a command's output, a measured
    value, a screenshot

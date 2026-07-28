@@ -19,7 +19,7 @@ prettier cannot decide.
 | Types / interfaces                           | PascalCase, **no `I` prefix**                            |
 | CSS-module classes                           | camelCase — read as `s.someName` in TSX                  |
 | Global classes in `theme.css` / `_base.scss` | kebab-case — they are applied imperatively               |
-| `@keyframes`                                 | kebab-case (16 of 18 already are)                        |
+| `@keyframes`                                 | kebab-case — all 20 currently are, keep it that way      |
 | CSS custom properties                        | `--kebab-case`                                           |
 | Booleans                                     | `is*`, `has*`, `can*`, `should*`                         |
 

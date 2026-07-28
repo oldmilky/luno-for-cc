@@ -64,7 +64,7 @@ Do not run prettier by hand.
 
 ```bash
 bun run lint    # tsc over BOTH projects, then eslint, then stylelint
-bun run test    # 357 passed, 6 skipped is the floor
+bun run test    # the count in CLAUDE.md is the floor
 ```
 
 **Gate 3.** Failures in files you wrote: fix, up to three attempts. Failures in
