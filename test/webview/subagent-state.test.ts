@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   foldSubagents,
-  AGENT_TOOL_NAMES
+  groupWorkflowProgress,
+  isWorkflowAgentDone,
+  TASK_TOOL_NAMES
 } from "../../webview/src/features/chat/subagent-state";
 import type { TimelineEvent } from "../../webview/src/lib/rpc";
 
@@ -127,8 +129,100 @@ describe("foldSubagents", () => {
   // 2.1.220 sends `Agent`. `Task` is what older sessions on disk still say, and
   // those have to keep rendering as cards rather than reverting to tool chips.
   it("knows both names the dispatching tool has had", () => {
-    expect(AGENT_TOOL_NAMES.has("Agent")).toBe(true);
-    expect(AGENT_TOOL_NAMES.has("Task")).toBe(true);
-    expect(AGENT_TOOL_NAMES.has("Read")).toBe(false);
+    expect(TASK_TOOL_NAMES.has("Agent")).toBe(true);
+    expect(TASK_TOOL_NAMES.has("Task")).toBe(true);
+    expect(TASK_TOOL_NAMES.has("Read")).toBe(false);
+  });
+
+  // A `Workflow` call registers a background task exactly as a dispatch does,
+  // so it owns the slot its chip would have taken. Left out, the chip and the
+  // card both rendered for one launch.
+  it("counts a workflow launch as a task the same way", () => {
+    expect(TASK_TOOL_NAMES.has("Workflow")).toBe(true);
+  });
+});
+
+// `workflow_progress` arrives as one flat array with phases and agents
+// interleaved, re-sent in full each time anything moves. The card groups it on
+// read rather than accumulating, so this is the whole contract.
+describe("workflow progress", () => {
+  const phase = (index: number, title: string) => ({
+    type: "workflow_phase",
+    index,
+    title
+  });
+  const agent = (
+    phaseIndex: number,
+    label: string,
+    state = "start",
+    phaseTitle = ""
+  ) => ({ type: "workflow_agent", phaseIndex, phaseTitle, label, state });
+
+  it("has nothing to group when the CLI sent nothing", () => {
+    expect(groupWorkflowProgress(undefined)).toEqual([]);
+    expect(groupWorkflowProgress([])).toEqual([]);
+  });
+
+  it("puts each agent under the phase it names", () => {
+    const groups = groupWorkflowProgress([
+      phase(1, "Find"),
+      phase(2, "Verify"),
+      agent(1, "grep the logs"),
+      agent(2, "refute it"),
+      agent(1, "grep the tests")
+    ]);
+
+    expect(groups.map((g) => g.title)).toEqual(["Find", "Verify"]);
+    expect(groups[0].agents.map((a) => a.label)).toEqual([
+      "grep the logs",
+      "grep the tests"
+    ]);
+    expect(groups[1].agents).toHaveLength(1);
+  });
+
+  it("orders phases by the index the CLI gave them, not by arrival", () => {
+    const groups = groupWorkflowProgress([
+      phase(3, "Third"),
+      phase(1, "First"),
+      phase(2, "Second")
+    ]);
+
+    expect(groups.map((g) => g.title)).toEqual(["First", "Second", "Third"]);
+  });
+
+  // A running agent must never be hidden because its phase heading has not
+  // arrived: the whole point of this view is seeing what is in flight.
+  it("keeps an agent whose phase was never announced", () => {
+    const groups = groupWorkflowProgress([
+      agent(4, "orphan work", "start", "Late phase")
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].title).toBe("Late phase");
+    expect(groups[0].agents).toHaveLength(1);
+  });
+
+  it("groups agents that name no phase at all", () => {
+    const groups = groupWorkflowProgress([
+      { type: "workflow_agent", label: "loose" }
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].agents[0].label).toBe("loose");
+  });
+
+  // Unknown states read as still running, the same way an unknown task status
+  // does — a spinner corrects itself, a premature tick does not.
+  it("counts only the states that mean the agent stopped", () => {
+    expect(isWorkflowAgentDone({ type: "workflow_agent", state: "done" })).toBe(
+      true
+    );
+    expect(
+      isWorkflowAgentDone({ type: "workflow_agent", state: "error" })
+    ).toBe(true);
+    expect(
+      isWorkflowAgentDone({ type: "workflow_agent", state: "start" })
+    ).toBe(false);
+    expect(isWorkflowAgentDone({ type: "workflow_agent" })).toBe(false);
   });
 });

@@ -294,33 +294,42 @@ approval would be inventing the half that matters. It is on the timeline rather
 than in a toast for the same reason compaction is: reopening the chat tomorrow,
 it is the only thing explaining why a tool ran with no approval here.
 
-**The policy, decided 2026-07-28: the ungated modes and the bridge are kept
-apart, and the bridge wins.** `bypass` turns the gate off outright; `auto`
-auto-allows edits with no card on either surface. Either one plus a connected
-device means a phone can make the agent write files with nobody approving it
-here. So switching to `auto` or `bypass` while Remote Control is on is refused
-(the picker snaps back and says why), and starting Remote Control from one of
-those modes is refused too — checked before anything is published, so a bridge
-that was never going to start does not flash "ready" first. `plan` is
-untouched: it gates harder, not less.
+**The policy, decided and then reversed the same day: Remote Control puts no
+restriction on the permission mode.**
 
-The bridge wins rather than the mode, because it is the thing someone is
-actively using from elsewhere — silently dropping it would strand a phone
-mid-conversation to grant a convenience nobody asked for at that moment.
+It was first built the other way — `auto` and `bypass` refused while the bridge
+was up, on the reasoning that a device not in the room could make the agent
+write files with nobody approving it here. Rodion's call, and it stands: whose
+files these are, and what may run against them unattended, is the user's
+decision on their own machine, and the phone in their pocket is not somebody
+else's hands. Being asked to justify a mode they deliberately chose is the
+annoyance, not the tool call.
 
-Every path into the mode goes through one method (`changePermissionMode`), for
-the reason the Bypass confirmation already lives host-side: the picker, Shift+Tab
-and the plan-rewind restore all reach it, and a check on one of them is a check
-on none.
+So: no guard, no warning, and no `changePermissionMode` choke point — every
+caller is back on `applySetting`. `bypass` keeps its own confirmation, which
+predates all of this and is about the mode itself rather than about the bridge.
+The reversal is pinned by tests that assert the modes _are_ accepted with a
+device connected, so nobody reinstates the refusal thinking it was an oversight.
 
-Verified: gates clean (`lint`, 659 passed / 6 skipped), 13 host tests including
-the two failure modes worth naming — the Bypass test refuses _after_ its own
-confirmation says yes (with the modal stubbed to "no" it had been passing on the
-wrong refusal), and the mode test asserts the picker was re-published rather
-than merely unchanged. In the harness: the card disappears on
-`permissionResolved` and the line renders as a centred boundary with the divider
-rules, `--t3` at 11.5px, contrast 4.59:1 against the page — the same treatment
-the compaction boundary already has, sharing its rule rather than restating it.
+What the user does inherit, and it is the CLI's constraint rather than a
+choice: **switching to Bypass replaces the process.** Measured against 2.1.219 —
+`set_permission_mode` over the control channel answers
+`"Cannot set permission mode to bypassPermissions because the session was not
+launched with --dangerously-skip-permissions"`, while `plan` and `set_model`
+both succeed. Agent mode respawns too, for a different reason: it is `default`
+plus `--allowedTools` entries, and argv changes replace the process by
+definition. A replaced process re-establishes the bridge by itself, on a **new
+session URL** — so a phone sitting on the old link has to reopen it from the
+pill. That is the Ф2 edge, now reachable from the mode picker.
+
+Verified: 13 host tests over the withdrawal and the modes. One of them is worth
+naming because it was passing for the wrong reason first: with the Bypass modal
+stubbed to "no", the test never reached the rule it was checking — it was
+passing on that confirmation's own refusal. The stub now says yes. In the
+harness: the card disappears on `permissionResolved` and the line renders as a
+centred boundary with the divider rules, `--t3` at 11.5px, contrast 4.59:1
+against the page — the same treatment the compaction boundary already has,
+sharing its rule rather than restating it.
 
 Still only a second device can prove the round trip: that answering on the phone
 is what produces the cancel we now act on.
@@ -360,11 +369,11 @@ approvals on every path, and the three copies of that loop are one method.
 pill said "error" with no reason. Now parsed by `bridgeStatus()`, which also
 clears a stale reason when the bridge recovers.
 
-Deliberate divergences, all in the stricter direction:
+Deliberate divergences:
 
-- **The reference does not restrict permission modes with Remote Control.** We
-  refuse `auto`/`bypass` while the bridge is up. That follows LUNO's existing
-  decision that its gate is stricter than upstream, not from the reference.
+- **Neither implementation restricts the permission mode with Remote Control.**
+  Ours briefly did; it was reversed the same day — see Ф5. The reference and
+  LUNO now agree here.
 - **They consume `--session-mirror` / `transcript_mirror`; we use
   `--replay-user-messages`.** Both flags exist and the extension passes the
   replay flag too. The mirror carries the transcript file plus bookkeeping

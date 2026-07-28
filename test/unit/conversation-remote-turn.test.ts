@@ -233,7 +233,7 @@ const publishedMode = (webview: FakeWebview) =>
 
 const publishedBridge = (webview: FakeWebview) =>
   webview.sent.filter((m) => m.type === "remoteControl").at(-1)?.status as
-    { state?: string } | undefined;
+    { state?: string; sessionUrl?: string } | undefined;
 
 describe("a turn started on another device", () => {
   it("puts the phone's prompt and the answer on the timeline", async () => {
@@ -344,11 +344,17 @@ describe("a turn started on another device", () => {
     expect(webview.sent.filter((m) => m.type === "turnEnd")).toHaveLength(2);
   });
 
-  it("drops turn traffic that belongs to no turn", async () => {
-    // A `result` tail from a turn that was already cancelled, arriving with
-    // nothing on the timeline to attach it to.
+  it("drops orphan tool traffic, which has nothing to attach to", async () => {
+    // A tool call from a turn that was already cancelled, arriving with no card
+    // and no turn to hang it on. Text is the deliberate exception — the CLI
+    // opens a whole extra turn to report a finished background task, and the
+    // host keeps that.
     const { webview } = await openWithBridge();
-    remote.push!({ type: "text", text: "orphan" });
+    remote.push!({
+      type: "tool_use_start",
+      tool: { id: "t-orphan", name: "Read" }
+    });
+    remote.push!({ type: "tool_use_end" });
     remote.push!({ type: "done" });
     await settle();
     expect(timeline(webview)).toEqual([]);
@@ -422,42 +428,31 @@ describe("an approval answered on the other device", () => {
   });
 });
 
-describe("the ungated modes and the bridge are kept apart", () => {
-  it("refuses Agent mode while a phone is connected", async () => {
-    // `auto` auto-allows edits with no card on either surface: a device that is
-    // not in the room could make the agent write files unapproved.
+describe("the bridge puts no restriction on the permission mode", () => {
+  // Deliberate, and reversed on purpose: an earlier build refused the ungated
+  // modes while a device was connected. Whose files these are, and what may run
+  // against them unattended, is the user's call on their own machine — the
+  // second surface is theirs too. These tests exist so nobody reinstates the
+  // refusal on the grounds that it looks like an oversight.
+  it("takes Agent mode with a phone connected", async () => {
     const { webview } = await openWithBridge();
-    const before = webview.sent.filter((m) => m.type === "auth").length;
     webview.deliver({ type: "setPermissionMode", mode: "auto" });
     await settle();
 
-    expect(publishedMode(webview)).toBe("default");
-    // Republished, not merely unchanged: the picker had already moved to the
-    // mode it could not have and has to be put back.
-    expect(
-      webview.sent.filter((m) => m.type === "auth").length
-    ).toBeGreaterThan(before);
-    // And the refusal costs nothing else — the bridge is still up.
+    expect(publishedMode(webview)).toBe("auto");
     expect(publishedBridge(webview)?.state).toBe("ready");
   });
 
-  it("refuses Bypass even once its own confirmation said yes", async () => {
+  it("takes Bypass too, behind its own confirmation and nothing else", async () => {
     const { webview } = await openWithBridge();
     webview.deliver({ type: "setPermissionMode", mode: "bypass" });
     await settle();
 
-    expect(publishedMode(webview)).toBe("default");
+    expect(publishedMode(webview)).toBe("bypass");
+    expect(publishedBridge(webview)?.state).toBe("ready");
   });
 
-  it("still allows Plan, which gates harder rather than less", async () => {
-    const { webview } = await openWithBridge();
-    webview.deliver({ type: "setPermissionMode", mode: "plan" });
-    await settle();
-
-    expect(publishedMode(webview)).toBe("plan");
-  });
-
-  it("refuses to start the bridge from Agent mode, without flashing ready", async () => {
+  it("starts the bridge from Agent mode", async () => {
     settings.permissionMode = "auto";
     const registry = new ConversationRegistry(fakeContext() as never);
     const host = registry.create();
@@ -467,10 +462,8 @@ describe("the ungated modes and the bridge are kept apart", () => {
     webview.deliver({ type: "toggleRemoteControl", enabled: true });
     await settle();
 
-    const states = webview.sent
-      .filter((m) => m.type === "remoteControl")
-      .map((m) => (m.status as { state?: string }).state);
-    expect(states).toEqual(["off"]);
+    expect(publishedBridge(webview)?.state).toBe("ready");
+    expect(publishedBridge(webview)?.sessionUrl).toBeTruthy();
     void registry;
   });
 });

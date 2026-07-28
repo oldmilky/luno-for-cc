@@ -158,8 +158,7 @@
   text-transform: uppercase;
 }
 
-.prompt {
-  max-height: 180px;
+%verbatim {
   padding: 6px 8px;
   overflow-y: auto;
   border-radius: var(--round-sm);
@@ -170,6 +169,40 @@
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: break-word;
+}
+
+.prompt {
+  @extend %verbatim;
+
+  max-height: 180px;
+}
+
+.outcome {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.status {
+  color: var(--err);
+}
+
+.interrupted .status {
+  color: var(--warn);
+}
+
+.transcript {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 
 .answer {
@@ -184,4 +217,83 @@
   p:last-child {
     margin-bottom: 0;
   }
+}
+
+// ── Workflow phases ──────────────────────────────────────────
+
+.script {
+  @extend %verbatim;
+
+  // Taller than a prompt: this is a whole workflow script, and the useful part
+  // (the phases and the agent calls) is below the `meta` block at its head.
+  max-height: 240px;
+}
+
+.phases {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.phase {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.phaseTitle {
+  color: var(--t3);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.agent {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  padding-left: 2px;
+  color: var(--t2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.agentDone .agentLabel {
+  color: var(--t3);
+}
+
+.agentState {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-self: center;
+  width: 10px;
+  color: var(--accent);
+}
+
+.agentSpinner {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--accent);
+  border-right-color: transparent;
+  border-radius: 50%;
+
+  @include motion.spin;
+}
+
+.agentLabel {
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentMeta {
+  flex-shrink: 0;
+  color: var(--t3);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
 }

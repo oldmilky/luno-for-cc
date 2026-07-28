@@ -346,6 +346,65 @@ describe("subagents on the timeline", () => {
     expect(rows[1].meta).toMatchObject({ status: "completed" });
   });
 
+  // A workflow arrives on the same events and has no agent type to be named
+  // by. Without its own branch every one of them rendered as the bare word
+  // "Agent", indistinguishable from the next.
+  it("names a workflow by its script rather than calling it an agent", async () => {
+    script.push(
+      {
+        type: "task",
+        task: {
+          phase: "started",
+          taskId: "whzxe4yej",
+          toolUseId: "toolu_wf",
+          taskType: "local_workflow",
+          workflowName: "probe",
+          description: "probe run for a stream audit"
+        }
+      },
+      {
+        type: "task",
+        task: {
+          phase: "notification",
+          taskId: "whzxe4yej",
+          status: "completed",
+          summary: 'Dynamic workflow "probe run for a stream audit" completed'
+        }
+      }
+    );
+    const { webview } = open();
+    webview.deliver({ type: "prompt", text: "run it" });
+    await settle();
+
+    const rows = cards(webview);
+    expect(rows.map((r) => r.title)).toEqual([
+      "Workflow: probe",
+      "Workflow: probe"
+    ]);
+    expect(rows[1].meta).toMatchObject({
+      taskType: "local_workflow",
+      workflowName: "probe",
+      status: "completed"
+    });
+  });
+
+  it("falls back to the bare word when the workflow named itself nothing", async () => {
+    script.push({
+      type: "task",
+      task: {
+        phase: "started",
+        taskId: "w2",
+        toolUseId: "toolu_w2",
+        taskType: "local_workflow"
+      }
+    });
+    const { webview } = open();
+    webview.deliver({ type: "prompt", text: "run it" });
+    await settle();
+
+    expect(cards(webview)[0].title).toBe("Workflow");
+  });
+
   it("keeps two agents apart", async () => {
     const second = "bb1859798b5bbd3b9";
     script.push(
@@ -448,6 +507,63 @@ describe("subagents that outlive their turn", () => {
     });
   });
 
+  // A session process pushes `done` at every `result` — including the extra
+  // turn the CLI opens to report a task that just finished. Sweeping on that
+  // one filed every *other* agent still working as `interrupted`, seconds
+  // before it answered. Measured on a live run: one agent closed yellow at
+  // 38.6s and reopened green at 107.6s, two closing rows for one agent.
+  it("does not close a working agent when another turn merely ends", async () => {
+    script.push(started, progress);
+    const { webview } = open();
+    await enableRemote(webview);
+    webview.deliver({ type: "prompt", text: "launch it" });
+    await settle();
+
+    outOfTurn[outOfTurn.length - 1]({ type: "done" });
+    await settle();
+
+    expect(cards(webview).map((r) => r.meta?.phase)).toEqual(["start"]);
+  });
+
+  // The report itself. It arrives with the panel's turn long over and no remote
+  // turn to belong to, and used to be dropped on the floor — the agent
+  // finished, the card closed, and the chat never said what came back.
+  it("puts the model's report on the timeline when no turn is running", async () => {
+    script.push(started);
+    const { webview } = open();
+    await enableRemote(webview);
+    webview.deliver({ type: "prompt", text: "launch it" });
+    await settle();
+
+    const push = outOfTurn[outOfTurn.length - 1];
+    push({ type: "text", text: "The suite is green: " });
+    push({ type: "text", text: "808 passed, 6 skipped." });
+    push({ type: "done" });
+    await settle();
+
+    const said = webview.sent
+      .filter((m) => m.type === "timeline" && m.event?.kind === "assistant")
+      .map((m) => m.event!.body);
+    expect(said).toEqual(["The suite is green: 808 passed, 6 skipped."]);
+  });
+
+  it("says nothing when the extra turn produced no text", async () => {
+    script.push(started);
+    const { webview } = open();
+    await enableRemote(webview);
+    webview.deliver({ type: "prompt", text: "launch it" });
+    await settle();
+
+    outOfTurn[outOfTurn.length - 1]({ type: "done" });
+    await settle();
+
+    expect(
+      webview.sent.filter(
+        (m) => m.type === "timeline" && m.event?.kind === "assistant"
+      )
+    ).toHaveLength(0);
+  });
+
   // The process finally going away is the one moment nothing more can arrive.
   it("closes anything still open when the session process exits", async () => {
     script.push(started);
@@ -457,7 +573,9 @@ describe("subagents that outlive their turn", () => {
     await settle();
     expect(cards(webview)).toHaveLength(1);
 
-    outOfTurn[outOfTurn.length - 1]({ type: "done" });
+    // `sessionEnded` is what the provider sets on the child's `exit`, and it is
+    // the only `done` that means nothing more can arrive.
+    outOfTurn[outOfTurn.length - 1]({ type: "done", sessionEnded: true });
     await settle();
 
     const rows = cards(webview);

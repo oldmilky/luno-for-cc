@@ -122,6 +122,21 @@ export interface SubagentTask {
   /** The main agent's `Agent` tool_use block this task belongs to. Absent on
    *  `updated`; the host fills it in from `started`. */
   toolUseId?: string;
+  /**
+   * Which kind of background task this is — `local_agent` for a dispatched
+   * subagent, `local_workflow` for a `Workflow` script, `remote_agent` for one
+   * handed to the cloud. Absent on an older CLI, where subagents were the only
+   * kind there was.
+   *
+   * Read before any other field. A workflow reuses this event shape and means
+   * something different by half of it: `prompt` holds its entire script,
+   * `last_tool_name` holds an agent's label rather than a tool, and there is no
+   * `subagent_type` at all. Rendering one as a subagent misreports every one of
+   * those.
+   */
+  taskType?: string;
+  /** `meta.name` from the workflow script. `local_workflow` only. */
+  workflowName?: string;
   /** Which agent ran: `Explore`, `general-purpose`, a name from
    *  `.claude/agents/`. */
   subagentType?: string;
@@ -157,6 +172,41 @@ export interface SubagentTask {
   summary?: string;
   /** Where the CLI spilled the full output when it was too long to inline. */
   outputFile?: string;
+  /** Live phase-and-agent breakdown of a running workflow. `local_workflow`
+   *  only, and only on `progress`. */
+  workflowProgress?: WorkflowProgressEntry[];
+}
+
+/**
+ * One row of a workflow's live progress, as the CLI already computes it.
+ *
+ * Passed through rather than remapped: the wire shape is what a progress view
+ * wants. Every field but `type` is optional because phases and agents share one
+ * array — `workflow_phase` carries `title`, `workflow_agent` carries the rest.
+ */
+export interface WorkflowProgressEntry {
+  type: string;
+  index?: number;
+  /** Phase heading. `workflow_phase` only. */
+  title?: string;
+  /** What this agent was asked, in a few words. `workflow_agent` only. */
+  label?: string;
+  /** The head of the agent's prompt. Falls back for `label` when the script
+   *  passed no explicit one. */
+  promptPreview?: string;
+  phaseIndex?: number;
+  phaseTitle?: string;
+  agentId?: string;
+  model?: string;
+  /** `start` while it runs, `done` once it answered. Left a free string for the
+   *  same reason a task status is: the CLI adds values between releases. */
+  state?: string;
+  attempt?: number;
+  tokens?: number;
+  toolCalls?: number;
+  durationMs?: number;
+  /** The head of what the agent returned. `done` only. */
+  resultPreview?: string;
 }
 
 /** Which `task_*` event this update came from. The host routes on it: two of
@@ -165,6 +215,18 @@ export type SubagentPhase = "started" | "progress" | "updated" | "notification";
 
 export interface SubagentUpdate extends SubagentTask {
   phase: SubagentPhase;
+}
+
+/**
+ * Whether this task is a `Workflow` run rather than a dispatched subagent.
+ *
+ * Absent `taskType` reads as a subagent: that is what an older CLI meant by
+ * saying nothing, and it is the safe way round — a workflow mislabelled as an
+ * agent is a wrong card, an agent mislabelled as a workflow is a card with no
+ * agent type and a script viewer over a prompt.
+ */
+export function isWorkflowTask(taskType: string | undefined): boolean {
+  return taskType === "local_workflow";
 }
 
 /**
@@ -251,6 +313,17 @@ export interface StreamDelta {
   compaction?: CompactionInfo;
   /** Carried on `type: "task"` — one subagent moved through its lifecycle. */
   task?: SubagentUpdate;
+  /**
+   * Carried on `type: "done"` — the CLI process itself is gone, not merely a
+   * turn that finished.
+   *
+   * In session mode one process serves every turn, so `done` is pushed twice
+   * for two entirely different reasons: at each `result`, and again on exit.
+   * Reading them as the same event is what stamped `interrupted` on agents that
+   * were still working — the turn the CLI opened to report a *finished* agent
+   * ended, and its `done` was taken for the session dying.
+   */
+  sessionEnded?: boolean;
   /** Carried on `type: "rate_limit"` — the CLI's own quota verdict for the
    *  turn in flight. */
   rateLimit?: RateLimitStatus;

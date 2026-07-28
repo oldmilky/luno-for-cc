@@ -224,7 +224,9 @@ describe("ClaudeCliProvider.stream — backgrounded subagents", () => {
       binary: "claude",
       cwd: "/tmp",
       permissionMode: "default",
-      backgroundGraceMs: 10_000 // long enough that only an explicit end fires
+      // Both long enough that only an explicit end fires.
+      backgroundGraceMs: 10_000,
+      taskReportGraceMs: 10_000
     });
 
   const started = {
@@ -253,6 +255,13 @@ describe("ClaudeCliProvider.stream — backgrounded subagents", () => {
       status: "completed",
       summary: "src/providers/claude-cli.ts"
     });
+    // The launching turn's own `result`. The model has still said nothing about
+    // what came back, so this is not the end of anything.
+    child.emitLine({ type: "result", subtype: "success" });
+    child.emitLine({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "It is in claude-cli.ts." }] }
+    });
     child.emitLine({ type: "result", subtype: "success" });
     await finished;
 
@@ -261,6 +270,50 @@ describe("ClaudeCliProvider.stream — backgrounded subagents", () => {
       status: "completed",
       summary: "src/providers/claude-cli.ts"
     });
+  });
+
+  // The shape a short workflow always produces: it finishes *before* the turn
+  // that launched it reports, so `result` arrives with nothing open. Ending
+  // there discarded the follow-up turn the CLI opens to answer its own
+  // `<task-notification>` — the only place the run's result is ever stated.
+  it("waits for the report on a task that finished before the result", async () => {
+    const { collected, finished } = await drive(provider());
+    child.emitLine({
+      type: "system",
+      subtype: "task_started",
+      task_id: "w1",
+      tool_use_id: "toolu_w",
+      task_type: "local_workflow",
+      workflow_name: "probe",
+      description: "probe run"
+    });
+    child.emitLine({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "w1",
+      status: "completed",
+      summary: 'Dynamic workflow "probe run" completed'
+    });
+    child.emitLine({ type: "result", subtype: "success" });
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(collected.some((d) => d.type === "done")).toBe(false);
+
+    // The follow-up turn, verbatim in shape from 2.1.219.
+    child.emitLine({ type: "system", subtype: "init" });
+    child.emitLine({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "text", text: 'Workflow completed. Result: {"a":"OK"}' }
+        ]
+      }
+    });
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+
+    const text = collected.filter((d) => d.type === "text").pop();
+    expect(text!.text).toBe('Workflow completed. Result: {"a":"OK"}');
   });
 
   // The agent answering is not the end of the turn — the model picks the
@@ -327,7 +380,10 @@ describe("ClaudeCliProvider.stream — backgrounded subagents", () => {
       binary: "claude",
       cwd: "/tmp",
       permissionMode: "default",
-      backgroundGraceMs: 60
+      backgroundGraceMs: 60,
+      // The agent answering leaves the model's report outstanding; this test is
+      // about the budget before that, so let the tail expire immediately.
+      taskReportGraceMs: 30
     });
     const { collected, finished } = await drive(p);
     child.emitLine(started);

@@ -183,3 +183,28 @@
     content: "";
   }
 }
+
+// Ruled rail rather than the divider above: a provider error is content the
+// turn produced, not a boundary between turns, and it reads next to the failed
+// SubagentCard rail it will often sit beside.
+.errorBlock {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--err);
+  border-radius: 0 var(--round-sm) var(--round-sm) 0;
+  background: color-mix(in srgb, var(--err) 8%, transparent);
+  color: var(--t2);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.errorIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--err);
+}

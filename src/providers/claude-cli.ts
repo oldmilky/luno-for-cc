@@ -18,10 +18,12 @@ import {
   PermissionSuggestion,
   RemoteControlStatus,
   isTerminalTaskStatus,
+  isWorkflowTask,
   StreamDelta,
   SubagentPhase,
   SubagentUpdate,
-  TaskType
+  TaskType,
+  WorkflowProgressEntry
 } from "../core/types.js";
 import { getModePrompt, getTaskTypePrompt } from "../services/prompt-loader.js";
 import { ConventionsFile } from "../services/conventions.js";
@@ -69,6 +71,23 @@ const WEB_TOOL_STALL_MS = 60 * 1000;
  * while a silent one is still cut loose well before the 10-minute hard kill.
  */
 const BACKGROUND_TASK_GRACE_MS = 90 * 1000;
+
+/**
+ * How long the turn waits for the model to report on a task that just finished.
+ *
+ * A background task does not simply end. The CLI queues a synthetic
+ * `<task-notification>` prompt naming it and opens a **fresh turn** to answer
+ * it — that turn is where "Workflow completed. Result: …" comes from, and it is
+ * the only sentence saying what the run produced. Measured on 2.1.219 across
+ * two runs: the follow-up `system/init` landed ~1s after the launching turn's
+ * `result`, and its own `result` 6s after that.
+ *
+ * Ending at the launching turn's `result` — which is what happens when the task
+ * finished before it, as a short workflow always does — throws that turn away
+ * unread. Every line the follow-up produces re-arms this budget, so it is paid
+ * in full only when the CLI never follows up at all.
+ */
+const TASK_REPORT_GRACE_MS = 15 * 1000;
 
 /** Tools that are surfaced through their own dedicated UI by the orchestrator's
  *  PlanInterceptor (plan cards, question cards). When the CLI routes a
@@ -375,6 +394,9 @@ export interface ClaudeCliOpts {
   /** How long the turn waits on a quiet backgrounded subagent before ending
    *  anyway. Defaults to BACKGROUND_TASK_GRACE_MS; tests shorten it. */
   backgroundGraceMs?: number;
+  /** How long the turn waits for the model to report on a task that finished.
+   *  Defaults to TASK_REPORT_GRACE_MS; tests shorten it. */
+  taskReportGraceMs?: number;
   /** How long the CLI may emit nothing before it's killed as wedged. Reset by
    *  every stdout line and stderr byte. Defaults to SILENCE_TIMEOUT_MS; tests
    *  shorten it. */
@@ -826,6 +848,10 @@ export class ClaudeCliProvider implements ChatProvider {
     // `result` — see BACKGROUND_TASK_GRACE_MS for what that buys and why the
     // wait has to be bounded.
     const openTasks = new Set<string>();
+    /** A task has finished and the model has not said anything since — so the
+     *  turn the CLI opens to report it has not run yet. See
+     *  TASK_REPORT_GRACE_MS. */
+    let pendingTaskReport = false;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
     let turnEnded = false;
 
@@ -842,9 +868,9 @@ export class ClaudeCliProvider implements ChatProvider {
       push({ type: "done" });
     };
 
-    /** (Re)start the countdown from this moment — the agent just showed a sign
+    /** (Re)start the countdown from this moment — something just showed a sign
      *  of life, so the budget it gets is measured from here. */
-    const armGrace = () => {
+    const armGrace = (ms: number) => {
       if (turnEnded) return;
       if (graceTimer) clearTimeout(graceTimer);
       graceTimer = setTimeout(() => {
@@ -852,8 +878,15 @@ export class ClaudeCliProvider implements ChatProvider {
           `[luno] ${openTasks.size} background agent(s) went quiet; ending the turn`
         );
         endTurn();
-      }, this.opts.backgroundGraceMs ?? BACKGROUND_TASK_GRACE_MS);
+      }, ms);
     };
+
+    /** The generous budget while something is still running, the short one
+     *  while only the model's report on a finished task is outstanding. */
+    const graceBudget = () =>
+      openTasks.size > 0
+        ? (this.opts.backgroundGraceMs ?? BACKGROUND_TASK_GRACE_MS)
+        : (this.opts.taskReportGraceMs ?? TASK_REPORT_GRACE_MS);
 
     let sawResult = false;
 
@@ -878,11 +911,18 @@ export class ClaudeCliProvider implements ChatProvider {
       if (ev.type === "control_response") return;
       for (const d of processor(ev)) {
         push(d);
+        // Anything the model says settles the report a finished task is owed.
+        // Read before the task branch so a notification arriving in the same
+        // line cannot be cleared by output that preceded it.
+        if (d.type === "text" || d.type === "tool_use_start") {
+          pendingTaskReport = false;
+        }
         if (d.type !== "task" || !d.task) continue;
         const { phase, taskId, status } = d.task;
         if (phase === "started") openTasks.add(taskId);
         else if (phase === "notification" || isTerminalTaskStatus(status)) {
           openTasks.delete(taskId);
+          pendingTaskReport = true;
         }
       }
       // Under stream-json input the CLI keeps the session open for more input
@@ -900,14 +940,18 @@ export class ClaudeCliProvider implements ChatProvider {
       // from a process that exited after answering in full.
       if (ev.type === "result") sawResult = true;
       if (permissionProtocol && ev.type === "result") {
-        if (openTasks.size === 0) endTurn();
-        else armGrace();
+        // A task that finished *before* this `result` leaves the turn owed one
+        // more: the CLI answers its own `<task-notification>` in a fresh turn,
+        // and that turn holds the only account of what the task produced.
+        // Short workflows always land this way — ending here discarded it.
+        if (openTasks.size === 0 && !pendingTaskReport) endTurn();
+        else armGrace(graceBudget());
         return;
       }
       // Past the first `result` the turn stays alive for the agents and for
       // whatever the model says once they answer. Any sign of either resets the
       // budget, so only real silence ends it.
-      if (sawResult) armGrace();
+      if (sawResult) armGrace(graceBudget());
     });
 
     const onExit = () => {
@@ -1217,7 +1261,7 @@ export class ClaudeCliProvider implements ChatProvider {
         const msg = exitFailure(session.stderr, child.exitCode, true);
         if (msg) route({ type: "error", error: msg });
       }
-      route({ type: "done" });
+      route({ type: "done", sessionEnded: true });
     });
     child.once("error", (err) => {
       session.exited = true;
@@ -2069,6 +2113,9 @@ export interface CliEvent {
   model?: string;
   /** Every slash command the CLI knows, reported on `system`/`init`. */
   slash_commands?: string[];
+  /** The same list, republished on `system`/`commands_changed` when it changes
+   *  mid-session. Named differently on the wire from `slash_commands`. */
+  commands?: string[];
   /** Set on a `user` event the CLI is playing back rather than receiving:
    *  either the prompt we just wrote to stdin, or one typed on a connected
    *  phone. Only present with `--replay-user-messages`. */
@@ -2167,6 +2214,18 @@ export interface CliEvent {
   tool_use_id?: string;
   subagent_type?: string;
   task_type?: string;
+  /** `meta.name` from the workflow script, on a `local_workflow` task. */
+  workflow_name?: string;
+  /** Per-phase and per-agent state of a running workflow, on `task_progress`.
+   *  The CLI has already computed everything a progress view needs. */
+  workflow_progress?: WorkflowProgressEntry[];
+  /** Every background task currently registered, on `background_tasks_changed`.
+   *  An empty array is the CLI stating that nothing is running. */
+  tasks?: Array<{
+    task_id?: string;
+    task_type?: string;
+    description?: string;
+  }>;
   description?: string;
   prompt?: string;
   status?: string;
@@ -2345,6 +2404,15 @@ export function makeProcessor(
       // turn, so the composer caches it rather than asking.
       if (ev.slash_commands?.length) onSlashCommands?.(ev.slash_commands);
       emitModel(ev.model, out);
+      return out;
+    }
+
+    // The command list is not fixed for the life of a session: installing a
+    // plugin or writing a new `.claude/commands` file makes the CLI republish
+    // it here rather than on a fresh `init`. Cached from `init` alone, a
+    // command added mid-session never appeared in the popover.
+    if (ev.type === "system" && ev.subtype === "commands_changed") {
+      if (ev.commands?.length) onSlashCommands?.(ev.commands);
       return out;
     }
 
@@ -2657,10 +2725,13 @@ export function exitFailure(
 function taskUpdate(ev: CliEvent, phase: SubagentPhase): SubagentUpdate | null {
   if (!ev.task_id) return null;
   const u = ev.usage;
+  const isWorkflow = isWorkflowTask(ev.task_type);
   return {
     phase,
     taskId: ev.task_id,
     toolUseId: ev.tool_use_id,
+    taskType: ev.task_type,
+    workflowName: ev.workflow_name,
     subagentType: ev.subagent_type,
     // Same wire field, two different meanings — see `SubagentTask.activity`.
     description: phase === "progress" ? undefined : ev.description,
@@ -2671,9 +2742,14 @@ function taskUpdate(ev: CliEvent, phase: SubagentPhase): SubagentUpdate | null {
     durationMs: u?.duration_ms,
     toolUses: u?.tool_uses,
     totalTokens: u?.total_tokens,
-    lastToolName: ev.last_tool_name,
+    // A workflow puts the *agent's label* here — "Reply with exactly the word
+    // OK" — not the name of a tool. Measured on 2.1.219. Rendering it in the
+    // last-tool slot invents a tool that was never run, and the same string is
+    // already in `activity`.
+    lastToolName: isWorkflow ? undefined : ev.last_tool_name,
     summary: ev.summary,
-    outputFile: ev.output_file
+    outputFile: ev.output_file,
+    workflowProgress: isWorkflow ? ev.workflow_progress : undefined
   };
 }
 

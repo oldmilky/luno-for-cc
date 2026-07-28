@@ -112,11 +112,39 @@ function readLimits(raw: unknown): UtilizationLimit[] {
 }
 
 /**
+ * Turn a utilization payload into rows, whoever fetched it.
+ *
+ * Split out because the same shape arrives two ways: from the CLI's cache of
+ * it, and from the account endpoint `oauth-usage.ts` calls itself. The cache
+ * was only ever a copy of that response, so one parser serves both — and a
+ * field that moves moves for both at once.
+ *
+ * `tier` is not part of the payload. It lives on the account record in
+ * `~/.claude.json`, so a live fetch has to carry it in from there.
+ */
+export function parseUtilization(
+  payload: unknown,
+  fetchedAt: number,
+  tier?: string
+): UsageUtilization | null {
+  const limits = readLimits(
+    (payload as { limits?: unknown } | null | undefined)?.limits
+  );
+  if (limits.length === 0 && !tier) return null;
+  return { fetchedAt, limits, plan: planFromTier(tier), tier };
+}
+
+/**
  * Read the cached utilization, or null when it is not there.
  *
  * Null is a normal answer, not a failure: a fresh install has never asked the
  * server, and an API-key user has no subscription to report. The caller falls
  * back to its own estimate and says so.
+ *
+ * Since CLI 2.1.x this file no longer carries `cachedUsageUtilization` at all
+ * — only the tier survives, which is why the live endpoint exists. Keep
+ * reading it anyway: the key is still the only offline source of a percentage,
+ * and an install that has it should not be made to go to the network.
  */
 export async function readUsageUtilization(
   configPath = path.join(os.homedir(), ".claude.json")
@@ -148,13 +176,9 @@ export async function readUsageUtilization(
       ? account.organizationRateLimitTier
       : undefined);
 
-  const limits = readLimits(cached?.utilization?.limits);
-  if (limits.length === 0 && !tier) return null;
-
-  return {
-    fetchedAt: typeof cached?.fetchedAtMs === "number" ? cached.fetchedAtMs : 0,
-    limits,
-    plan: planFromTier(tier),
+  return parseUtilization(
+    cached?.utilization,
+    typeof cached?.fetchedAtMs === "number" ? cached.fetchedAtMs : 0,
     tier
-  };
+  );
 }

@@ -1,17 +1,17 @@
 // ─────────────────────────────────────────────────────────────
 // TokenMeter — header chip + popover modeled on Claude's official
-// "Usage" settings page (Current session + Weekly limits + Last
-// updated). Data is aggregated from Claude Code's per-workspace
-// session JSONL files when available (subscription mode); falls
-// back to a client-side chars/4 estimate otherwise.
+// "Usage" settings page.
 //
-// Limits are plan-specific (Pro / Max 5× / Max 20× / Team) because
-// Anthropic doesn't expose the user's real quota to clients. The
-// user picks their plan once; we keep sensible defaults for each.
-// When usage exceeds the configured plan limit (most often because
-// the limit is set too low for the user's tier), the row switches
-// to a soft "above plan default — adjust?" pill instead of locking
-// the bar at a misleading 100% red.
+// The panel says one of two things, and never mixes them. When the
+// account has reported its own utilization, every row is a real
+// percentage of a limit only Anthropic knows. When it has not, the
+// rows are token counts aggregated from Claude Code's session JSONL
+// files, with no percentage and no bar — because the denominator
+// would have to be invented, and an invented one read "over" on an
+// account that was at 22%.
+//
+// The context row is the exception that proves it: the CLI reports
+// both halves of that fraction, so it keeps its bar on either path.
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -42,6 +42,19 @@ import type {
   UsageUtilization,
   UtilizationLimit
 } from "../../lib/rpc";
+import {
+  serverRows,
+  chipView,
+  labelForLimit,
+  toneForLimit,
+  toneForPct,
+  pctOf,
+  barWidth,
+  formatCompact,
+  formatNum,
+  formatPctUsed,
+  type ToneKey
+} from "./usage-view";
 import s from "./TokenMeter.module.scss";
 
 interface TokenMeterProps {
@@ -49,130 +62,15 @@ interface TokenMeterProps {
   streaming: string;
 }
 
-// Plan presets — rough estimates of Anthropic's published per-plan caps.
-// Anthropic doesn't broadcast these to clients, so we ship the best
-// publicly-documented numbers and let the user override anything that
-// doesn't match their actual experience.
-type PlanKey = "pro" | "max5" | "max20" | "team" | "api" | "custom";
-
-interface PlanPreset {
-  name: string;
-  /** Tokens per 5-hour rolling window. 0 = no cap (API). */
-  session: number;
-  /** Cumulative tokens per week, across every model. 0 = no cap. */
-  weekAll: number;
-  /** Cumulative tokens per week, Sonnet only. 0 = no cap. */
-  weekSonnet: number;
-  /** Short note shown under the plan name in the picker. */
-  note: string;
-}
-
-const PLAN_PRESETS: Record<PlanKey, PlanPreset> = {
-  pro: {
-    name: "Pro",
-    session: 200_000,
-    weekAll: 10_000_000,
-    weekSonnet: 3_000_000,
-    note: "Personal tier"
-  },
-  max5: {
-    name: "Max 5×",
-    session: 1_500_000,
-    weekAll: 50_000_000,
-    weekSonnet: 20_000_000,
-    note: "5× the Pro quota"
-  },
-  max20: {
-    name: "Max 20×",
-    session: 6_000_000,
-    weekAll: 200_000_000,
-    weekSonnet: 80_000_000,
-    note: "20× the Pro quota"
-  },
-  team: {
-    name: "Team",
-    session: 10_000_000,
-    weekAll: 500_000_000,
-    weekSonnet: 200_000_000,
-    note: "Per-seat business plan"
-  },
-  api: {
-    name: "API",
-    session: 0,
-    weekAll: 0,
-    weekSonnet: 0,
-    note: "No subscription cap — billed per token"
-  },
-  custom: {
-    name: "Custom",
-    session: 200_000,
-    weekAll: 5_000_000,
-    weekSonnet: 2_000_000,
-    note: "Set your own limits"
-  }
+/** Display names for the tier the account reports. Nothing hangs off these any
+ *  more — the plan used to select a cap, and there are no caps here now. */
+const PLAN_NAMES: Record<string, string> = {
+  pro: "Pro",
+  max5: "Max 5×",
+  max20: "Max 20×",
+  team: "Team",
+  api: "API"
 };
-
-const PLAN_ORDER: PlanKey[] = ["pro", "max5", "max20", "team", "api", "custom"];
-
-const SETTINGS_KEY = "luno.tokenMeter.v3";
-
-interface MeterSettings {
-  plan: PlanKey;
-  /** Whether the plan above is the user's own choice. Until it is, the tier
-   *  read off the account wins: a picker left on its "Pro" default while the
-   *  account is Max 20× is a wrong answer, not a neutral one. */
-  planPicked?: boolean;
-  /** Custom overrides keyed by plan (so editing Pro limits doesn't bleed into Max). */
-  overrides: Partial<
-    Record<PlanKey, { session?: number; weekAll?: number; weekSonnet?: number }>
-  >;
-}
-
-function defaultSettings(): MeterSettings {
-  return { plan: "pro", overrides: {}, planPicked: false };
-}
-
-function readSettings(): MeterSettings {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return defaultSettings();
-    const parsed = JSON.parse(raw) as Partial<MeterSettings>;
-    return {
-      plan: PLAN_ORDER.includes(parsed.plan as PlanKey)
-        ? (parsed.plan as PlanKey)
-        : "pro",
-      planPicked: parsed.planPicked === true,
-      overrides:
-        parsed.overrides && typeof parsed.overrides === "object"
-          ? (parsed.overrides as MeterSettings["overrides"])
-          : {}
-    };
-  } catch {
-    return defaultSettings();
-  }
-}
-
-function writeSettings(next: MeterSettings): void {
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
-  } catch {
-    // ignore
-  }
-}
-
-function resolveLimits(cfg: MeterSettings): {
-  session: number;
-  weekAll: number;
-  weekSonnet: number;
-} {
-  const preset = PLAN_PRESETS[cfg.plan];
-  const ov = cfg.overrides[cfg.plan] ?? {};
-  return {
-    session: ov.session ?? preset.session,
-    weekAll: ov.weekAll ?? preset.weekAll,
-    weekSonnet: ov.weekSonnet ?? preset.weekSonnet
-  };
-}
 
 const EMPTY_TOTAL: UsageTotals = {
   inputTokens: 0,
@@ -209,8 +107,6 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
    * and a panel with its first column cut off.
    */
   const [anchorLeft, setAnchorLeft] = useState(0);
-  const [settings, setSettings] = useState<MeterSettings>(() => readSettings());
-  const [showPlanPicker, setShowPlanPicker] = useState(false);
   const [auth, setAuth] = useState<AuthoritativeUsage>({
     session: EMPTY_SESSION,
     today: EMPTY_TOTAL,
@@ -221,14 +117,14 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
     available: false
   });
   // The CLI's own quota verdicts: which window is binding and when it resets.
-  // Server truth for the *boundaries* — it reports no amounts, so the bars
-  // still come from the aggregated session files.
+  // Boundaries only — it reports no amounts and no percentages.
   const [limits, setLimits] = useState<RateLimitStatus[]>([]);
-  // The server's own verdict on the account, via the CLI's cache. Null until
-  // the host has read it — and on an API key, for good.
+  // The account's own figures, fetched by the host. Null until they arrive,
+  // and for good on an API key.
   const [util, setUtil] = useState<UsageUtilization | null>(null);
   // How full the model's context was on the last request. The CLI reports both
-  // halves, so this is the one row in this panel that is not an estimate.
+  // halves, so this is the one row here that can show a fraction we did not
+  // have to guess at.
   const [context, setContext] = useState<{
     used: number;
     window: number;
@@ -269,126 +165,24 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
     [events, streaming]
   );
 
-  // The account's tier, until the user says otherwise. `plan` in state stays
-  // whatever it was so the picker can still show a manual choice being made.
-  const effective: MeterSettings = useMemo(() => {
-    const detected = util?.plan;
-    if (settings.planPicked || !detected || detected === settings.plan) {
-      return settings;
-    }
-    return { ...settings, plan: detected };
-  }, [settings, util]);
-
-  const caps = resolveLimits(effective);
-  const preset = PLAN_PRESETS[effective.plan];
-
-  // The server's own figures, when the CLI has them. They outrank everything
-  // derived below: a percentage we compute needs a cap we guessed and a token
-  // count that matches Anthropic's accounting, and on a live account both were
-  // wrong at once — the meter read "over" where the server said 11%.
-  const server = useMemo(() => {
-    const rows = util?.limits ?? [];
-    const pick = (kind: string) => rows.find((r) => r.kind === kind);
-    const session = pick("session");
-    const weekly = pick("weekly_all");
-    const scoped = pick("weekly_scoped");
-    const worst = [session, weekly, scoped]
-      .filter((r): r is UtilizationLimit => Boolean(r))
-      .reduce<UtilizationLimit | undefined>(
-        (a, b) => (!a || b.percent > a.percent ? b : a),
-        undefined
-      );
-    return rows.length > 0 ? { session, weekly, scoped, worst } : null;
-  }, [util]);
+  const server = useMemo(() => serverRows(util?.limits), [util]);
 
   const sessionTotal = auth.available
     ? totalOf(auth.session.usage)
     : sessionEstimate.input + sessionEstimate.output;
-  const weekAllTotal = totalOf(auth.week);
-  const weekSonnetTotal = totalOf(auth.weekSonnet);
 
-  const sessionPct = pctOf(sessionTotal, caps.session);
-  const weekAllPct = pctOf(weekAllTotal, caps.weekAll);
-  const weekSonnetPct = pctOf(weekSonnetTotal, caps.weekSonnet);
-
-  // For the chip: show whichever bucket has the highest pressure. If the
-  // currently-active plan has no caps (API) just show session total.
-  const noCaps = effective.plan === "api";
-  const {
-    primaryLabel,
-    primaryShort,
-    primaryValue,
-    primaryDisplay,
-    primaryTone
-  } = pickChipPrimary(
-    noCaps,
-    sessionTotal,
-    sessionPct,
-    weekAllTotal,
-    weekAllPct,
-    weekSonnetTotal,
-    weekSonnetPct
-  );
-
-  // The chip repeats whatever the panel would say, so it has to take the same
-  // source. This is the line that had it reading "5H over" while the account
-  // sat at 11%.
-  const chip = server?.worst
-    ? {
-        label:
-          server.worst.kind === "session"
-            ? "5-hour limit"
-            : server.worst.scopeLabel
-              ? `Weekly (${server.worst.scopeLabel})`
-              : "Weekly (all models)",
-        short: server.worst.group === "session" ? "5H" : "WK",
-        value: server.worst.percent,
-        display: `${server.worst.percent}%`,
-        tone: (server.worst.severity === "critical" ||
-        server.worst.percent >= 90
-          ? "err"
-          : server.worst.severity === "warning" || server.worst.percent >= 75
-            ? "warn"
-            : "ok") as ToneKey
-      }
-    : {
-        label: primaryLabel,
-        short: primaryShort,
-        value: primaryValue,
-        display: primaryDisplay,
-        tone: primaryTone
-      };
-
-  const setLimitOverride = (
-    key: "session" | "weekAll" | "weekSonnet",
-    v: number
-  ) => {
-    setSettings((prev) => {
-      const ov = { ...(prev.overrides[prev.plan] ?? {}), [key]: v };
-      const next = {
-        ...prev,
-        overrides: { ...prev.overrides, [prev.plan]: ov }
-      };
-      writeSettings(next);
-      return next;
-    });
-  };
-
-  const setPlan = (p: PlanKey) => {
-    setSettings((prev) => {
-      // Picking one is what makes it the user's, and from then on the detected
-      // tier stops overriding it. Someone on a seat whose tier reads wrong has
-      // to be able to say so once and be believed.
-      const next = { ...prev, plan: p, planPicked: true };
-      writeSettings(next);
-      return next;
-    });
-    setShowPlanPicker(false);
-  };
+  const chip = chipView(server, sessionTotal);
+  const planName = util?.plan ? PLAN_NAMES[util.plan] : undefined;
 
   return (
     <div ref={rootRef} className={s.root}>
-      <Tooltip label={`${chip.label}: ${chip.display}`}>
+      <Tooltip
+        label={
+          chip.kind === "percent"
+            ? `${chip.label}: ${chip.percent}% used`
+            : `${chip.label}: ${formatNum(chip.tokens)} tokens counted here`
+        }
+      >
         <motion.button
           type="button"
           onClick={() => {
@@ -404,14 +198,14 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
           <Icon name="bolt" size={9} />
           <span className={s.chipShort}>{chip.short}</span>
           {/* Two branches rather than one counter with a switchable formatter:
-              the number means different things either side of `noCaps` — a
-              percentage against a cap, a raw token total without one — so a
-              single spring would count between the two when the plan changes.
-              Separate elements mount at their own value instead. */}
-          {noCaps && !server ? (
-            <CountUp value={chip.value} format={formatCompact} />
+              the number means different things either side of the account's
+              answer — a percentage it reported, a token total we counted — so
+              a single spring would count between the two when the source
+              changes. Separate elements mount at their own value instead. */}
+          {chip.kind === "percent" ? (
+            <ChipGauge pct={chip.percent} />
           ) : (
-            <ChipGauge pct={chip.value} />
+            <CountUp value={chip.tokens} format={formatCompact} />
           )}
         </motion.button>
       </Tooltip>
@@ -434,7 +228,6 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                 <SourceBadge
                   fromAccount={Boolean(server)}
                   available={auth.available}
-                  anchored={auth.session.authoritative === true}
                 />
               </div>
               <button
@@ -447,62 +240,23 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
               </button>
             </div>
 
-            {/* Plan row */}
-            <div className={s.planRow}>
-              <div className={s.planHead}>
-                <span className={s.planLabel}>Plan</span>
-                <button
-                  type="button"
-                  onClick={() => setShowPlanPicker((p) => !p)}
-                  className={s.planButton}
-                >
-                  <span>{preset.name}</span>
-                  <Icon name="chevronD" size={9} />
-                </button>
-              </div>
-              <div className={s.planNote}>{preset.note}</div>
-              <AnimatePresence>
-                {showPlanPicker && (
-                  <motion.div
-                    {...OVERLAY_PANEL}
-                    // Same inversion as the popover — it opens under the plan
-                    // button.
-                    initial={{ ...OVERLAY_PANEL.initial, y: -TRAVEL.lg }}
-                    exit={{ ...OVERLAY_PANEL.exit, y: -TRAVEL.sm }}
-                    className={s.planMenu}
+            {/* Plan row — a label, not a control. It used to pick which set of
+                invented caps to divide by; the account's own figures need no
+                such choice, and the fallback shows no fraction at all. */}
+            {planName && (
+              <div className={s.planRow}>
+                <div className={s.planHead}>
+                  <span className={s.planLabel}>Plan</span>
+                  <Tooltip
+                    label={`Reported by your account${util?.tier ? ` as ${util.tier}` : ""}`}
                   >
-                    {PLAN_ORDER.map((k) => {
-                      const p = PLAN_PRESETS[k];
-                      const active = k === effective.plan;
-                      return (
-                        <button
-                          key={k}
-                          type="button"
-                          onClick={() => setPlan(k)}
-                          className={[
-                            s.planItem,
-                            active ? s.planItemActive : ""
-                          ].join(" ")}
-                        >
-                          <span className={s.planItemHead}>
-                            <span className={s.planItemName}>{p.name}</span>
-                            {active && <Icon name="check" size={10} />}
-                          </span>
-                          <span className={s.planItemNote}>{p.note}</span>
-                        </button>
-                      );
-                    })}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+                    <span className={s.planValue}>{planName}</span>
+                  </Tooltip>
+                </div>
+              </div>
+            )}
 
             <div className={s.body}>
-              {/* The account's real 5-hour figure when the server has spoken,
-                  and only then our own arithmetic. The two are not variations
-                  on one number: the server reports a percentage of a quota it
-                  alone knows, while ours divides tokens we counted by a cap we
-                  guessed. */}
               {server?.session ? (
                 <ServerRow
                   limit={server.session}
@@ -510,11 +264,9 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                   tick={tick}
                 />
               ) : (
-                <UsageRow
+                <CountRow
                   label="Current session"
-                  pct={sessionPct}
-                  used={sessionTotal}
-                  limit={caps.session}
+                  tokens={sessionTotal}
                   sub={
                     auth.available && auth.session.resetsAt > 0
                       ? `Resets in ${formatCountdown(auth.session.resetsAt, tick)}${
@@ -524,9 +276,7 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                         ? "No activity in the last 5 hours"
                         : "Estimated · resets per Anthropic's 5-hour window"
                   }
-                  tooltip="Estimated: no figures from the server yet. Tokens counted here, against a cap taken from the plan above."
-                  noCap={caps.session === 0}
-                  onLimitChange={(v) => setLimitOverride("session", v)}
+                  tooltip="Tokens counted from this machine's session files. No percentage: Anthropic tells the account what its limit is, not this client."
                 />
               )}
 
@@ -535,19 +285,16 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                   why the agent forgot the start of the chat, a spent quota is
                   why it stopped answering. */}
               {context && (
-                <UsageRow
+                <GaugeRow
                   label="Context window"
-                  pct={pctOf(context.used, context.window)}
                   used={context.used}
-                  limit={context.window}
+                  window={context.window}
                   sub={
                     pctOf(context.used, context.window) >= 70
                       ? "Filling up — the CLI will fold earlier messages into a summary before it runs out"
                       : "Last request, reported by the CLI"
                   }
-                  tooltip="Exact, unlike the plan caps below: both numbers come from the CLI rather than being inferred."
-                  noCap={false}
-                  onLimitChange={() => undefined}
+                  tooltip="Both halves of this one come from the CLI, so the percentage is exact."
                 />
               )}
 
@@ -564,48 +311,36 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                     tick={tick}
                   />
                 ) : (
-                  <UsageRow
+                  <CountRow
                     label="All models"
-                    pct={weekAllPct}
-                    used={weekAllTotal}
-                    limit={caps.weekAll}
+                    tokens={totalOf(auth.week)}
                     sub={weeklyReset("seven_day", limits, tick)}
-                    noCap={caps.weekAll === 0}
-                    onLimitChange={(v) => setLimitOverride("weekAll", v)}
                   />
                 )}
 
-                {/* The server names the model this one is scoped to, so the row
-                    does too. It used to be hard-coded to Sonnet; on this
+                {/* The account names the model this one is scoped to, so the
+                    row does too. It used to be hard-coded to Sonnet; on this
                     account the scoped limit is Fable's. */}
                 {server?.scoped ? (
                   <ServerRow
                     limit={server.scoped}
-                    label={
-                      server.scoped.scopeLabel
-                        ? `${server.scoped.scopeLabel} only`
-                        : "Model-scoped"
-                    }
+                    label={labelForLimit(server.scoped)}
                     tick={tick}
                   />
                 ) : server ? null : (
-                  <UsageRow
+                  <CountRow
                     label="Sonnet only"
-                    pct={weekSonnetPct}
-                    used={weekSonnetTotal}
-                    limit={caps.weekSonnet}
+                    tokens={totalOf(auth.weekSonnet)}
                     sub={weeklyReset("seven_day_sonnet", limits, tick)}
-                    noCap={caps.weekSonnet === 0}
-                    onLimitChange={(v) => setLimitOverride("weekSonnet", v)}
                   />
                 )}
               </div>
 
               {/* Footer: last updated + refresh */}
               <div className={s.footer}>
-                {/* Whose clock this is matters: the server figures are only as
-                    fresh as the CLI's last refresh of them, and we do not get
-                    to ask on our own. */}
+                {/* Whose clock this is matters: the account's figures are only
+                    as fresh as the last fetch of them, and the endpoint is
+                    asked at most once every five minutes. */}
                 <span className={s.footerStamp}>
                   {server && util?.fetchedAt
                     ? `From your account: ${formatAgo(util.fetchedAt, tick)}`
@@ -624,15 +359,11 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                 </button>
               </div>
 
-              {/* The disclaimer that stood here apologised for guessing at the
-                  caps. With the account's own figures on screen there is
-                  nothing left to apologise for, and the one caveat that
-                  survives — how fresh they are — is in the footer above. */}
               {!server && (
                 <div className={s.disclaimer}>
-                  Estimated from this machine&apos;s session files against the
-                  plan above. Your account&apos;s own figures appear here once
-                  the CLI has fetched them — run a turn.
+                  Token counts from this machine&apos;s session files. Your
+                  account&apos;s own percentages are not available right now —
+                  Refresh asks for them again.
                 </div>
               )}
             </div>
@@ -730,12 +461,9 @@ function CountUp({
 function ChipGauge({ pct }: { pct: number }) {
   const count = useCountSpring(pct);
   const width = useTransform(count, barWidth);
-  // Past the cap the chip says "over" instead of a number. Read off the real
-  // value rather than the in-flight one, so it flips exactly where it used to.
-  const over = pct >= 100;
   return (
     <>
-      <CountText count={count} format={(n) => (over ? "over" : `${n}%`)} />
+      <CountText count={count} format={(n) => `${n}%`} />
       <span className={s.chipBar}>
         <motion.span className={s.chipBarFill} style={{ width }} />
       </span>
@@ -744,25 +472,23 @@ function ChipGauge({ pct }: { pct: number }) {
 }
 
 /**
- * Where the numbers came from. Two independent things have to be true to call
- * the panel authoritative — the amounts and the window they are counted over —
- * and claiming it on the amounts alone put the badge next to rows that said
- * "(estimated)" on every line.
+ * Where the numbers came from.
+ *
+ * Two states, because there are two vocabularies: the account's percentages,
+ * or tokens counted here. The badge used to claim "Authoritative" for the
+ * second one, which was true of the amounts and false of everything shown
+ * beside them.
  */
 function SourceBadge({
   fromAccount,
-  available,
-  anchored
+  available
 }: {
-  /** The figures on screen are the account's own. Nothing else in this panel
-   *  outranks that, so nothing else gets to label it. */
   fromAccount: boolean;
   available: boolean;
-  anchored: boolean;
 }) {
   if (fromAccount) {
     return (
-      <Tooltip label="Percentages reported by your Claude account, read from the CLI's cache of them">
+      <Tooltip label="Percentages reported by your Claude account">
         <span className={s.badgeOk}>
           <Icon name="check" size={8} />
           Your account
@@ -770,20 +496,10 @@ function SourceBadge({
       </Tooltip>
     );
   }
-  if (available && anchored) {
-    return (
-      <Tooltip label="Amounts from Claude Code's session files, window boundaries reported by the CLI itself">
-        <span className={s.badgeOk}>
-          <Icon name="check" size={8} />
-          Authoritative
-        </span>
-      </Tooltip>
-    );
-  }
   if (available) {
     return (
-      <Tooltip label="Amounts from Claude Code's session files, but no quota verdict seen yet — the windows they are counted over are inferred until a turn runs">
-        <span className={s.badgeMuted}>Partial</span>
+      <Tooltip label="Tokens counted from Claude Code's session files on this machine. Percentages need the account's own figures.">
+        <span className={s.badgeMuted}>Counted here</span>
       </Tooltip>
     );
   }
@@ -797,11 +513,9 @@ function SourceBadge({
 /**
  * One quota exactly as the account reports it.
  *
- * No token counts and no cap: the server gives a percentage of a limit it does
- * not disclose, and inventing a denominator to show alongside it would put the
- * old guesswork back on screen next to the truth. Severity is the server's too
- * — a second opinion computed from a threshold we chose is how the previous
- * meter ended up calling 11% "over".
+ * No token count and no cap: the account gives a percentage of a limit it does
+ * not disclose, and inventing a denominator to print beside it would put the
+ * old guesswork back on screen next to the truth.
  */
 function ServerRow({
   limit,
@@ -812,75 +526,104 @@ function ServerRow({
   label: string;
   tick: number;
 }) {
-  const tone: ToneKey =
-    limit.severity === "critical" || limit.percent >= 90
-      ? "err"
-      : limit.severity === "warning" || limit.percent >= 75
-        ? "warn"
-        : "ok";
+  const tone = toneForLimit(limit);
+  const pctCount = useCountSpring(limit.percent);
+  const fillWidth = useTransform(pctCount, barWidth);
   return (
     <div className={s.row}>
       <div className={s.rowHead}>
         <div className={s.rowLabelWrap}>
           <span className={s.rowLabel}>{label}</span>
         </div>
-        <span className={s.rowPct}>{limit.percent}% used</span>
-      </div>
-      <div className={s.bar}>
-        <div
-          className={`${s.barFill} ${TONE_CLASS[tone]}`}
-          style={{ width: `${Math.min(100, Math.max(0, limit.percent))}%` }}
+        <CountText
+          className={s.rowPct}
+          count={pctCount}
+          format={formatPctUsed}
         />
       </div>
-      <div className={s.rowFoot}>
-        <span>
-          {hasReset(limit.resetsAt, tick)
-            ? "Resets shortly"
-            : `Resets in ${formatCountdown(limit.resetsAt, tick)}`}
+      <div className={s.bar}>
+        <motion.div
+          className={`${s.barFill} ${TONE_CLASS[tone]}`}
+          style={{ width: fillWidth }}
+        />
+      </div>
+      {/* A scoped limit the account has never touched carries no reset time at
+          all. Printing one from a zero said "resets shortly", which is a claim
+          about a window nobody mentioned. */}
+      {limit.resetsAt > 0 && (
+        <div className={s.rowFoot}>
+          <span>
+            {hasReset(limit.resetsAt, tick)
+              ? "Resets shortly"
+              : `Resets in ${formatCountdown(limit.resetsAt, tick)}`}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A row with an amount and no fraction — everything the fallback path is
+ * entitled to say.
+ */
+function CountRow({
+  label,
+  tokens,
+  sub,
+  tooltip
+}: {
+  label: string;
+  tokens: number;
+  sub: string;
+  tooltip?: string;
+}) {
+  const count = useCountSpring(tokens);
+  return (
+    <div className={s.row}>
+      <div className={s.rowHead}>
+        <div className={s.rowLabelWrap}>
+          <span className={s.rowLabel}>{label}</span>
+          {tooltip && (
+            <Tooltip label={tooltip}>
+              <span className={s.rowInfo}>
+                <Icon name="info" size={12} />
+              </span>
+            </Tooltip>
+          )}
+        </div>
+        <span className={s.rowAmount}>
+          <CountText count={count} format={formatNum} />
+          <span className={s.rowUnit}>tokens</span>
         </span>
+      </div>
+      <div className={s.rowFoot}>
+        <span>{sub}</span>
       </div>
     </div>
   );
 }
 
-function UsageRow({
+/** A fraction both halves of which are known. Only the context window is. */
+function GaugeRow({
   label,
-  pct,
   used,
-  limit,
+  window: windowSize,
   sub,
-  tooltip,
-  noCap,
-  onLimitChange
+  tooltip
 }: {
   label: string;
-  pct: number;
   used: number;
-  limit: number;
+  window: number;
   sub: string;
   tooltip?: string;
-  noCap: boolean;
-  onLimitChange: (v: number) => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(String(limit));
-  useEffect(() => {
-    if (!editing) setDraft(String(limit));
-  }, [limit, editing]);
-
-  const tone = toneFor(pct);
-  const overLimit = !noCap && pct >= 100;
+  const pct = pctOf(used, windowSize);
   // The bar and the "% used" label are one number, so they hang off one
-  // spring. `used` and the limit move independently of both.
+  // spring. `used` moves independently of both.
   const pctCount = useCountSpring(pct);
   const usedCount = useCountSpring(used);
-  const limitCount = useCountSpring(limit);
   const fillWidth = useTransform(pctCount, barWidth);
-  const commit = () => {
-    setEditing(false);
-    const parsed = parseLimit(draft);
-    if (parsed && parsed !== limit) onLimitChange(parsed);
-  };
 
   return (
     <div className={s.row}>
@@ -895,38 +638,22 @@ function UsageRow({
             </Tooltip>
           )}
         </div>
-        {noCap ? (
-          <span className={s.rowNoCap}>no cap</span>
-        ) : overLimit ? (
-          <Tooltip label="Your usage is above the limit for this plan — pick the right plan above, or click the limit to set a custom value">
-            <span className={s.rowOver}>
-              <Icon name="zap" size={8} />
-              Above plan default
-            </span>
-          </Tooltip>
-        ) : (
-          <CountText
-            className={s.rowPct}
-            count={pctCount}
-            format={formatPctUsed}
-          />
-        )}
+        <CountText
+          className={s.rowPct}
+          count={pctCount}
+          format={formatPctUsed}
+        />
       </div>
-      {!noCap && (
-        <div className={s.bar}>
-          <motion.div
-            className={`${s.barFill} ${TONE_CLASS[tone]}`}
-            // Bound to the same spring as the percentage above it instead of
-            // running its own transition: two animations of one number drift
-            // apart, and a bar disagreeing with its own label is the one thing
-            // a meter must not do. This costs the sweep-from-zero the bar used
-            // to play when the popover opened — sharing the value means that
-            // sweep would drag the number up from zero with it.
-            style={{ width: fillWidth }}
-          />
-          {overLimit && <div className={s.barOver} aria-hidden />}
-        </div>
-      )}
+      <div className={s.bar}>
+        <motion.div
+          // Bound to the same spring as the percentage above it instead of
+          // running its own transition: two animations of one number drift
+          // apart, and a bar disagreeing with its own label is the one thing a
+          // meter must not do.
+          className={`${s.barFill} ${TONE_CLASS[toneForPct(pct)]}`}
+          style={{ width: fillWidth }}
+        />
+      </div>
       <div className={s.rowFoot}>
         <span>{sub}</span>
         <span className={s.rowNums}>
@@ -935,38 +662,8 @@ function UsageRow({
             count={usedCount}
             format={formatNum}
           />
-          {!noCap && (
-            <>
-              <span className={s.rowSlash}>/</span>
-              {editing ? (
-                <input
-                  type="text"
-                  autoFocus
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onBlur={commit}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commit();
-                    else if (e.key === "Escape") {
-                      setDraft(String(limit));
-                      setEditing(false);
-                    }
-                  }}
-                  className={s.limitInput}
-                />
-              ) : (
-                <Tooltip label="Click to set a custom limit for this plan">
-                  <button
-                    type="button"
-                    onClick={() => setEditing(true)}
-                    className={s.limitButton}
-                  >
-                    <CountText count={limitCount} format={formatCompact} />
-                  </button>
-                </Tooltip>
-              )}
-            </>
-          )}
+          <span className={s.rowSlash}>/</span>
+          {formatCompact(windowSize)}
         </span>
       </div>
     </div>
@@ -975,10 +672,12 @@ function UsageRow({
 
 // ─────────────────── Helpers ───────────────────
 
-function pctOf(used: number, limit: number): number {
-  if (limit <= 0) return 0;
-  return (used / limit) * 100;
-}
+const TONE_CLASS: Record<ToneKey, string> = {
+  ok: s.toneOk,
+  warn: s.toneWarn,
+  err: s.toneErr,
+  accent: s.toneAccent
+};
 
 function totalOf(t: UsageTotals): number {
   // Includes cache-created tokens (they cost) but NOT cache-read (cheap).
@@ -999,86 +698,6 @@ function estimateSession(
   }
   output += Math.ceil(streaming.length / 4);
   return { input, output };
-}
-
-/** Which `.tone*` class paints the chip / bar. The colors live in the module. */
-type ToneKey = "ok" | "warn" | "err" | "accent";
-
-const TONE_CLASS: Record<ToneKey, string> = {
-  ok: s.toneOk,
-  warn: s.toneWarn,
-  err: s.toneErr,
-  accent: s.toneAccent
-};
-
-function toneFor(pct: number): ToneKey {
-  if (pct < 50) return "ok";
-  if (pct < 80) return "warn";
-  if (pct < 100) return "err";
-  // Over-limit: warm amber, not alarming red, since we may just have the plan wrong.
-  return "warn";
-}
-
-/** Bar fills read the same spring as their number; only the display is clamped. */
-function barWidth(pct: number): string {
-  return `${Math.min(100, Math.max(0, pct))}%`;
-}
-
-function pickChipPrimary(
-  noCaps: boolean,
-  sessionUsed: number,
-  sessionPct: number,
-  weekAllUsed: number,
-  weekAllPct: number,
-  weekSonnetUsed: number,
-  weekSonnetPct: number
-): {
-  primaryLabel: string;
-  primaryShort: string;
-  /** What the chip counts to: a percentage, or a token total on an uncapped plan. */
-  primaryValue: number;
-  /** Settled form of the same number — the tooltip has no reason to animate. */
-  primaryDisplay: string;
-  primaryTone: ToneKey;
-} {
-  if (noCaps) {
-    return {
-      primaryLabel: "Current session",
-      primaryShort: "5H",
-      primaryValue: sessionUsed,
-      primaryDisplay: formatCompact(sessionUsed),
-      primaryTone: "accent"
-    };
-  }
-  const candidates = [
-    {
-      label: "Current session",
-      short: "5H",
-      used: sessionUsed,
-      pct: sessionPct
-    },
-    {
-      label: "Weekly (all models)",
-      short: "WK",
-      used: weekAllUsed,
-      pct: weekAllPct
-    },
-    {
-      label: "Weekly (Sonnet)",
-      short: "SON",
-      used: weekSonnetUsed,
-      pct: weekSonnetPct
-    }
-  ];
-  candidates.sort((a, b) => b.pct - a.pct);
-  const top = candidates[0];
-  return {
-    primaryLabel: top.label,
-    primaryShort: top.short,
-    primaryValue: top.pct,
-    primaryDisplay: top.pct >= 100 ? "over" : `${Math.round(top.pct)}%`,
-    primaryTone: toneFor(top.pct)
-  };
 }
 
 /** Whether the window has already rolled over. A function rather than an
@@ -1130,40 +749,4 @@ function weeklyReset(
   d.setDate(d.getDate() + days);
   const day = d.toLocaleDateString(undefined, { weekday: "short" });
   return `Resets ${day} 12:00 AM (estimated)`;
-}
-
-function formatCompact(n: number): string {
-  if (n < 1000) return String(n);
-  if (n < 1_000_000) {
-    const v = n / 1000;
-    return v >= 10
-      ? Math.round(v) + "k"
-      : v.toFixed(1).replace(/\.0$/, "") + "k";
-  }
-  const v = n / 1_000_000;
-  return v >= 10
-    ? Math.round(v) + "M"
-    : v.toFixed(2).replace(/\.?0+$/, "") + "M";
-}
-
-function formatNum(n: number): string {
-  return n.toLocaleString("en-US");
-}
-
-// The suffixes travel with the number rather than sitting in a sibling node:
-// a count writes its own textContent, so anything it must not overwrite has to
-// be outside it — and anything it should keep has to be inside.
-function formatPctUsed(n: number): string {
-  return `${n}% used`;
-}
-
-function parseLimit(raw: string): number | null {
-  const trimmed = raw.trim().toLowerCase().replace(/[, _]/g, "");
-  if (!trimmed) return null;
-  const m = trimmed.match(/^(\d+(?:\.\d+)?)([km]?)$/i);
-  if (!m) return null;
-  const base = parseFloat(m[1]);
-  if (!Number.isFinite(base) || base <= 0) return null;
-  const mult = m[2] === "k" ? 1000 : m[2] === "m" ? 1_000_000 : 1;
-  return Math.round(base * mult);
 }

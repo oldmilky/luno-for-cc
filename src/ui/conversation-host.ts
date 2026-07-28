@@ -13,6 +13,7 @@ import { DeltaQueue } from "../core/delta-queue.js";
 import {
   CompactionInfo,
   isTerminalTaskStatus,
+  isWorkflowTask,
   PermissionMode,
   PermissionBehavior,
   PermissionRequestPayload,
@@ -56,12 +57,7 @@ import {
   SessionStore,
   type ConversationSettings
 } from "./domains/session-store.js";
-import {
-  confirmBypassMode,
-  isUngatedMode,
-  warnModeBlockedByRemoteControl,
-  warnRemoteControlBlockedByMode
-} from "./domains/permission-modes.js";
+import { confirmBypassMode } from "./domains/permission-modes.js";
 import { nextCycleMode } from "../core/permission-cycle.js";
 import { AuthManager } from "./domains/auth.js";
 import { PlanHandlers } from "./domains/plan-handlers.js";
@@ -314,6 +310,10 @@ export class ConversationHost {
    * dead rather than slow, and a card left spinning would claim otherwise.
    */
   private readonly liveTasks = new Map<string, SubagentUpdate>();
+  /** Text the model produced with no turn running — see the `text` branch in
+   *  `onOutOfTurn`. Buffered because it arrives as a stream of fragments and
+   *  only reads as a message once. */
+  private outOfTurnText = "";
   /** Enough of the live turn to rebuild it on a surface that was showing
    *  another conversation while it happened. */
   private busy = false;
@@ -921,33 +921,10 @@ export class ConversationHost {
   /** Shift+Tab. Walks the cycle for this conversation only — the other chats
    *  keep the posture they were left in. */
   async cycleMode(): Promise<void> {
-    await this.changePermissionMode(
+    await this.applySetting(
+      "permissionMode",
       nextCycleMode(this.settings.permissionMode)
     );
-  }
-
-  /**
-   * The one way the permission mode changes.
-   *
-   * Every path goes through here for the same reason the Bypass confirmation
-   * does: the picker, Shift+Tab and a plan rewind all reach the mode, and a
-   * check on one of them is a check on none. An ungated mode plus Remote
-   * Control means a device that is not in the room can make the agent write
-   * files with nobody approving it, so the two are kept apart — and the bridge
-   * wins, because it is the thing someone is actively using from elsewhere.
-   *
-   * @returns whether the mode is now what was asked for.
-   */
-  private async changePermissionMode(mode: PermissionMode): Promise<boolean> {
-    if (this.remoteControl.state !== "off" && isUngatedMode(mode)) {
-      warnModeBlockedByRemoteControl(mode);
-      // The picker moved to the mode it could not have; put it back on the one
-      // that is actually in force.
-      await this.auth.broadcast();
-      return false;
-    }
-    await this.applySetting("permissionMode", mode);
-    return true;
   }
 
   /**
@@ -1229,7 +1206,7 @@ export class ConversationHost {
         await this.auth.broadcast();
         return;
       }
-      await this.changePermissionMode(mode as PermissionMode);
+      await this.applySetting("permissionMode", mode as PermissionMode);
     },
     setEffort: async (m) => {
       const effort = str(m, "effort");
@@ -1256,14 +1233,6 @@ export class ConversationHost {
       const enabled = bool(m, "enabled") ?? false;
       if (!enabled) {
         await this.remoteProvider?.disableRemoteControl();
-        this.publishRemoteControl({ state: "off" });
-        return;
-      }
-      // The same rule as changePermissionMode, from the other side. Checked
-      // before anything is published: a bridge that was never going to start
-      // must not flash "ready" on the way to being refused.
-      if (isUngatedMode(this.settings.permissionMode)) {
-        warnRemoteControlBlockedByMode(this.settings.permissionMode);
         this.publishRemoteControl({ state: "off" });
         return;
       }
@@ -1427,7 +1396,8 @@ export class ConversationHost {
     },
 
     // ── Usage ──────────────────────────────────────────────────
-    refreshUsage: () => broadcastUsage(this.post, this.shared.rateLimits),
+    refreshUsage: () =>
+      broadcastUsage(this.post, this.shared.rateLimits, { force: true }),
 
     // ── Conventions ────────────────────────────────────────────
     dismissConventionsBanner: async () => {
@@ -1778,9 +1748,7 @@ export class ConversationHost {
         delete meta.proceeded;
         delete meta.prePermissionMode;
         if (prevMode && this.settings.permissionMode !== prevMode) {
-          // Refusable like any other change: the mode this plan was drafted
-          // under may be one the bridge does not allow back.
-          await this.changePermissionMode(prevMode);
+          await this.applySetting("permissionMode", prevMode);
         }
         this.scheduleSave();
       }
@@ -1999,14 +1967,31 @@ export class ConversationHost {
           this.onSubagentUpdate(d.task);
           return;
         }
-        // Nothing is driving the session and it just ended, so no late report
-        // is coming for anything still open — close those cards rather than
-        // leave them spinning. Guarded on there being no remote turn, because
-        // `done` is also how one of those ends: swallowing it there would hang
-        // the phone's turn, and sweeping would bury agents it had just
-        // launched.
+        // What the model says once a background task answers. The CLI queues a
+        // `<task-notification>` and opens a whole extra turn to report it, and
+        // that turn arrives here — after the panel's own turn has ended and
+        // with no remote turn to belong to. Falling through dropped it — the
+        // agent finished, the card closed, and the chat said nothing about what
+        // came back, which is the only account the user ever gets.
+        if (d.type === "text" && d.text && !this.remoteTurn) {
+          this.outOfTurnText += d.text;
+          return;
+        }
+        // The process is gone, so no late report is coming for anything still
+        // open — close those cards rather than leave them spinning. Guarded on
+        // there being no remote turn, because `done` is also how one of those
+        // ends: swallowing it there would hang the phone's turn.
+        //
+        // `sessionEnded` is what makes this specific. A session process pushes
+        // `done` at every `result`, including the extra turn the CLI opens to
+        // report a task that just finished — and sweeping on that one filed
+        // every *other* agent still running as `interrupted`, seconds before it
+        // answered. Measured on a live run: one agent was closed yellow at
+        // 38.6s and reopened green at 107.6s, leaving two closing rows on the
+        // timeline for one agent.
         if (d.type === "done" && !this.remoteTurn) {
-          this.sweepLiveTasks();
+          this.flushOutOfTurnText();
+          if (d.sessionEnded) this.sweepLiveTasks();
           return;
         }
         // Everything else belongs to that turn — or to no turn at all, in which
@@ -2147,6 +2132,7 @@ export class ConversationHost {
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        logError(`[luno] turn failed before the stream opened: ${msg}`);
         this.post({ type: "error", message: msg });
         void mcpConfig?.cleanup();
         return;
@@ -2440,6 +2426,23 @@ export class ConversationHost {
    * running and will report later through `onOutOfTurn`; sweeping would put
    * "interrupted" on a card that is about to answer.
    */
+  /**
+   * Put the model's out-of-turn report on the timeline, if it said anything.
+   *
+   * Written as an ordinary assistant row rather than through the streaming
+   * path: there is no turn for the panel to attach it to, and a stored session
+   * has to show it tomorrow exactly as it read today.
+   */
+  private flushOutOfTurnText(): void {
+    const text = this.outOfTurnText.trim();
+    this.outOfTurnText = "";
+    if (!text) return;
+    this.session.emit({ kind: "assistant", title: "Assistant", body: text });
+    this.scheduleSave();
+    if (!this.visible) this.finishedWhileHidden = true;
+    this.refreshSurface();
+  }
+
   private sweepLiveTasks(): void {
     if (this.liveTasks.size === 0) return;
     const open = [...this.liveTasks.values()];
@@ -2523,8 +2526,15 @@ function compactionSummary(info: CompactionInfo | undefined): string {
 /**
  * What the card is called. The agent type is the useful half — "Explore",
  * "code-reviewer" — and it is what the user recognises from `.claude/agents/`.
+ *
+ * A workflow has no agent type to name, so it is called by its script's
+ * `meta.name` instead. Without the branch every workflow rendered as the bare
+ * word "Agent", which is both wrong and indistinguishable from the next one.
  */
 function subagentTitle(task: SubagentUpdate): string {
+  if (isWorkflowTask(task.taskType)) {
+    return task.workflowName ? `Workflow: ${task.workflowName}` : "Workflow";
+  }
   return task.subagentType ? `Agent: ${task.subagentType}` : "Agent";
 }
 

@@ -23,6 +23,15 @@ const NO_TOKENS = {
   messages: 0
 };
 
+/** Enough of a count that the fallback rows have something to show. */
+const SOME_TOKENS = {
+  inputTokens: 412_900,
+  outputTokens: 96_400,
+  cacheReadTokens: 5_100_000,
+  cacheCreatedTokens: 7_201_560,
+  messages: 84
+};
+
 /**
  * What the fake host replies with, keyed by the message it is answering.
  *
@@ -113,21 +122,59 @@ export function harnessReplies(
     },
     requestHistory: { type: "historyList", sessions: [] },
     requestConnectors: { type: "connectorsList", connectors: [] },
+    // Carries `utilization`, because that is what a logged-in account looks
+    // like: the panel speaks in the server's percentages. Drop the field to
+    // see the other half — token counts and no fraction, which is what an API
+    // key or an unreachable endpoint gets.
     refreshUsage: {
       type: "claudeCodeUsage",
       session: {
-        usage: NO_TOKENS,
+        usage: SOME_TOKENS,
         startedAt: now - HOUR,
         resetsAt: now + 4 * HOUR,
-        authoritative: false
+        authoritative: true
       },
-      today: NO_TOKENS,
-      week: NO_TOKENS,
+      today: SOME_TOKENS,
+      week: SOME_TOKENS,
       weekSonnet: NO_TOKENS,
-      total: NO_TOKENS,
+      total: SOME_TOKENS,
       generatedAt: now,
       available: true,
-      limits: []
+      limits: [],
+      utilization: {
+        fetchedAt: now - 90_000,
+        plan: "max20",
+        tier: "default_claude_max_20x",
+        limits: [
+          {
+            kind: "session",
+            group: "session",
+            percent: 22,
+            severity: "normal",
+            resetsAt: now + 1.6 * HOUR,
+            isActive: true
+          },
+          {
+            kind: "weekly_all",
+            group: "weekly",
+            percent: 4,
+            severity: "normal",
+            resetsAt: now + 129 * HOUR,
+            isActive: false
+          },
+          // No reset time, exactly as the account reports a scoped limit it has
+          // not touched. The row must not invent one.
+          {
+            kind: "weekly_scoped",
+            group: "weekly",
+            percent: 0,
+            severity: "normal",
+            resetsAt: 0,
+            scopeLabel: "Fable",
+            isActive: false
+          }
+        ]
+      }
     }
   };
 }

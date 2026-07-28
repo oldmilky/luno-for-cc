@@ -1607,6 +1607,131 @@ describe("subagents", () => {
   });
 });
 
+// A `Workflow` call reuses the whole `task_*` protocol and means something
+// different by half of it. Fixtures below are verbatim from a run driven
+// through 2.1.219: one workflow, one phase, one echo agent.
+describe("workflows on the task protocol", () => {
+  const WF = "whzxe4yej";
+  const TOOL = "toolu_01ACfUJbGhNhVxkuXQ9qCTVy";
+  const SCRIPT =
+    "export const meta = {\n  name: 'probe',\n}\nphase('One')\n" +
+    "const a = await agent('Reply with exactly the word OK and nothing else.')";
+
+  it("names the workflow rather than borrowing an agent's shape", () => {
+    const out = makeProcessor()({
+      type: "system",
+      subtype: "task_started",
+      task_id: WF,
+      tool_use_id: TOOL,
+      description: "probe run for a stream audit",
+      task_type: "local_workflow",
+      workflow_name: "probe",
+      prompt: SCRIPT
+    } as never);
+
+    expect(out[0].task).toMatchObject({
+      phase: "started",
+      taskId: WF,
+      taskType: "local_workflow",
+      workflowName: "probe",
+      description: "probe run for a stream audit"
+    });
+    // There is no agent type on a workflow, and inventing one is what made
+    // every workflow render as the bare word "Agent".
+    expect(out[0].task!.subagentType).toBeUndefined();
+  });
+
+  // `last_tool_name` on a workflow holds the *agent's label*, not a tool that
+  // ran. Rendered in the last-tool slot it invents a tool nobody called, and
+  // the same string is already the activity.
+  it("does not report an agent label as the last tool run", () => {
+    const out = makeProcessor()({
+      type: "system",
+      subtype: "task_progress",
+      task_id: WF,
+      tool_use_id: TOOL,
+      task_type: "local_workflow",
+      description: "One: Reply with exactly the word OK and nothing else.",
+      last_tool_name: "Reply with exactly the word OK and nothing else.",
+      usage: { total_tokens: 19_210, tool_uses: 0, duration_ms: 2_324 }
+    } as never);
+
+    expect(out[0].task).toMatchObject({
+      phase: "progress",
+      taskType: "local_workflow",
+      activity: "One: Reply with exactly the word OK and nothing else."
+    });
+    expect(out[0].task!.lastToolName).toBeUndefined();
+  });
+
+  // The phase-and-agent breakdown the CLI has already computed. It is the only
+  // answer to "what is my twenty-agent workflow doing right now".
+  it("carries the workflow's own progress through", () => {
+    const out = makeProcessor()({
+      type: "system",
+      subtype: "task_progress",
+      task_id: WF,
+      task_type: "local_workflow",
+      description: "One: …",
+      workflow_progress: [
+        { type: "workflow_phase", index: 1, title: "One" },
+        {
+          type: "workflow_agent",
+          index: 1,
+          label: "Reply with exactly the word OK and nothing else.",
+          phaseIndex: 1,
+          phaseTitle: "One",
+          agentId: "a0a43870db569a0b1",
+          state: "done",
+          tokens: 19_210,
+          durationMs: 5_580,
+          resultPreview: "OK"
+        }
+      ]
+    } as never);
+
+    expect(out[0].task!.workflowProgress).toHaveLength(2);
+    expect(out[0].task!.workflowProgress![1]).toMatchObject({
+      state: "done",
+      resultPreview: "OK"
+    });
+  });
+
+  // A subagent has no `workflow_progress` and must not grow one — the field is
+  // what the card branches on to decide it is looking at a workflow.
+  it("leaves a subagent's update without workflow progress", () => {
+    const out = makeProcessor()({
+      type: "system",
+      subtype: "task_progress",
+      task_id: "ad0748687a4aac2a8",
+      task_type: "local_agent",
+      description: "Searching",
+      last_tool_name: "Grep",
+      workflow_progress: [{ type: "workflow_phase", index: 1, title: "One" }]
+    } as never);
+
+    expect(out[0].task!.workflowProgress).toBeUndefined();
+    expect(out[0].task!.lastToolName).toBe("Grep");
+  });
+});
+
+// The command list is republished when it changes — installing a plugin, or
+// writing a new file under `.claude/commands`. Read from `init` alone, a
+// command added mid-session never reached the popover.
+describe("commands_changed", () => {
+  it("republishes the slash commands the CLI now knows", () => {
+    const seen: string[][] = [];
+    const processor = makeProcessor(undefined, (names) => seen.push(names));
+    processor({
+      type: "system",
+      subtype: "commands_changed",
+      commands: ["/audit", "/browser", "/ship"]
+    } as never);
+
+    expect(seen).toEqual([["/audit", "/browser", "/ship"]]);
+  });
+});
+
 // When a backgrounded agent answers, the model picks the conversation back up
 // in a *second* assistant message. Nothing flushes the text buffer between the
 // two, so without a break they render as one run-on sentence — seen in 0.22.5

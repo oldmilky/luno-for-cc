@@ -48,7 +48,7 @@ import { SkillSuggestion } from "./SkillSuggestion";
 import { ToolGroupCard, ToolGroupItem } from "./ToolGroupCard";
 import { SubagentCard } from "./SubagentCard";
 import {
-  AGENT_TOOL_NAMES,
+  TASK_TOOL_NAMES,
   foldSubagents,
   type FoldedSubagents
 } from "./subagent-state";
@@ -673,6 +673,7 @@ type TurnBlock =
   | { kind: "plan"; revisionId: string }
   | { kind: "compact"; text: string }
   | { kind: "remoteApproval"; tool: string }
+  | { kind: "error"; text: string }
   | { kind: "subagent"; taskId: string };
 
 /**
@@ -885,7 +886,7 @@ function groupEvents(events: TimelineEvent[]): GroupingResult {
       // parse to recover anything, and a card silently reverting to a chip is
       // the kind of miss nothing else would catch.
       const meta = e.meta as { id?: string; name?: string } | undefined;
-      if (AGENT_TOOL_NAMES.has(meta?.name ?? name)) {
+      if (TASK_TOOL_NAMES.has(meta?.name ?? name)) {
         const tid = meta?.id;
         const taskId = tid ? subagents.taskIdByToolUse.get(tid) : undefined;
         if (taskId) {
@@ -946,6 +947,14 @@ function groupEvents(events: TimelineEvent[]): GroupingResult {
     // same reason compaction does: nothing else explains it later.
     if (e.kind === "approval") {
       turn.blocks.push({ kind: "remoteApproval", tool: e.body ?? "" });
+      continue;
+    }
+
+    // The banner carrying this text is cleared on the next `turnStart`, so
+    // without a block of its own the only account of a failed turn is gone the
+    // moment the user retries — which is exactly when they go looking for it.
+    if (e.kind === "error") {
+      turn.blocks.push({ kind: "error", text: e.body ?? e.title });
       continue;
     }
 
@@ -1105,6 +1114,16 @@ function renderTurnBlock(
             ? `${b.tool} · answered on another device`
             : "Answered on another device"}
         </span>
+      </div>
+    );
+  }
+  if (b.kind === "error") {
+    return (
+      <div key={`e-${i}`} className={s.errorBlock}>
+        <span className={s.errorIcon} aria-hidden>
+          <Icon name="x" size={11} />
+        </span>
+        <span>{b.text}</span>
       </div>
     );
   }

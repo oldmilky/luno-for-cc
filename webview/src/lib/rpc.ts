@@ -61,9 +61,33 @@ export interface TimelineEvent {
  * close the card and survive a reload, while `subagentProgress` messages carry
  * what the agent is doing mid-run and are deliberately not persisted.
  */
+/** Mirrors `WorkflowProgressEntry` in src/core/types.ts. */
+export interface WorkflowProgressEntry {
+  type: string;
+  index?: number;
+  title?: string;
+  label?: string;
+  promptPreview?: string;
+  phaseIndex?: number;
+  phaseTitle?: string;
+  agentId?: string;
+  model?: string;
+  state?: string;
+  attempt?: number;
+  tokens?: number;
+  toolCalls?: number;
+  durationMs?: number;
+  resultPreview?: string;
+}
+
 export interface SubagentTaskView {
   taskId: string;
   toolUseId?: string;
+  /** `local_agent`, `local_workflow`, `remote_agent` — absent on an older CLI,
+   *  which read as a subagent because that was the only kind. */
+  taskType?: string;
+  /** The workflow script's `meta.name`. `local_workflow` only. */
+  workflowName?: string;
   subagentType?: string;
   /** What the agent was asked for — the task label, fixed for the whole run. */
   description?: string;
@@ -78,6 +102,8 @@ export interface SubagentTaskView {
   lastToolName?: string;
   summary?: string;
   outputFile?: string;
+  /** Live phase-and-agent breakdown. `local_workflow` only. */
+  workflowProgress?: WorkflowProgressEntry[];
 }
 
 // ── Plan-mode payloads (mirror src/core/types.ts) ─────────────

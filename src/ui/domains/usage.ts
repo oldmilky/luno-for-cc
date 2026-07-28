@@ -8,9 +8,18 @@
 
 import * as vscode from "vscode";
 import { aggregateClaudeCodeUsage } from "../../services/claude-code-usage.js";
-import { readUsageUtilization } from "../../services/usage-utilization.js";
+import {
+  parseUtilization,
+  readUsageUtilization
+} from "../../services/usage-utilization.js";
+import { createOAuthUsageReader } from "../../services/oauth-usage.js";
 import type { RateLimitTracker } from "../../services/rate-limit.js";
 import type { Post } from "../messages.js";
+
+/** One reader for the whole extension: the quota is per account, and its cache
+ *  is what keeps a per-conversation poll from becoming per-conversation
+ *  traffic. */
+const accountUsage = createOAuthUsageReader();
 
 /**
  * Read the CLI's own usage records for this workspace and publish them.
@@ -22,10 +31,14 @@ import type { Post } from "../messages.js";
  * `rateLimits` supplies the 5-hour window boundary the CLI reported. Without
  * it the aggregation infers one, and the inference is wrong by hours whenever
  * a window boundary sits inside the range it scans.
+ *
+ * `force` comes from the Refresh button and reaches only the account endpoint;
+ * everything else here is a local read that was never throttled.
  */
 export async function broadcastUsage(
   post: Post,
-  rateLimits?: RateLimitTracker
+  rateLimits?: RateLimitTracker,
+  options: { force?: boolean } = {}
 ): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) return;
@@ -34,12 +47,20 @@ export async function broadcastUsage(
     // Read on every broadcast rather than caching: the CLI rewrites the file
     // when it refreshes the account's figures, and a meter holding the copy it
     // read at startup is exactly the stale-number problem this replaced.
-    const [agg, utilization] = await Promise.all([
+    const [agg, cached, live] = await Promise.all([
       aggregateClaudeCodeUsage(root, new Date(), {
         sessionWindowStart: rateLimits?.sessionWindowStart()
       }),
-      readUsageUtilization()
+      readUsageUtilization(),
+      accountUsage.read(options.force)
     ]);
+
+    // The live answer outranks the cached one — it is the same payload, hours
+    // fresher. The tier only ever comes from the config file, so it is carried
+    // across rather than lost with it.
+    const utilization =
+      (live && parseUtilization(live.payload, live.fetchedAt, cached?.tier)) ||
+      cached;
     post({
       type: "claudeCodeUsage",
       session: agg.session,

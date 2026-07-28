@@ -22,6 +22,7 @@ import { ContentBlock, StreamDelta } from "./types.js";
 import { Session } from "./session.js";
 import { ChatProvider, ProviderRequest } from "../providers/base.js";
 import { PlanInterceptor } from "./plan-intercept.js";
+import { error as logError } from "../services/logger.js";
 
 export interface OrchestratorOpts {
   provider: ChatProvider;
@@ -179,6 +180,10 @@ export class Orchestrator {
           break;
         case "error":
           flushText();
+          // The only copy that outlives the session: the chat banner is cleared
+          // on the next turn, and a stored timeline is not what a user reads out
+          // over a bug report.
+          logError(`[luno] provider error: ${delta.error ?? "(no detail)"}`);
           this.session.emit({
             kind: "error",
             title: "Provider error",

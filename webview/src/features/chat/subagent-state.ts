@@ -7,11 +7,23 @@
 // renderer, the same way plan state and file edits are.
 // ─────────────────────────────────────────────────────────────
 
-import type { SubagentTaskView, TimelineEvent } from "../../lib/rpc";
+import type {
+  SubagentTaskView,
+  TimelineEvent,
+  WorkflowProgressEntry
+} from "../../lib/rpc";
 
-/** Tool names that dispatch a subagent. `Agent` is what 2.1.220 actually
- *  sends; `Task` is the older name and still turns up in stored sessions. */
-export const AGENT_TOOL_NAMES = new Set(["Agent", "Task"]);
+/**
+ * Tool names whose call registers a background task, and so renders as a card
+ * rather than as a tool chip.
+ *
+ * `Agent` is what 2.1.220 actually sends for a dispatch; `Task` is the older
+ * name and still turns up in stored sessions. `Workflow` belongs here for the
+ * same reason both of those do — it returns `async_launched` and the run it
+ * started is reported through `task_*` — and without it a workflow rendered
+ * twice: once as a chip saying "Ran 1 tool", once as the card beside it.
+ */
+export const TASK_TOOL_NAMES = new Set(["Agent", "Task", "Workflow"]);
 
 export interface FoldedSubagents {
   /** taskId → everything the timeline knows about that agent. */
@@ -55,4 +67,57 @@ export function foldSubagents(events: TimelineEvent[]): FoldedSubagents {
     }
   }
   return { byTaskId, taskIdByToolUse, elapsed };
+}
+
+/** One phase of a workflow with the agents the CLI reported under it. */
+export interface WorkflowPhaseGroup {
+  /** Phase index as the CLI numbered it, or -1 for agents that named no phase. */
+  index: number;
+  title: string;
+  agents: WorkflowProgressEntry[];
+}
+
+/**
+ * Fold `workflow_progress` into the phases it describes.
+ *
+ * The CLI sends phases and agents interleaved in one array, related by
+ * `phaseIndex`, and re-sends the whole array each time anything moves. Grouping
+ * is therefore done on read rather than accumulated.
+ *
+ * An agent whose phase was never announced still gets a group — built from its
+ * own `phaseTitle`, or untitled. Dropping it would hide a running agent because
+ * of a missing heading, which is the opposite of what this view is for.
+ */
+export function groupWorkflowProgress(
+  entries: WorkflowProgressEntry[] | undefined
+): WorkflowPhaseGroup[] {
+  if (!entries?.length) return [];
+  const groups = new Map<number, WorkflowPhaseGroup>();
+
+  const groupFor = (index: number, title: string) => {
+    const existing = groups.get(index);
+    if (existing) {
+      if (!existing.title && title) existing.title = title;
+      return existing;
+    }
+    const created = { index, title, agents: [] };
+    groups.set(index, created);
+    return created;
+  };
+
+  for (const e of entries) {
+    if (e.type === "workflow_phase") groupFor(e.index ?? -1, e.title ?? "");
+  }
+  for (const e of entries) {
+    if (e.type !== "workflow_agent") continue;
+    groupFor(e.phaseIndex ?? -1, e.phaseTitle ?? "").agents.push(e);
+  }
+
+  return [...groups.values()].sort((a, b) => a.index - b.index);
+}
+
+/** Whether this workflow agent has stopped. Anything unrecognised reads as
+ *  still running, the same way an unknown task status does. */
+export function isWorkflowAgentDone(entry: WorkflowProgressEntry): boolean {
+  return entry.state === "done" || entry.state === "error";
 }
