@@ -219,16 +219,62 @@ the page 7.69 / 7.69 / 11.71 / 7.07 for ready / connected / disconnected /
 error, all above AA; the pill adds nothing to the header's width
 (`scrollWidth` identical with and without it).
 
-**Ф4 — sync.** Smaller than it looked: `--replay-user-messages` plus dropping
-the echo of what we sent ourselves. The rest of a remote turn — assistant text,
-`tool_use`, `tool_result`, `result` — already arrives on stdout unchanged, and
-the session id stays the same throughout.
+**Ф4 — sync. Done, 2026-07-28.** The flag was already being passed; what was
+missing was everything downstream of it. A `user` event carrying text was read
+only for the `tool_result` blocks it usually holds, so a replayed prompt
+produced no delta at all — and out-of-turn traffic reached a handler that read
+the bridge's state and dropped the rest, with a comment saying why. Both halves
+are now real.
 
-**Ф5 — permissions.** Two parts, and the first is not optional. **Handle
-`control_cancel_request`**: a prompt answered on the phone must disappear from
-the panel, and a card whose request was cancelled must stop being answerable.
-Without it the two surfaces desynchronise on the first remote approval. The
-second part is policy: LUNO's gate is deliberately stricter than upstream (see
-`remaining-features.md` §2 and `decidePermission`), and a phone is another
-surface that can press "allow". `luno.permissionMode: auto` together with Remote
-Control should simply be refused. Write that decision down before the code.
+- **The prompt is the announcement.** Nothing else says a turn is starting
+  here, so `beginRemoteTurn` is deliberately not async: the queue that catches
+  the answer has to exist before the reader's callback returns. Everything that
+  must wait — a local turn still in its `finally`, the checkpoint — waits
+  inside it.
+- **One loop for both surfaces.** `Orchestrator.observe(text, stream)` is
+  `turn()` without the send: same plan interception, same message history, same
+  checkpoint. A second implementation of "what a turn does to the timeline"
+  would have drifted within a phase.
+- **The echo is dropped by matching what we wrote**, not by the replay flag —
+  measured on 2.1.219, our own stdin message comes back marked exactly like a
+  phone's would be, so the flag cannot separate them. The pending list is
+  consumed rather than tested, or the phone repeating a prompt the panel had
+  sent earlier would vanish instead of being answered.
+- **`content` is a bare string on a replayed prompt** and a block list on
+  everything else. That widening is what the classifier keys on, and it forced
+  an `Array.isArray` guard at the two places the processor iterates content —
+  a string would have iterated per character.
+- **Stop had to close the queue.** There is no generator to return from; a
+  session that never reports its `result` would otherwise leave the panel busy
+  for the rest of its life.
+- **Text typed here during a remote turn is queued** — `activeTurn` is set, so
+  the existing path does that already — but nothing drained it: `flushQueued`
+  only runs behind a turn the panel started. The remote turn now flushes it.
+
+Verified: the full gate (`lint` clean, 645 passed / 6 skipped), the echo shape
+measured against the live binary today, and 21 tests across the two halves —
+the classifier and the echo queue as pure functions, and the host wiring end to
+end with a fake CLI (timeline, busy, an approval answered from the panel, Stop,
+and the queued local prompt going out afterwards).
+
+**Not verified, and only a second device can:** that a prompt from the phone
+carries the same event shape as our own echo. Ф0 measured that it does
+(`isReplay: true`, `origin: {kind:"human"}`); the classifier deliberately keys
+on neither field, only on a `user` event with text content and no
+`parent_tool_use_id`, so it holds either way — but the round trip itself is
+untested here.
+
+One edge left open on purpose: a prompt from the phone that arrives _during_ a
+panel turn reaches the local turn's sink instead of the out-of-turn seam, where
+nothing consumes it. The CLI answers one turn at a time, so in practice the
+replay lands after ours finishes; if it ever does not, the symptom is a remote
+prompt missing from the timeline rather than anything corrupted.
+
+**Ф5 — permissions.** The first half is already in: `control_cancel_request` is
+handled (`claude-cli.ts`, the session reader) and withdraws the card through a
+`permission_resolved` delta, so a prompt answered on the phone stops being
+answerable here. What remains is policy: LUNO's gate is deliberately stricter
+than upstream (see `remaining-features.md` §2 and `decidePermission`), and a
+phone is another surface that can press "allow". `luno.permissionMode: auto`
+together with Remote Control should simply be refused. Write that decision down
+before the code.

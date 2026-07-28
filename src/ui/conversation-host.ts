@@ -9,6 +9,7 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { Session } from "../core/session.js";
 import { Orchestrator } from "../core/orchestrator.js";
+import { DeltaQueue } from "../core/delta-queue.js";
 import {
   CompactionInfo,
   isTerminalTaskStatus,
@@ -251,6 +252,10 @@ export class ConversationHost {
    */
   private remoteProvider: ClaudeCliProvider | null = null;
   private remoteControl: RemoteControlStatus = { state: "off" };
+  /** Where a turn started on another device is being fed from. Present only
+   *  while such a turn runs — it is also what tells the out-of-turn reader that
+   *  the deltas arriving now belong to something on the timeline. */
+  private remoteTurn?: DeltaQueue;
   // In-flight turn; awaited before starting a new one so turns never overlap.
   private activeTurn?: Promise<void>;
   /** Owns the current session, its timeline listeners, debounced persistence,
@@ -1024,6 +1029,11 @@ export class ConversationHost {
     logInfo("[luno] aborting turn (cancel/rewind/new-session)");
     this.orchestrator?.cancel();
     this.activeProvider?.cancel?.();
+    // A remote turn has no generator to return from — it ends when its source
+    // says so. Closing the queue is what lets Stop end it at all: the interrupt
+    // above stops the CLI, but a session that never reports the `result` would
+    // otherwise leave the panel busy forever.
+    this.remoteTurn?.close();
   }
 
   /**
@@ -1831,11 +1841,41 @@ export class ConversationHost {
       sessionMode: true,
       onOutOfTurn: (d) => {
         // The other device talking while the panel is not driving the turn.
-        // Only the bridge's own state is handled here; carrying the rest onto
-        // the timeline needs the turn model to accept work it did not start.
         if (d.type === "remote_control" && d.remoteControl) {
           this.publishRemoteControl(d.remoteControl);
+          return;
         }
+        // A prompt sent from the phone. It is the only announcement that a turn
+        // is starting here, so the queue that will carry the rest of it has to
+        // exist before this call returns.
+        if (d.type === "remote_prompt" && d.prompt) {
+          this.beginRemoteTurn(d.prompt);
+          return;
+        }
+        // A subagent that outlived the turn that launched it. In session mode
+        // the process survives, so a `run_in_background` agent keeps working
+        // and reports minutes later with the turn long over — its card is
+        // still on the timeline waiting to be closed. Routed before the remote
+        // queue because this belongs to the panel's own conversation, not to
+        // whatever a phone happens to be doing.
+        if (d.type === "task" && d.task) {
+          this.onSubagentUpdate(d.task);
+          return;
+        }
+        // Nothing is driving the session and it just ended, so no late report
+        // is coming for anything still open — close those cards rather than
+        // leave them spinning. Guarded on there being no remote turn, because
+        // `done` is also how one of those ends: swallowing it there would hang
+        // the phone's turn, and sweeping would bury agents it had just
+        // launched.
+        if (d.type === "done" && !this.remoteTurn) {
+          this.sweepLiveTasks();
+          return;
+        }
+        // Everything else belongs to that turn — or to no turn at all, in which
+        // case there is nothing on the timeline for it to attach to and
+        // dropping it is the honest outcome.
+        this.remoteTurn?.push(d);
       }
     });
     this.remoteProvider = provider;
@@ -1983,66 +2023,7 @@ export class ConversationHost {
       provider: providerInstance,
       model,
       maxTokens,
-      onDelta: (d: StreamDelta) => {
-        // A pending tool-permission prompt: surface it as a dedicated typed
-        // message (an inline approval card in the webview) rather than a raw
-        // delta the timeline doesn't know how to render.
-        if (d.type === "permission_request" && d.permission) {
-          // The turn now cannot continue until someone answers. Off screen that
-          // reads as a chat that simply stopped, so it has to say so.
-          this.awaitingApproval = true;
-          this.refreshSurface();
-          this.post({ type: "permissionRequest", request: d.permission });
-          return;
-        }
-        // Forward stream deltas to the webview verbatim (text, tool_use_*, etc.).
-        this.post({ type: "delta", delta: d });
-        // The CLI reports the resolved model (alias → concrete id). Re-publish
-        // it as a typed event so the model picker can show what's actually
-        // running, not just the alias the user selected.
-        if (d.type === "model" && d.model) {
-          this.models.record(model, d.model);
-        }
-        // Usage deltas are the authoritative token counts reported by the
-        // CLI. Re-publish them as a typed `tokenUsage` event so the
-        // TokenMeter doesn't need to parse the raw delta envelope.
-        if (d.type === "usage" && d.usage) {
-          this.post({
-            type: "tokenUsage",
-            inputTokens: d.usage.inputTokens,
-            outputTokens: d.usage.outputTokens,
-            cacheReadTokens: d.usage.cacheReadTokens,
-            cacheCreatedTokens: d.usage.cacheCreatedTokens,
-            costUsd: d.usage.costUsd,
-            sessionId: d.usage.sessionId,
-            source: "claude-cli",
-            contextTokens: d.usage.contextTokens,
-            contextWindow: d.usage.contextWindow
-          });
-        }
-        // Compaction is the one thing that changes what the model remembers
-        // without the user doing anything, so it goes on the timeline rather
-        // than into a transient message: reopening the chat tomorrow, the gap
-        // still needs explaining.
-        if (d.type === "compact") {
-          this.session.emit({
-            kind: "compact",
-            title: "Context compacted",
-            body: compactionSummary(d.compaction),
-            meta: { ...d.compaction }
-          });
-          this.scheduleSave();
-        }
-        if (d.type === "task" && d.task) {
-          this.onSubagentUpdate(d.task);
-        }
-        // The CLI's own quota verdict — which window is binding and when it
-        // resets. It anchors the 5-hour aggregation, so record it before the
-        // post-turn refresh reads it back.
-        if (d.type === "rate_limit" && d.rateLimit) {
-          this.shared.rateLimits.record(d.rateLimit);
-        }
-      }
+      onDelta: (d: StreamDelta) => this.onTurnDelta(d, model)
     });
 
     this.post({ type: "turnStart" });
@@ -2053,7 +2034,10 @@ export class ConversationHost {
       } finally {
         this.activeProvider = undefined;
         this.awaitingApproval = false;
-        this.sweepLiveTasks();
+        // Only where the process died with the turn. On the session provider it
+        // does not, and a backgrounded agent is still working — see
+        // `sweepLiveTasks` and the `task` branch in `onOutOfTurn`.
+        if (providerInstance !== this.remoteProvider) this.sweepLiveTasks();
         // A turn that landed while the user was looking elsewhere is the other
         // thing worth a glyph: the answer is sitting there unread.
         if (!this.visible) this.finishedWhileHidden = true;
@@ -2073,6 +2057,143 @@ export class ConversationHost {
       await turn;
     } finally {
       if (this.activeTurn === turn) this.activeTurn = undefined;
+    }
+  }
+
+  /**
+   * Take over a turn the phone started.
+   *
+   * Not async, and that is the whole point: the prompt arrives on the reader's
+   * thread and the answer is already on its way behind it, so the queue that
+   * catches it has to be in place before this returns. Everything that has to
+   * wait — a local turn still finishing, the checkpoint — waits inside.
+   *
+   * The turn is otherwise indistinguishable from one sent here: same
+   * orchestrator, same delta handler, same busy state, and Stop still stops it,
+   * because `activeProvider` is what the cancel and approval paths reach for.
+   */
+  private beginRemoteTurn(text: string): void {
+    const provider = this.remoteProvider;
+    if (!provider) return;
+    const queue = new DeltaQueue();
+    this.remoteTurn = queue;
+    const model = this.settings.model;
+    const maxTokens = vscode.workspace
+      .getConfiguration("luno")
+      .get<number>("maxTokens", 0);
+    const orchestrator = new Orchestrator(this.session, {
+      provider,
+      model,
+      maxTokens,
+      onDelta: (d: StreamDelta) => this.onTurnDelta(d, model)
+    });
+    // Normally nothing: the CLI answers one turn at a time, so a prompt from
+    // the phone lands between ours. The exception is the moment a local turn is
+    // finishing — its `finally` has not run yet, and starting on top of it
+    // would leave two turns sharing one `activeProvider`.
+    const previous = this.activeTurn;
+    const turn = (async () => {
+      try {
+        await previous;
+      } catch {
+        // A local turn that failed reported it itself; this one still runs.
+      }
+      this.orchestrator = orchestrator;
+      this.activeProvider = provider;
+      this.armCheckpoints();
+      this.post({ type: "turnStart" });
+      try {
+        await orchestrator.observe(text, queue);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logError("[luno] remote turn failed:", err);
+        this.post({ type: "error", message });
+      } finally {
+        if (this.remoteTurn === queue) this.remoteTurn = undefined;
+        if (this.activeProvider === provider) this.activeProvider = undefined;
+        this.awaitingApproval = false;
+        this.sweepLiveTasks();
+        if (!this.visible) this.finishedWhileHidden = true;
+        this.refreshSurface();
+        this.post({ type: "turnEnd" });
+        this.scheduleSave();
+        void broadcastUsage(this.post, this.shared.rateLimits);
+      }
+    })();
+    this.activeTurn = turn;
+    void turn.finally(() => {
+      if (this.activeTurn === turn) this.activeTurn = undefined;
+      // Anything typed here while the phone held the session was queued rather
+      // than sent. Nothing else will flush it: `handlePrompt` only drains the
+      // queue behind a turn it started itself.
+      void this.flushQueued();
+    });
+  }
+
+  /**
+   * One delta from a turn in flight, whichever surface started it.
+   *
+   * @param requestedModel what the picker asked for, so the resolved id the CLI
+   *   reports can be recorded against it.
+   */
+  private onTurnDelta(d: StreamDelta, requestedModel: string): void {
+    // A pending tool-permission prompt: surface it as a dedicated typed
+    // message (an inline approval card in the webview) rather than a raw
+    // delta the timeline doesn't know how to render.
+    if (d.type === "permission_request" && d.permission) {
+      // The turn now cannot continue until someone answers. Off screen that
+      // reads as a chat that simply stopped, so it has to say so.
+      this.awaitingApproval = true;
+      this.refreshSurface();
+      this.post({ type: "permissionRequest", request: d.permission });
+      return;
+    }
+    // Forward stream deltas to the webview verbatim (text, tool_use_*, etc.).
+    this.post({ type: "delta", delta: d });
+    // The CLI reports the resolved model (alias → concrete id). Re-publish
+    // it as a typed event so the model picker can show what's actually
+    // running, not just the alias the user selected.
+    if (d.type === "model" && d.model) {
+      this.models.record(requestedModel, d.model);
+    }
+    // Usage deltas are the authoritative token counts reported by the
+    // CLI. Re-publish them as a typed `tokenUsage` event so the
+    // TokenMeter doesn't need to parse the raw delta envelope.
+    if (d.type === "usage" && d.usage) {
+      this.post({
+        type: "tokenUsage",
+        inputTokens: d.usage.inputTokens,
+        outputTokens: d.usage.outputTokens,
+        cacheReadTokens: d.usage.cacheReadTokens,
+        cacheCreatedTokens: d.usage.cacheCreatedTokens,
+        costUsd: d.usage.costUsd,
+        sessionId: d.usage.sessionId,
+        source: "claude-cli",
+        contextTokens: d.usage.contextTokens,
+        contextWindow: d.usage.contextWindow
+      });
+    }
+    // Compaction is the one thing that changes what the model remembers
+    // without the user doing anything, so it goes on the timeline rather
+    // than into a transient message: reopening the chat tomorrow, the gap
+    // still needs explaining.
+    if (d.type === "compact") {
+      this.session.emit({
+        kind: "compact",
+        title: "Context compacted",
+        body: compactionSummary(d.compaction),
+        meta: { ...d.compaction }
+      });
+      this.scheduleSave();
+    }
+    if (d.type === "task" && d.task) {
+      this.onSubagentUpdate(d.task);
+    }
+    // The CLI's own quota verdict — which window is binding and when it
+    // resets. It anchors the 5-hour aggregation, so record it before the
+    // post-turn refresh reads it back.
+    if (d.type === "rate_limit" && d.rateLimit) {
+      this.shared.rateLimits.record(d.rateLimit);
     }
   }
 
@@ -2136,13 +2257,17 @@ export class ConversationHost {
   }
 
   /**
-   * Close every subagent still open when the turn ends.
+   * Close every subagent still open, because nothing more is coming for them.
    *
-   * The CLI process does not outlive the turn, so a task that never reported a
-   * terminal status did not keep running — it died with the turn, whether that
-   * was Stop, a crash, or the 10-minute hard timeout. Without this the card
-   * spins forever, and reopening the chat tomorrow replays a subagent that
-   * appears to still be working.
+   * Called when the process that was running them is gone: the end of a turn on
+   * the per-turn path, or the session process exiting on the other one. A task
+   * that never reported a terminal status did not keep working — it died there,
+   * whether that was Stop, a crash, or the hard timeout.
+   *
+   * Deliberately NOT called at the end of a session-mode turn. There the
+   * process survives the turn, so a `run_in_background` agent really is still
+   * running and will report later through `onOutOfTurn`; sweeping would put
+   * "interrupted" on a card that is about to answer.
    */
   private sweepLiveTasks(): void {
     if (this.liveTasks.size === 0) return;

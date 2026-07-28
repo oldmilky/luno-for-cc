@@ -10,6 +10,7 @@ import {
   PermissionRequestPayload,
   PermissionSuggestion,
   RemoteControlStatus,
+  isTerminalTaskStatus,
   StreamDelta,
   SubagentPhase,
   SubagentUpdate,
@@ -35,6 +36,20 @@ const STALL_WATCHDOG_TOOLS: ReadonlySet<string> = new Set([
  *  as stalled. Generous enough for a slow-but-real fetch; far short of the
  *  10-minute hard kill. Override per-session via ClaudeCliOpts.toolStallMs. */
 const WEB_TOOL_STALL_MS = 60 * 1000;
+
+/**
+ * How long the turn waits for a backgrounded subagent after the CLI's `result`,
+ * measured from that agent's last sign of life rather than from `result`.
+ *
+ * A `run_in_background` agent keeps working past the end of the turn: timed
+ * against 2.1.220, one reported `completed` with its full answer 5.6s after
+ * `result` arrived. Ending the turn there — which is what closing stdin does —
+ * exits the child and kills the agent mid-step, so its card could only ever
+ * read "interrupted". 90s is generous against `task_progress`, which fires per
+ * nested tool call, so an agent that is visibly working keeps the turn open
+ * while a silent one is still cut loose well before the 10-minute hard kill.
+ */
+const BACKGROUND_TASK_GRACE_MS = 90 * 1000;
 
 /** Tools that are surfaced through their own dedicated UI by the orchestrator's
  *  PlanInterceptor (plan cards, question cards). When the CLI routes a
@@ -227,6 +242,9 @@ export interface ClaudeCliOpts {
    *  doesn't return a result within this window the turn is stopped cleanly.
    *  Defaults to WEB_TOOL_STALL_MS. */
   toolStallMs?: number;
+  /** How long the turn waits on a quiet backgrounded subagent before ending
+   *  anyway. Defaults to BACKGROUND_TASK_GRACE_MS; tests shorten it. */
+  backgroundGraceMs?: number;
   /**
    * Keep one CLI process alive across turns instead of spawning per turn.
    * Required by Remote Control, which lives exactly as long as its process.
@@ -298,6 +316,10 @@ interface CliSession {
   busy: boolean;
   /** Resolvers waiting for `busy` to clear. */
   idleWaiters: Array<() => void>;
+  /** Prompts written to stdin whose replay has not come back yet. The CLI
+   *  echoes our own messages alongside the phone's, and only we can tell them
+   *  apart — see takeEcho(). */
+  pendingEchoes: string[];
 }
 
 /** How long the next turn waits for an interrupted one to report its `result`
@@ -617,6 +639,29 @@ export class ClaudeCliProvider implements ChatProvider {
       }
       this.pendingPermissions.clear();
       stallWatch?.clearAll();
+      // Routed through endTurn so a pending background-agent grace timer is
+      // cleared too — Stop must not leave one armed to fire a minute later.
+      endTurn();
+    };
+
+    const processor = makeProcessor(
+      this.opts.setResumeSessionId,
+      this.opts.onSlashCommands
+    );
+
+    // Subagents launched with `run_in_background` that have not reported a
+    // terminal status. While any are open the turn is deliberately held past
+    // `result` — see BACKGROUND_TASK_GRACE_MS for what that buys and why the
+    // wait has to be bounded.
+    const openTasks = new Set<string>();
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    let turnEnded = false;
+
+    const endTurn = () => {
+      if (turnEnded) return;
+      turnEnded = true;
+      if (graceTimer) clearTimeout(graceTimer);
+      graceTimer = undefined;
       try {
         child.stdin?.end();
       } catch {
@@ -625,10 +670,19 @@ export class ClaudeCliProvider implements ChatProvider {
       push({ type: "done" });
     };
 
-    const processor = makeProcessor(
-      this.opts.setResumeSessionId,
-      this.opts.onSlashCommands
-    );
+    /** (Re)start the countdown from this moment — the agent just showed a sign
+     *  of life, so the budget it gets is measured from here. */
+    const armGrace = () => {
+      if (graceTimer) clearTimeout(graceTimer);
+      graceTimer = setTimeout(() => {
+        logInfo(
+          `[luno] ${openTasks.size} background agent(s) went quiet; ending the turn`
+        );
+        endTurn();
+      }, this.opts.backgroundGraceMs ?? BACKGROUND_TASK_GRACE_MS);
+    };
+
+    let sawResult = false;
 
     rl.on("line", (line) => {
       const trimmed = line.trim();
@@ -648,17 +702,26 @@ export class ClaudeCliProvider implements ChatProvider {
       }
       // Acks to control requests *we* sent (e.g. set_permission_mode) — ignore.
       if (ev.type === "control_response") return;
-      for (const d of processor(ev)) push(d);
-      // Under stream-json input the CLI keeps the session open for more input
-      // after the turn. Close stdin on the end-of-turn `result` so it exits,
-      // and end the stream here (text-input runs exit on their own).
-      if (permissionProtocol && ev.type === "result") {
-        try {
-          child.stdin?.end();
-        } catch {
-          /* already closed */
+      for (const d of processor(ev)) {
+        push(d);
+        if (d.type !== "task" || !d.task) continue;
+        const { phase, taskId, status } = d.task;
+        if (phase === "started") openTasks.add(taskId);
+        else if (phase === "notification" || isTerminalTaskStatus(status)) {
+          openTasks.delete(taskId);
         }
-        push({ type: "done" });
+        // The last one just landed and the turn was only waiting on it.
+        if (sawResult && openTasks.size === 0) endTurn();
+        else if (sawResult) armGrace();
+      }
+      // Under stream-json input the CLI keeps the session open for more input
+      // after the turn, so closing stdin is what actually ends it. Held while a
+      // backgrounded agent is still running: closing here kills it mid-step and
+      // throws away work the user is watching a card for.
+      if (permissionProtocol && ev.type === "result") {
+        sawResult = true;
+        if (openTasks.size === 0) endTurn();
+        else armGrace();
       }
     });
 
@@ -784,16 +847,19 @@ export class ClaudeCliProvider implements ChatProvider {
     session.sink = push;
     session.busy = true;
     const preamble = turnPreamble(this.opts);
+    const sent = preamble ? preamble + userText : userText;
+    // Registered before the write, not after: the replay can be back before the
+    // next tick, and an unregistered echo would land on the timeline as a
+    // prompt the user never typed on the phone.
+    session.pendingEchoes.push(sent);
     const wrote = this.writeToChild(session, {
       type: "user",
-      message: {
-        role: "user",
-        content: preamble ? preamble + userText : userText
-      }
+      message: { role: "user", content: sent }
     });
     if (!wrote) {
       session.sink = null;
       this.abortCurrent = null;
+      takeEcho(session.pendingEchoes, sent);
       yield {
         type: "error",
         error: "The Claude session is no longer accepting input."
@@ -863,7 +929,8 @@ export class ClaudeCliProvider implements ChatProvider {
       model: req?.model,
       permissionMode: this.opts.permissionMode ?? "default",
       busy: false,
-      idleWaiters: []
+      idleWaiters: [],
+      pendingEchoes: []
     };
     this.session = session;
     this.child = child;
@@ -925,6 +992,22 @@ export class ClaudeCliProvider implements ChatProvider {
         // thing with a link. Let the reply speak.
         if (!this.remoteControlInFlight) {
           route({ type: "remote_control", remoteControl: this.remoteControl });
+        }
+        return;
+      }
+      // A prompt the session accepted from somewhere. Ours comes straight back
+      // and is dropped; anything left was typed on a connected device, and it
+      // is the only announcement that a turn nobody here started is beginning.
+      // Read before the processor, which knows `user` events only as the
+      // envelope a tool_result travels in.
+      const prompt = replayedPrompt(ev);
+      if (prompt !== null) {
+        if (!takeEcho(session.pendingEchoes, prompt)) {
+          // The CLI is now working for the other surface. Marking the session
+          // busy is what makes a prompt sent from here wait for that turn's
+          // `result` instead of interleaving with it.
+          session.busy = true;
+          route({ type: "remote_prompt", prompt });
         }
         return;
       }
@@ -1755,25 +1838,33 @@ export interface CliEvent {
   model?: string;
   /** Every slash command the CLI knows, reported on `system`/`init`. */
   slash_commands?: string[];
+  /** Set on a `user` event the CLI is playing back rather than receiving:
+   *  either the prompt we just wrote to stdin, or one typed on a connected
+   *  phone. Only present with `--replay-user-messages`. */
+  isReplay?: boolean;
   message?: {
     /** Resolved model id on each `assistant` message — the model that
      *  actually produced this turn's output. */
     model?: string;
-    content?: Array<
-      | { type: "text"; text: string }
-      | {
-          type: "tool_use";
-          id: string;
-          name: string;
-          input: Record<string, unknown>;
-        }
-      | {
-          type: "tool_result";
-          tool_use_id: string;
-          content: unknown;
-          is_error?: boolean;
-        }
-    >;
+    /** A replayed `user` message carries the prompt as a bare string —
+     *  measured on 2.1.219 — where everything else uses blocks. */
+    content?:
+      | string
+      | Array<
+          | { type: "text"; text: string }
+          | {
+              type: "tool_use";
+              id: string;
+              name: string;
+              input: Record<string, unknown>;
+            }
+          | {
+              type: "tool_result";
+              tool_use_id: string;
+              content: unknown;
+              is_error?: boolean;
+            }
+        >;
     usage?: CliUsage;
   };
   event?: {
@@ -1874,6 +1965,48 @@ export interface CliEvent {
 }
 
 type Processor = (ev: CliEvent) => StreamDelta[];
+
+/**
+ * The prompt inside a replayed `user` event, or null if the event is not one.
+ *
+ * `--replay-user-messages` plays back every user message the session accepts,
+ * from whichever surface sent it — which is the only way a prompt typed on a
+ * phone reaches us at all. Two things it must not match: the `user` events that
+ * carry a `tool_result` back to the model (the same event type, every turn), and
+ * anything a subagent produced, which is stamped with its dispatching tool id
+ * and is not the conversation talking.
+ *
+ * The prompt arrives as a bare string rather than a block list — measured on
+ * 2.1.219 — but the block form is accepted too, since an attachment sent from
+ * the phone has nowhere else to go.
+ */
+export function replayedPrompt(ev: CliEvent): string | null {
+  if (ev.type !== "user" || ev.parent_tool_use_id) return null;
+  const content = ev.message?.content;
+  if (typeof content === "string") return content || null;
+  if (!Array.isArray(content)) return null;
+  if (content.some((b) => b.type === "tool_result")) return null;
+  const text = content
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .join("")
+    .trim();
+  return text || null;
+}
+
+/**
+ * Whether this replayed prompt is the echo of one we wrote ourselves.
+ *
+ * The replay flag does not distinguish the two surfaces — our own stdin writes
+ * come back exactly like a phone's do — so the only discriminator is that we
+ * know what we sent. Consuming the match rather than merely testing it is what
+ * makes the same text typed twice replay the second time.
+ */
+export function takeEcho(pending: string[], text: string): boolean {
+  const i = pending.indexOf(text);
+  if (i === -1) return false;
+  pending.splice(i, 1);
+  return true;
+}
 
 export function makeProcessor(
   setResume?: (id: string) => void,
@@ -1988,7 +2121,7 @@ export function makeProcessor(
       return out;
     }
 
-    if (ev.type === "assistant" && ev.message?.content) {
+    if (ev.type === "assistant" && Array.isArray(ev.message?.content)) {
       emitModel(ev.message.model, out);
       for (const block of ev.message.content) {
         if (block.type === "text") {
@@ -2017,7 +2150,9 @@ export function makeProcessor(
       return out;
     }
 
-    if (ev.type === "user" && ev.message?.content) {
+    // Only the block form: a `user` event whose content is a bare string is a
+    // replayed prompt, and the session reader has already taken it.
+    if (ev.type === "user" && Array.isArray(ev.message?.content)) {
       for (const block of ev.message.content) {
         if (block.type === "tool_result") {
           const content =

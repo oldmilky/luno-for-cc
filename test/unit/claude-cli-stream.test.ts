@@ -204,3 +204,122 @@ describe("ClaudeCliProvider.stream — tool stall watchdog (integration)", () =>
     expect(results[0].resultIsError).toBe(false);
   });
 });
+
+// A `run_in_background` subagent keeps working past the turn's `result`.
+// Closing stdin there — which is what ends the turn — exits the child and kills
+// the agent mid-step, so its card could only ever read "interrupted". Timed
+// against 2.1.220: one agent reported `completed` with its full answer 5.6s
+// after `result` arrived.
+describe("ClaudeCliProvider.stream — backgrounded subagents", () => {
+  let child: any;
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    child = makeFakeChild();
+    (spawn as unknown as ReturnType<typeof vi.fn>).mockReturnValue(child);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const provider = () =>
+    new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      backgroundGraceMs: 10_000 // long enough that only an explicit end fires
+    });
+
+  const started = {
+    type: "system",
+    subtype: "task_started",
+    task_id: "t1",
+    tool_use_id: "toolu_a",
+    subagent_type: "Explore",
+    description: "Find makeProcessor"
+  };
+
+  it("holds the turn open while a launched agent is still running", async () => {
+    const { collected, finished } = await drive(provider());
+    child.emitLine(started);
+    child.emitLine({ type: "result", subtype: "success" });
+    await new Promise((r) => setTimeout(r, 30));
+
+    // The turn has NOT ended: no `done`, and stdin is still open for the agent.
+    expect(collected.some((d) => d.type === "done")).toBe(false);
+    expect(child.stdin.writableEnded).toBe(false);
+
+    child.emitLine({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "t1",
+      status: "completed",
+      summary: "src/providers/claude-cli.ts"
+    });
+    await finished;
+
+    const answer = collected.filter((d) => d.type === "task").pop();
+    expect(answer!.task).toMatchObject({
+      status: "completed",
+      summary: "src/providers/claude-cli.ts"
+    });
+  });
+
+  it("ends the turn at `result` when nothing was backgrounded", async () => {
+    const { collected, finished } = await drive(provider());
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+
+    expect(collected.some((d) => d.type === "done")).toBe(true);
+  });
+
+  // The wait has to be bounded, or an agent that never reports holds the turn
+  // until the 10-minute hard kill.
+  it("gives up on an agent that goes quiet", async () => {
+    const p = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      backgroundGraceMs: 30
+    });
+    const { collected, finished } = await drive(p);
+    child.emitLine(started);
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+
+    expect(collected.some((d) => d.type === "done")).toBe(true);
+  });
+
+  // Progress is a sign of life: the budget is measured from the last one, so a
+  // long agent that keeps reporting is not cut off at a flat deadline.
+  it("re-arms the wait each time the agent reports progress", async () => {
+    const p = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      backgroundGraceMs: 60
+    });
+    const { collected, finished } = await drive(p);
+    child.emitLine(started);
+    child.emitLine({ type: "result", subtype: "success" });
+
+    for (let i = 0; i < 3; i++) {
+      await new Promise((r) => setTimeout(r, 40));
+      expect(collected.some((d) => d.type === "done")).toBe(false);
+      child.emitLine({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "t1",
+        description: `step ${i}`,
+        last_tool_name: "Grep"
+      });
+    }
+
+    child.emitLine({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "t1",
+      status: "completed",
+      summary: "done"
+    });
+    await finished;
+    expect(collected.some((d) => d.type === "done")).toBe(true);
+  });
+});

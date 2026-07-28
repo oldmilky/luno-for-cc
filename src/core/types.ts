@@ -236,6 +236,7 @@ export interface StreamDelta {
     | "compact"
     | "task"
     | "remote_control"
+    | "remote_prompt"
     | "done"
     | "error";
   text?: string;
@@ -268,6 +269,11 @@ export interface StreamDelta {
   /** Carried on `type: "remote_control"` — the state of the bridge to
    *  claude.ai/code and the Claude mobile app. */
   remoteControl?: RemoteControlStatus;
+  /** Carried on `type: "remote_prompt"` — a prompt typed on another surface
+   *  (a connected phone or claude.ai/code) that the CLI replayed back to us.
+   *  It starts a turn this panel did not send, and the text is what the user
+   *  actually asked, preamble and all. */
+  prompt?: string;
 }
 
 /** Whether this conversation can currently be driven from another device.

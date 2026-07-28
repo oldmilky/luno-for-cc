@@ -18,14 +18,26 @@ const settings = vi.hoisted(() => ({}) as Record<string, unknown>);
 /** Deltas the fake provider yields for the next turn, in order. */
 const script = vi.hoisted(() => [] as unknown[]);
 
+/** Out-of-turn sinks handed to every provider built, newest last. Session-mode
+ *  providers use this to deliver events that arrive with no turn running. */
+const outOfTurn = vi.hoisted(() => [] as ((d: unknown) => void)[]);
+
 vi.mock("../../src/providers/factory.js", () => ({
-  createProvider: () => ({
-    id: "fake",
-    async *stream() {
-      for (const delta of script) yield delta as never;
-    },
-    cancel() {}
-  }),
+  createProvider: (opts: { onOutOfTurn?: (d: unknown) => void }) => {
+    if (opts.onOutOfTurn) outOfTurn.push(opts.onOutOfTurn);
+    return {
+      id: "fake",
+      async *stream() {
+        for (const delta of script) yield delta as never;
+      },
+      cancel() {},
+      updateOptions() {},
+      async enableRemoteControl() {
+        return { state: "connected", url: "https://claude.ai/code/x" };
+      },
+      async disableRemoteControl() {}
+    };
+  },
   resolveClaudeBinary: () => "claude"
 }));
 
@@ -137,6 +149,7 @@ let storage: string;
 
 beforeEach(() => {
   script.length = 0;
+  outOfTurn.length = 0;
   for (const key of Object.keys(settings)) delete settings[key];
   settings.worktree = "off";
   storage = fs.mkdtempSync(path.join(os.tmpdir(), "luno-agent-storage-"));
@@ -374,6 +387,85 @@ describe("subagents on the timeline", () => {
       status: "failed",
       subagentType: "general-purpose",
       description: "Check the tests"
+    });
+  });
+});
+
+// Session mode is the other half of the story and it inverts the rule above.
+// There one CLI process serves every turn, so an agent launched with
+// `run_in_background` genuinely keeps working after the turn that launched it
+// ends — and reports minutes later, with no turn to deliver into. Sweeping at
+// turn end would stamp "interrupted" on a card that is about to answer, and
+// dropping the late event would leave it spinning forever.
+describe("subagents that outlive their turn", () => {
+  const enableRemote = async (webview: FakeWebview) => {
+    webview.deliver({ type: "toggleRemoteControl", enabled: true });
+    await settle();
+    expect(outOfTurn.length).toBeGreaterThan(0);
+  };
+
+  it("leaves a backgrounded agent open when the turn ends", async () => {
+    script.push(started, progress);
+    const { webview } = open();
+    await enableRemote(webview);
+    webview.deliver({ type: "prompt", text: "launch it" });
+    await settle();
+
+    // Only the dispatch. No closing row: the process is still there and so is
+    // the agent.
+    expect(cards(webview).map((r) => r.meta?.phase)).toEqual(["start"]);
+  });
+
+  it("closes the card when the agent reports after the turn", async () => {
+    script.push(started, progress);
+    const { webview } = open();
+    await enableRemote(webview);
+    webview.deliver({ type: "prompt", text: "launch it" });
+    await settle();
+
+    outOfTurn[outOfTurn.length - 1]({
+      type: "task",
+      task: {
+        phase: "notification",
+        taskId: TASK,
+        status: "completed",
+        summary: "src/providers/claude-cli.ts",
+        toolUses: 7,
+        durationMs: 13_400
+      }
+    });
+    await settle();
+
+    const rows = cards(webview);
+    expect(rows.map((r) => r.meta?.phase)).toEqual(["start", "end"]);
+    expect(rows[1].meta).toMatchObject({
+      status: "completed",
+      summary: "src/providers/claude-cli.ts",
+      // Merged with what the dispatch said — the late event names neither the
+      // agent nor the task.
+      subagentType: "Explore",
+      description: "Find makeProcessor definition"
+    });
+  });
+
+  // The process finally going away is the one moment nothing more can arrive.
+  it("closes anything still open when the session process exits", async () => {
+    script.push(started);
+    const { webview } = open();
+    await enableRemote(webview);
+    webview.deliver({ type: "prompt", text: "launch it" });
+    await settle();
+    expect(cards(webview)).toHaveLength(1);
+
+    outOfTurn[outOfTurn.length - 1]({ type: "done" });
+    await settle();
+
+    const rows = cards(webview);
+    expect(rows).toHaveLength(2);
+    expect(rows[1].meta).toMatchObject({
+      phase: "end",
+      status: "interrupted",
+      taskId: TASK
     });
   });
 });

@@ -7,6 +7,11 @@
 // PlanInterceptor convert the special planning tools into structured
 // timeline events, and accumulates the assistant message history.
 //
+// Two ways in, one loop: `turn` sends a prompt and reads the answer,
+// `observe` reads an answer to a prompt another surface sent. With
+// Remote Control on, both surfaces drive the same CLI process, and a
+// turn is a turn whichever of them started it.
+//
 // Earlier versions had a parallel `runInternal` path for the
 // Anthropic-Messages-API fork where we ran tools in-process. That
 // fork is gone — there's a single CLI provider and the orchestrator
@@ -50,6 +55,29 @@ export class Orchestrator {
       tools: []
     };
 
+    await this.consume(this.o.provider.stream(req));
+  }
+
+  /**
+   * A turn this panel did not start.
+   *
+   * The prompt was typed on a connected phone or on claude.ai/code, and the CLI
+   * — one long-lived process, shared by both surfaces — is already answering it.
+   * Nothing is written to the provider here; the deltas are handed in from
+   * wherever they were read. Everything after that is the same turn the local
+   * path runs, and deliberately so: a remote turn gets the same checkpoint, the
+   * same plan interception and the same message history, or rewinding across
+   * one would restore a state the timeline no longer describes.
+   */
+  async observe(
+    userText: string,
+    stream: AsyncIterable<StreamDelta>
+  ): Promise<void> {
+    await this.session.addUser(userText);
+    await this.consume(stream);
+  }
+
+  private async consume(stream: AsyncIterable<StreamDelta>): Promise<void> {
     const blocks: ContentBlock[] = [];
     let currentTool: { id: string; name: string; inputBuf: string } | null =
       null;
@@ -75,7 +103,7 @@ export class Orchestrator {
       textBuf = "";
     };
 
-    for await (const delta of this.o.provider.stream(req)) {
+    for await (const delta of stream) {
       // A cancelled turn keeps whatever the model already said. Text sits in
       // `textBuf` until a tool call or the end of the stream flushes it, so
       // returning straight out threw away a partial answer the user had already
