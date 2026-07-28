@@ -48,6 +48,8 @@ export type InboundType =
   | "revertFile"
   | "requestFileSearch"
   | "requestTerminals"
+  | "requestToolGrants"
+  | "revokeToolGrant"
   | "captureSelection"
   | "refreshEditorContext"
   | "chatFocus"

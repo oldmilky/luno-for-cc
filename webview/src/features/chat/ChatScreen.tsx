@@ -20,6 +20,7 @@ import {
   SubagentTaskView
 } from "../../lib/rpc";
 import { ConnectorsModal } from "../mcp";
+import { PermissionsModal } from "./PermissionsModal";
 import {
   ENTER_CARD,
   PRESS,
@@ -121,7 +122,7 @@ export interface ChatScreenProps {
   pendingPermission: PermissionRequestView | null;
   onPermissionRespond: (
     behavior: "allow" | "deny",
-    restOfTurn?: boolean
+    opts?: { restOfTurn?: boolean; always?: boolean }
   ) => void;
 }
 
@@ -183,6 +184,7 @@ export function ChatScreen({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [hintsOpen, setHintsOpen] = useState(false);
   const [connectorsOpen, setConnectorsOpen] = useState(false);
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [remoteControl, setRemoteControl] = useState<RemoteControlStatus>({
     state: "off"
   });
@@ -349,6 +351,7 @@ export function ChatScreen({
         streaming={streaming}
         onOpenHistory={() => setHistoryOpen(true)}
         onOpenConnectors={() => setConnectorsOpen(true)}
+        onOpenPermissions={() => setPermissionsOpen(true)}
         remoteControl={remoteControl}
       />
 
@@ -523,6 +526,11 @@ export function ChatScreen({
       <ConnectorsModal
         open={connectorsOpen}
         onClose={() => setConnectorsOpen(false)}
+      />
+
+      <PermissionsModal
+        open={permissionsOpen}
+        onClose={() => setPermissionsOpen(false)}
       />
 
       <AnimatePresence>

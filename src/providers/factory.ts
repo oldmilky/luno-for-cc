@@ -15,6 +15,7 @@ import * as os from "node:os";
 import * as vscode from "vscode";
 import { ClaudeCliProvider, EffortLevel } from "./claude-cli.js";
 import { PermissionMode, StreamDelta, TaskType } from "../core/types.js";
+import type { ToolGrant } from "../core/tool-grants.js";
 import { ConventionsFile } from "../services/conventions.js";
 import { warn as logWarn } from "../services/logger.js";
 
@@ -37,6 +38,9 @@ export interface ProviderContext {
   editorContext?: string | null;
   getResumeSessionId?: () => string | undefined;
   setResumeSessionId?: (id: string) => void;
+  /** Standing "always allow" grants, read per decision so one granted from a
+   *  card silences the next call of the same turn. */
+  getToolGrants?: () => ReadonlyArray<ToolGrant>;
   /** Told the CLI's slash-command list when a turn reports one. */
   onSlashCommands?: (names: string[]) => void;
   /** Auth token (OAuth or API key) injected into the CLI's environment. */
@@ -285,6 +289,7 @@ export function createProvider(ctx: ProviderContext): ClaudeCliProvider {
     diagnostics: ctx.diagnostics,
     editorContext: ctx.editorContext,
     getResumeSessionId: ctx.getResumeSessionId,
+    getToolGrants: ctx.getToolGrants,
     setResumeSessionId: ctx.setResumeSessionId,
     onSlashCommands: ctx.onSlashCommands,
     token: ctx.token,

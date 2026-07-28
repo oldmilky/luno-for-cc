@@ -477,13 +477,14 @@ export function App() {
         onCancel={() => send({ type: "cancel" })}
         onDismissError={() => setError(null)}
         pendingPermission={pendingPermission}
-        onPermissionRespond={(behavior, restOfTurn) => {
+        onPermissionRespond={(behavior, opts) => {
           if (!pendingPermission) return;
           send({
             type: "permissionResponse",
             requestId: pendingPermission.requestId,
             behavior,
-            restOfTurn
+            restOfTurn: opts?.restOfTurn,
+            always: opts?.always
           });
           // Dequeue only the prompt we just answered; the next queued prompt
           // (if any) becomes the new head and its card renders immediately.

@@ -327,6 +327,16 @@ export interface PermissionRequestPayload {
   network?: boolean;
   /** Approval shortcuts the CLI offers (e.g. "accept edits this session"). */
   suggestions: PermissionSuggestion[];
+  /**
+   * What an "always allow" on this card would grant, already worded — e.g.
+   * `Bash(bun run …)`. Absent when no standing grant is on offer: a
+   * destructive or network call, or a shell command composed of several
+   * commands, for which no single prefix describes what is being agreed to.
+   *
+   * Computed here rather than in the webview so the button cannot promise
+   * something other than what gets stored.
+   */
+  grantLabel?: string;
 }
 
 /** How the user answered a permission prompt. */

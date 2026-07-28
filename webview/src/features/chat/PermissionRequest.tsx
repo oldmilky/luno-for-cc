@@ -13,12 +13,16 @@
 //   • Allow          (↵)     — run this one call
 //   • Allow this turn (⇧↵)   — also stop asking about similar calls
 //                              this turn (only when the CLI offers it)
+//   • Always                 — a standing grant, kept until revoked. Only
+//                              offered when the host says one is available:
+//                              never for a destructive or network call.
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useRef } from "react";
 import { ENTER_CARD } from "../../design/motion";
 import { motion } from "framer-motion";
 import type { PermissionRequestView } from "../../lib/rpc";
+import { Tooltip } from "../../design/primitives";
 import { extractFileEdits } from "./extract-file-edits";
 import { InlineEditPreview } from "./InlineEditPreview";
 import type { ToolGroupItem } from "./ToolGroupCard";
@@ -26,7 +30,10 @@ import s from "./PermissionRequest.module.scss";
 
 interface PermissionRequestProps {
   request: PermissionRequestView;
-  onRespond: (behavior: "allow" | "deny", restOfTurn?: boolean) => void;
+  onRespond: (
+    behavior: "allow" | "deny",
+    opts?: { restOfTurn?: boolean; always?: boolean }
+  ) => void;
 }
 
 const BASH_TOOLS = /^(bash|shell|run|exec|terminal)/i;
@@ -89,7 +96,7 @@ export function PermissionRequest({
     if (e.key === "Enter") {
       if (destructive) return; // focused Deny handles Enter
       e.preventDefault();
-      if (e.shiftKey && canAllowTurn) onRespond("allow", true);
+      if (e.shiftKey && canAllowTurn) onRespond("allow", { restOfTurn: true });
       else onRespond("allow");
     }
   };
@@ -146,11 +153,27 @@ export function PermissionRequest({
         {canAllowTurn && !destructive && (
           <button
             type="button"
-            onClick={() => onRespond("allow", true)}
+            onClick={() => onRespond("allow", { restOfTurn: true })}
             className={s.allowTurn}
           >
             Allow this turn
           </button>
+        )}
+        {/* The host decides whether a standing grant is on offer and how it
+            reads. Absent means there is none: a destructive or network call,
+            or a command with no single prefix that describes it. */}
+        {request.grantLabel && (
+          <Tooltip
+            label={`Never ask about ${request.grantLabel} again, in any project. Revoke from the shield in the header.`}
+          >
+            <button
+              type="button"
+              onClick={() => onRespond("allow", { always: true })}
+              className={s.allowAlways}
+            >
+              Always
+            </button>
+          </Tooltip>
         )}
         <button
           ref={allowRef}

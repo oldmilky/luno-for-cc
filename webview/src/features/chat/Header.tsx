@@ -43,6 +43,9 @@ interface HeaderProps {
   streaming: string;
   onOpenHistory: () => void;
   onOpenConnectors: () => void;
+  /** The standing-grants list. In the header rather than behind a menu because
+   *  a permission you cannot find is one you cannot revoke. */
+  onOpenPermissions: () => void;
   /** Whether this conversation is reachable from another device. */
   remoteControl: RemoteControlStatus;
 }
@@ -68,6 +71,7 @@ export function Header({
   streaming,
   onOpenHistory,
   onOpenConnectors,
+  onOpenPermissions,
   remoteControl
 }: HeaderProps) {
   const [newChatTick, setNewChatTick] = useState(0);
@@ -167,6 +171,12 @@ export function Header({
             title="Connectors (MCP servers)"
             size={28}
             onClick={onOpenConnectors}
+          />
+          <IconButton
+            icon="shield"
+            title="Standing permissions"
+            size={28}
+            onClick={onOpenPermissions}
           />
           <div className={s.divider} />
           <IconButton

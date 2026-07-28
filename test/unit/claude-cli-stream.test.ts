@@ -356,3 +356,77 @@ describe("ClaudeCliProvider.stream — backgrounded subagents", () => {
     expect(collected.some((d) => d.type === "done")).toBe(true);
   });
 });
+
+// The wedge watchdog measures SILENCE, not elapsed time. As a deadline from
+// spawn it killed turns that were working perfectly — a long build, a long test
+// run or a fleet of background agents all look identical to a wall clock, and
+// the SIGKILL landed mid-message with no error and nothing in the transcript to
+// say why.
+describe("ClaudeCliProvider.stream — silence watchdog", () => {
+  let child: any;
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    child = makeFakeChild();
+    (spawn as unknown as ReturnType<typeof vi.fn>).mockReturnValue(child);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("does not kill a turn that keeps emitting past the budget", async () => {
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      silenceTimeoutMs: 60
+    });
+    const { collected, finished } = await drive(provider);
+
+    // Six steps at 25ms — 150ms total, well past the 60ms budget, but never
+    // 60ms quiet. This is the shape of a turn driving background agents.
+    for (let i = 0; i < 6; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      child.emitLine({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "t1",
+        description: `step ${i}`,
+        last_tool_name: "Grep"
+      });
+      expect(child.killed).toBe(false);
+    }
+
+    child.emitLine({ type: "result", subtype: "success", result: "done" });
+    await finished;
+    expect(collected.some((d) => d.type === "error")).toBe(false);
+  });
+
+  it("kills a CLI that has gone completely silent", async () => {
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      silenceTimeoutMs: 40
+    });
+    await drive(provider);
+
+    expect(child.killed).toBe(false);
+    await new Promise((r) => setTimeout(r, 90));
+    expect(child.killed).toBe(true);
+    expect(child.signalCode).toBe("SIGKILL");
+  });
+
+  it("counts stderr output as a sign of life", async () => {
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      silenceTimeoutMs: 60
+    });
+    await drive(provider);
+
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      child.stderr.write("compiling…\n");
+    }
+    expect(child.killed).toBe(false);
+  });
+});

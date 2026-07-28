@@ -15,6 +15,7 @@ import {
   isTerminalTaskStatus,
   PermissionMode,
   PermissionBehavior,
+  PermissionRequestPayload,
   RemoteControlStatus,
   StreamDelta,
   SubagentUpdate
@@ -76,6 +77,14 @@ import {
 } from "./domains/files.js";
 import { capturedRun, capturedRuns } from "./domains/terminal-capture.js";
 import { expandTerminalMentions } from "../core/terminal-output.js";
+import { grantFor, grantLabel } from "../core/tool-grants.js";
+import {
+  broadcastGrants,
+  grantTool,
+  readGrants,
+  revokeAllTools,
+  revokeTool
+} from "./domains/tool-grants.js";
 import { collectDiagnostics } from "./domains/diagnostics.js";
 import { collectEditorContext } from "./domains/editor-context.js";
 import {
@@ -183,6 +192,10 @@ export interface SharedServices {
    * every keybinding scoped to the chat can never match.
    */
   focusChanged(host: ConversationHost, focused: boolean): void;
+  /** Post to every open conversation. For facts that belong to the account or
+   *  the machine rather than to one chat — the standing grants are global, so
+   *  revoking one in a tab has to empty the list in the sidebar too. */
+  broadcast(msg: unknown): void;
 }
 
 /**
@@ -306,6 +319,12 @@ export class ConversationHost {
   private busy = false;
   private streamed = "";
   private pendingRequest?: unknown;
+  /** Every approval this turn has asked for, by id. Read only when the user
+   *  answers with "always", and cleared with the turn. */
+  private readonly askedPermissions = new Map<
+    string,
+    PermissionRequestPayload
+  >();
   /**
    * What the user typed while this conversation was mid-turn, waiting for the
    * turn to end. It lives here rather than in the webview because a
@@ -594,6 +613,7 @@ export class ConversationHost {
       this.busy = false;
       this.streamed = "";
       this.pendingRequest = undefined;
+      this.askedPermissions.clear();
     } else if (m.type === "delta" && m.delta?.type === "text") {
       this.streamed += m.delta.text ?? "";
     } else if (m.type === "timeline") {
@@ -602,7 +622,15 @@ export class ConversationHost {
       const kind = (msg as { event?: { kind?: string } }).event?.kind;
       if (kind === "assistant" || kind === "tool_call") this.streamed = "";
     } else if (m.type === "permissionRequest") {
-      this.pendingRequest = (msg as { request?: unknown }).request;
+      const request = (msg as { request?: unknown }).request;
+      this.pendingRequest = request;
+      // Kept by id as well, because "always allow" has to derive the grant
+      // from what the CLI actually asked for. Taking the webview's word for
+      // what it was showing would make the panel the authority on what it is
+      // being granted, and parallel tool calls mean the newest request is not
+      // necessarily the one being answered.
+      const asked = request as PermissionRequestPayload | undefined;
+      if (asked?.requestId) this.askedPermissions.set(asked.requestId, asked);
     } else if (m.type === "permissionResolved") {
       // Matched by id: a withdrawn request must not take a *different* prompt
       // off the surface with it. Answering the phone's question while another
@@ -982,6 +1010,25 @@ export class ConversationHost {
     await this.handlePrompt(text);
   }
 
+  /**
+   * Turn "always allow" on a card into a standing grant.
+   *
+   * The call is looked up by id rather than taken from the message: the panel
+   * says *which* approval it answered, and the host decides what that approval
+   * was for. A destructive or network call is refused outright — the card does
+   * not offer the button for one, and this is the half that has to hold if the
+   * message arrives anyway.
+   */
+  private async grantFromRequest(requestId: string): Promise<void> {
+    const asked = this.askedPermissions.get(requestId);
+    if (!asked || asked.destructive || asked.network) return;
+    const grant = grantFor(asked.toolName, asked.input);
+    if (!grant) return;
+    const grants = await grantTool(this.ctx, grant);
+    logInfo(`[luno] standing grant added: ${grantLabel(grant)}`);
+    this.shared.broadcast({ type: "toolGrants", grants });
+  }
+
   /** Put text in the composer without sending it. The way in from outside the
    *  editor — a `vscode://` link — and deliberately the whole of what such a
    *  link can do. */
@@ -1118,12 +1165,15 @@ export class ConversationHost {
     },
     dropQueued: () => this.clearQueued(),
     newSession: () => this.newSession(),
-    permissionResponse: (m) => {
+    permissionResponse: async (m) => {
       const requestId = str(m, "requestId");
       const behavior = oneOf(m, "behavior", ["allow", "deny"] as const);
       if (!requestId || !behavior) return;
       this.awaitingApproval = false;
       this.refreshSurface();
+      if (behavior === "allow" && m.always === true) {
+        await this.grantFromRequest(requestId);
+      }
       if (!this.activeProvider?.respondToPermission) {
         logWarn(
           "[luno] permissionResponse arrived but no active provider to answer it"
@@ -1270,6 +1320,16 @@ export class ConversationHost {
         str(m, "id") ?? "",
         this.workingRoot
       );
+    },
+    requestToolGrants: () => broadcastGrants(this.post, readGrants(this.ctx)),
+    revokeToolGrant: async (m) => {
+      const key = str(m, "key");
+      if (!key) return;
+      const grants =
+        key === "*"
+          ? await revokeAllTools(this.ctx)
+          : await revokeTool(this.ctx, key);
+      this.shared.broadcast({ type: "toolGrants", grants });
     },
     requestTerminals: (m) => {
       this.post({
@@ -1907,6 +1967,7 @@ export class ConversationHost {
       setResumeSessionId: (id) => {
         this.resumeId = id;
       },
+      getToolGrants: () => readGrants(this.ctx),
       onSlashCommands: (names) => {
         rememberCliCommands(this.ctx, names);
         void broadcastSlashCommands(this.post, this.ctx, this.workingRoot);
@@ -2070,6 +2131,9 @@ export class ConversationHost {
           setResumeSessionId: (id) => {
             this.resumeId = id;
           },
+          // Read per decision, not captured here: granting one from a card
+          // has to silence the very next call of the same turn.
+          getToolGrants: () => readGrants(this.ctx),
           onSlashCommands: (names) => {
             rememberCliCommands(this.ctx, names);
             void broadcastSlashCommands(this.post, this.ctx, this.workingRoot);

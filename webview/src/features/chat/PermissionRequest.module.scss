@@ -1,6 +1,5 @@
 // ─────────────────────────────────────────────────────────────
 // Permission request — the inline approve/deny card.
-// Converted from Tailwind + inline styles in Ф2а.
 //
 // The risk tone used to be a JS string ("var(--err)" | "var(--warn)"
 // | "var(--accent)") threaded through three inline styles. It is now
@@ -183,6 +182,15 @@
 }
 
 .allowTurn {
+  @extend %ghost;
+  color: var(--t3);
+  font-weight: 500;
+}
+
+// Quieter than Allow on purpose. This is the only button on the card whose
+// effect outlives the conversation, and a standing grant should be something
+// the user reaches for rather than something they land on.
+.allowAlways {
   @extend %ghost;
   color: var(--t3);
   font-weight: 500;

@@ -106,15 +106,44 @@ sits in `patch` — which is why the host keeps a task-id map and closes the car
 on `task_notification`, the only phase with the summary. Anything still open
 when the turn ends is swept: the CLI process does not outlive the turn.
 
-## 2. Permissions cannot be granted permanently from the UI
+## 2. Permissions cannot be granted permanently from the UI — **DONE 2026-07-28**
 
-**Size: medium.** `webview/src/features/chat/PermissionRequest.tsx` offers
-Deny / Allow this turn / Allow, and "this turn" only appears when the CLI sent a
-`setMode` suggestion. There is no "always allow this tool", no list of what has
-been granted, and nothing to revoke. The only durable allowlist is
-`luno.allowedBashPatterns`, editable by hand in settings.json.
+An approval card now offers **Always** beside Deny / Allow, and the header's
+shield opens the list of what has been granted, with revoke and revoke-all.
 
-Note before touching this: LUNO's permission design is deliberately stricter
+**Where they live: `globalState`, in force in every folder the user opens.**
+That was chosen deliberately over per-workspace, and it is the riskier of the
+two — a grant made in your own repository applies inside a clone of someone
+else's. Two things answer for it, and neither is decoration: the list says so
+in running text above itself, and the gate below still runs first.
+
+**A grant is checked inside the branch the destructive/network gate already
+declined.** That ordering is the whole safety argument, so it is pinned by
+tests rather than left to a comment: `Bash(rm …)` cannot be granted, a granted
+`Bash(bun run …)` does not cover `bun run lint && rm -rf /`, and a grant naming
+`curl` still prompts.
+
+Two decisions worth keeping:
+
+- **The grant is a tool plus the leading words of its command**, not a tool
+  name. "Always allow Bash" is a permission mode wearing a disguise. A composed
+  command (pipe, chain, redirect, substitution, leading assignment) is offered
+  no grant at all — the user is looking at one card describing several
+  commands, and no single prefix describes what they would be agreeing to.
+- **The button's wording is computed host-side** (`grantLabel` on the request
+  payload) rather than derived in the webview, so the button cannot promise
+  something other than what gets stored. The host also re-derives the grant
+  from the request it is answering rather than taking the panel's word for it.
+
+Where it lives: `src/core/tool-grants.ts` (pure, tested), the `grants` branch
+of `decidePermission`, `src/ui/domains/tool-grants.ts` (storage),
+`PermissionsModal.tsx` + the shield in `Header.tsx`.
+
+`luno.allowedBashPatterns` is untouched and still the hand-edited allowlist it
+always was; the two do not know about each other, which is worth knowing before
+anyone tries to unify them.
+
+Note before touching any of this: LUNO's permission design is deliberately stricter
 than upstream — `auto` maps to the CLI's `default` rather than `acceptEdits`,
 and destructive/network calls are never auto-allowed even when they match the
 allowlist. Read `decidePermission` and the destructive/network gate in

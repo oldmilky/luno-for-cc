@@ -169,6 +169,7 @@ export class ConversationRegistry {
       models,
       auth,
       rateLimits,
+      broadcast: this.broadcast,
       conversationFor: (sessionId) => this.conversationFor(sessionId),
       openConversationInTab: (sessionId) => void this.openInTab(sessionId),
       showConversation: (sessionId) => void this.showInSidebar(sessionId),

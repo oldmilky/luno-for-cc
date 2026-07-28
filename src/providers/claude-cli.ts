@@ -4,6 +4,12 @@ import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { ChatProvider, ProviderRequest } from "./base.js";
 import {
+  coveredByGrants,
+  grantFor,
+  grantLabel,
+  type ToolGrant
+} from "../core/tool-grants.js";
+import {
   ContentBlock,
   Message,
   PermissionBehavior,
@@ -20,13 +26,25 @@ import {
 import { getModePrompt, getTaskTypePrompt } from "../services/prompt-loader.js";
 import { ConventionsFile } from "../services/conventions.js";
 
-const HARD_TIMEOUT_MS = 10 * 60 * 1000;
+/**
+ * How long the CLI may produce nothing at all — not one stdout line, not one
+ * stderr byte — before it is treated as wedged and SIGKILLed.
+ *
+ * Measured from the last sign of life, never from spawn. As a deadline from
+ * spawn this killed turns that were working perfectly: a `/audit` driving a
+ * fleet of background agents died at exactly 10 minutes, mid-message, with no
+ * error, no partial result and nothing in the transcript to say why. A long
+ * build, a long test run and a subagent fleet are all silent-looking to a
+ * wall clock and none of them are wedged. Real wedging is silence, so that is
+ * what is measured.
+ */
+const SILENCE_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** Latency-bounded tools that should return a result in seconds, not minutes.
  *  If the CLI wedges inside one of these and never emits a `tool_result`
  *  (e.g. WebFetch hanging on a slow/streaming endpoint), the per-tool stall
  *  watchdog ends the turn cleanly rather than letting the UI spinner run until
- *  the 10-minute HARD_TIMEOUT_MS SIGKILL. Bash and other potentially
+ *  the SILENCE_TIMEOUT_MS SIGKILL. Bash and other potentially
  *  long-running tools are deliberately NOT watched here. */
 const STALL_WATCHDOG_TOOLS: ReadonlySet<string> = new Set([
   "WebFetch",
@@ -299,6 +317,11 @@ export interface ClaudeCliOpts {
   cwd: string;
   permissionMode?: PermissionMode;
   allowedBashPatterns?: string[];
+  /** Standing grants, read fresh on every decision rather than captured at
+   *  construction: granting one from a card has to take effect on the very
+   *  next call of that turn, and the provider outlives no reload but does
+   *  outlive the decision. */
+  getToolGrants?: () => ReadonlyArray<ToolGrant>;
   /** Skill ids the user toggled OFF in the picker. Enforced via
    *  --disallowedTools "Skill(<id>)" plus a system-prompt append. */
   disabledSkills?: string[];
@@ -352,6 +375,10 @@ export interface ClaudeCliOpts {
   /** How long the turn waits on a quiet backgrounded subagent before ending
    *  anyway. Defaults to BACKGROUND_TASK_GRACE_MS; tests shorten it. */
   backgroundGraceMs?: number;
+  /** How long the CLI may emit nothing before it's killed as wedged. Reset by
+   *  every stdout line and stderr byte. Defaults to SILENCE_TIMEOUT_MS; tests
+   *  shorten it. */
+  silenceTimeoutMs?: number;
   /**
    * Keep one CLI process alive across turns instead of spawning per turn.
    * Required by Remote Control, which lives exactly as long as its process.
@@ -622,7 +649,8 @@ export class ClaudeCliProvider implements ChatProvider {
       req.input,
       {
         autoAllowEdits: this.autoAllowEdits,
-        agentMode: (this.opts.permissionMode ?? "default") === "auto"
+        agentMode: (this.opts.permissionMode ?? "default") === "auto",
+        grants: this.opts.getToolGrants?.()
       }
     );
     if (action === "allow") {
@@ -644,7 +672,8 @@ export class ClaudeCliProvider implements ChatProvider {
       description: req.description,
       destructive,
       network,
-      suggestions: (req.permission_suggestions ?? []) as PermissionSuggestion[]
+      suggestions: (req.permission_suggestions ?? []) as PermissionSuggestion[],
+      grantLabel: offeredGrantLabel(toolName, req.input, destructive, network)
     };
     this.pendingPermissions.set(requestId, payload);
     logInfo(
@@ -711,13 +740,31 @@ export class ClaudeCliProvider implements ChatProvider {
       }
     }
 
-    const timeout = setTimeout(() => child.kill("SIGKILL"), HARD_TIMEOUT_MS);
+    let silenceTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearSilence = () => {
+      if (silenceTimer) clearTimeout(silenceTimer);
+      silenceTimer = undefined;
+    };
+    /** (Re)start the countdown from this moment — the child just showed a sign
+     *  of life, so the budget it gets is measured from here. */
+    const armSilence = () => {
+      if (silenceTimer) clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(
+        () => child.kill("SIGKILL"),
+        this.opts.silenceTimeoutMs ?? SILENCE_TIMEOUT_MS
+      );
+    };
+    armSilence();
+
     const rl = readline.createInterface({
       input: child.stdout!,
       crlfDelay: Infinity
     });
     let stderrBuf = "";
-    child.stderr!.on("data", (b: Buffer) => (stderrBuf += b.toString("utf8")));
+    child.stderr!.on("data", (b: Buffer) => {
+      armSilence();
+      stderrBuf += b.toString("utf8");
+    });
 
     const queue: StreamDelta[] = [];
     let resolver: (() => void) | null = null;
@@ -734,7 +781,7 @@ export class ClaudeCliProvider implements ChatProvider {
 
     // Per-tool stall watchdog: if a latency-bounded tool (WebFetch/WebSearch)
     // never returns a result, surface a timeout result so the UI spinner clears
-    // and stop the wedged CLI — instead of spinning until HARD_TIMEOUT_MS. The
+    // and stop the wedged CLI — instead of spinning until SILENCE_TIMEOUT_MS. The
     // CLI can't be told to abandon a single hung tool, so killing it (ending
     // the turn) is the only recovery.
     stallWatch = createToolStallWatchdog({
@@ -811,6 +858,7 @@ export class ClaudeCliProvider implements ChatProvider {
     let sawResult = false;
 
     rl.on("line", (line) => {
+      armSilence();
       const trimmed = line.trim();
       if (!trimmed) return;
       let ev: CliEvent;
@@ -863,7 +911,7 @@ export class ClaudeCliProvider implements ChatProvider {
     });
 
     const onExit = () => {
-      clearTimeout(timeout);
+      clearSilence();
       stallWatch?.clearAll();
       if (child.exitCode !== 0 && child.signalCode !== "SIGTERM") {
         const msg = exitFailure(stderrBuf, child.exitCode, sawResult);
@@ -892,7 +940,7 @@ export class ClaudeCliProvider implements ChatProvider {
         });
       }
     } finally {
-      clearTimeout(timeout);
+      clearSilence();
       stallWatch?.clearAll();
       this.abortCurrent = null;
       this.pendingPermissions.clear();
@@ -1836,6 +1884,26 @@ export function isNetworkRequest(
   return /(^|[_-])(web|fetch|http|download|url|browse)/i.test(toolName);
 }
 
+/**
+ * The wording for an "always allow" button, or `undefined` when the card must
+ * not offer one.
+ *
+ * Destructive and network calls are refused here as well as in
+ * `decidePermission`. Two checks for one rule is deliberate: this one keeps the
+ * button off the screen, and that one would refuse the grant even if a message
+ * arrived claiming otherwise.
+ */
+function offeredGrantLabel(
+  toolName: string,
+  input: Record<string, unknown> | undefined,
+  destructive: boolean,
+  network: boolean
+): string | undefined {
+  if (destructive || network) return undefined;
+  const grant = grantFor(toolName, input);
+  return grant ? grantLabel(grant) : undefined;
+}
+
 export type PermissionAction = "allow" | "prompt";
 
 export interface PermissionDecision {
@@ -1860,6 +1928,9 @@ export interface PermissionDecision {
  * claimed it did.
  *
  * **Ask (`default`)** — the conservative list, unchanged:
+ *  - A standing grant the user made from an approval card auto-allows. It is
+ *    checked here, below the gate, so "always allow `Bash(bun run …)`" can
+ *    never become "always allow `rm`".
  *  - Plan/answer helper tools auto-allow (they have their own UI).
  *  - Read-only inspection tools (Read/Glob/Grep/LS/NotebookRead and read-only
  *    MCP queries) always auto-allow — they only observe, never mutate.
@@ -1872,12 +1943,22 @@ export interface PermissionDecision {
 export function decidePermission(
   toolName: string,
   input: Record<string, unknown> | undefined,
-  ctx: { autoAllowEdits: boolean; agentMode?: boolean }
+  ctx: {
+    autoAllowEdits: boolean;
+    agentMode?: boolean;
+    /** Standing "always allow" grants. Consulted only inside the branch both
+     *  gates already declined, which is what makes it structurally impossible
+     *  for a grant to auto-run `rm` or `curl` however it was worded. */
+    grants?: ReadonlyArray<ToolGrant>;
+  }
 ): PermissionDecision {
   const destructive = isDestructiveRequest(toolName, input);
   const network = isNetworkRequest(toolName, input);
   if (!destructive && !network) {
     if (ctx.agentMode) return { action: "allow", destructive, network };
+    if (ctx.grants?.length && coveredByGrants(ctx.grants, toolName, input)) {
+      return { action: "allow", destructive, network };
+    }
     if (PERMISSION_AUTO_ALLOW.has(toolName))
       return { action: "allow", destructive, network };
     // Read-only inspection (file reads, globs, greps, read-only MCP queries)

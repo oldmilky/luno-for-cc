@@ -616,6 +616,91 @@ describe("decidePermission policy", () => {
     expect(d.destructive).toBe(true);
   });
 
+  // ── Standing grants, and the line they cannot cross ─────────────
+  // A grant is checked below the destructive/network gate, which is what makes
+  // "always allow Bash(bun run …)" structurally unable to become "always allow
+  // rm". These tests are the reason that ordering is not free to change.
+  describe("standing grants", () => {
+    const granted = (...grants: Array<{ tool: string; prefix?: string }>) => ({
+      autoAllowEdits: false,
+      grants
+    });
+
+    it("allows a call a grant covers", () => {
+      const d = decidePermission(
+        "Bash",
+        { command: "bun run test" },
+        granted({ tool: "Bash", prefix: "bun run" })
+      );
+      expect(d.action).toBe("allow");
+    });
+
+    it("allows a prefix-less grant on a tool that takes no command", () => {
+      expect(
+        decidePermission(
+          "Write",
+          { file_path: "a.ts" },
+          granted({ tool: "Write" })
+        ).action
+      ).toBe("allow");
+    });
+
+    it("still prompts for a call no grant covers", () => {
+      expect(
+        decidePermission(
+          "Bash",
+          { command: "git push" },
+          granted({ tool: "Bash", prefix: "bun run" })
+        ).action
+      ).toBe("prompt");
+    });
+
+    // The property the whole feature rests on. A granted prefix must not
+    // become a way to run something else behind it.
+    it("cannot be used to smuggle a destructive command in behind a grant", () => {
+      const d = decidePermission(
+        "Bash",
+        { command: "bun run lint && rm -rf /" },
+        granted({ tool: "Bash", prefix: "bun run" })
+      );
+      expect(d.action).toBe("prompt");
+      expect(d.destructive).toBe(true);
+    });
+
+    it("cannot grant a destructive tool even when the grant names it", () => {
+      const d = decidePermission(
+        "Bash",
+        { command: "rm -rf build" },
+        granted({ tool: "Bash", prefix: "rm" })
+      );
+      expect(d.action).toBe("prompt");
+      expect(d.destructive).toBe(true);
+    });
+
+    it("cannot grant a network call even when the grant names it", () => {
+      const d = decidePermission(
+        "Bash",
+        { command: "curl https://example.com" },
+        granted({ tool: "Bash", prefix: "curl" })
+      );
+      expect(d.action).toBe("prompt");
+      expect(d.network).toBe(true);
+    });
+
+    it("changes nothing when there are no grants", () => {
+      expect(
+        decidePermission(
+          "Bash",
+          { command: "bun run test" },
+          {
+            autoAllowEdits: false,
+            grants: []
+          }
+        ).action
+      ).toBe("prompt");
+    });
+  });
+
   it("still prompts for network commands even with edits-this-turn enabled", () => {
     const d = decidePermission("Bash", { command: "curl https://x" }, auto);
     expect(d.action).toBe("prompt");

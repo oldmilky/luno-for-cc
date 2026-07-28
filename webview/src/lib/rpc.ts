@@ -244,6 +244,19 @@ export interface TerminalRunView {
   exitCode?: number;
 }
 
+/**
+ * A standing "always allow", as the list shows it. Mirrors `ToolGrant` in
+ * src/core/tool-grants.ts.
+ *
+ * Grants are stored globally — in force in every folder the user opens — which
+ * is exactly why the panel has a list of them at all.
+ */
+export interface ToolGrantView {
+  tool: string;
+  /** Leading words of the command, shell tools only. */
+  prefix?: string;
+}
+
 /** Mirrors `SlashCommand` in src/services/slash-commands.ts. Expansion is the
  *  CLI's own — this only drives the composer's popover. */
 export interface SlashCommand {
@@ -285,6 +298,10 @@ export interface PermissionRequestView {
   /** True for network / external-access commands (curl, ssh, git push, web
    *  fetch). The card flags it as reaching outside the workspace. */
   network?: boolean;
+  /** What "always allow" would grant, already worded — `Bash(bun run …)`.
+   *  Absent means no standing grant is on offer and the button is not shown:
+   *  a destructive or network call, or a composed shell command. */
+  grantLabel?: string;
   /** Approval shortcuts the CLI offers (drives the "allow this turn" button). */
   suggestions: PermissionSuggestion[];
 }
@@ -422,6 +439,10 @@ export type Outbound =
       behavior: "allow" | "deny";
       /** Allow + stop prompting for similar calls for the rest of this turn. */
       restOfTurn?: boolean;
+      /** Allow + never ask about this shape of call again. The host derives
+       *  what "this shape" means from the request it is answering — the panel
+       *  says which approval, not what to grant. */
+      always?: boolean;
     }
   | { type: "newSession" }
   | { type: "setModel"; model: string }
@@ -538,7 +559,10 @@ export type Outbound =
   /** Terminals with a captured run, for the `@terminal:` half of the mention
    *  popover. Asked for on every keystroke behind the same debounce as the
    *  file search, because a command can finish while the popover is open. */
-  | { type: "requestTerminals"; id: string };
+  | { type: "requestTerminals"; id: string }
+  | { type: "requestToolGrants" }
+  /** Revoke one standing grant, or all of them with `"*"`. */
+  | { type: "revokeToolGrant"; key: string };
 
 // ── Inbound (extension → webview) ─────────────────────────────
 
@@ -618,6 +642,9 @@ export type Inbound =
     }
   | { type: "fileSearchResults"; id: string; results: FileSearchResult[] }
   | { type: "terminalList"; id: string; terminals: TerminalRunView[] }
+  /** Every standing grant, after any change. Broadcast to all conversations —
+   *  they are global, so revoking one in a tab empties the sidebar's list. */
+  | { type: "toolGrants"; grants: ToolGrantView[] }
   /** Settings the webview itself acts on, as opposed to the many the host
    *  reads on its behalf. Sent on attach and whenever the user edits one. */
   | { type: "settings"; useCtrlEnterToSend: boolean }

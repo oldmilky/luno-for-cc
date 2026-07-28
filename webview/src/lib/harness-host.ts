@@ -96,6 +96,12 @@ export function harnessReplies(
         }
       ]
     },
+    // Two shapes, because the list renders them differently: a shell grant
+    // shows the command prefix it is bounded by, and a tool grant has none.
+    requestToolGrants: {
+      type: "toolGrants",
+      grants: [{ tool: "Bash", prefix: "bun run" }, { tool: "Write" }]
+    },
     requestTerminals: {
       type: "terminalList",
       id: "",
