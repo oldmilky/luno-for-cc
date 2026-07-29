@@ -20,8 +20,13 @@ import { MarkdownBody } from "./markdown";
 import { formatDuration } from "./tool-buckets";
 import { send } from "../../lib/rpc";
 import type { SubagentTaskView } from "../../lib/rpc";
-import { groupWorkflowProgress, isWorkflowAgentDone } from "./subagent-state";
+import {
+  groupWorkflowProgress,
+  workflowAgentOutcome,
+  subagentOutcome
+} from "./subagent-state";
 import type { WorkflowPhaseGroup } from "./subagent-state";
+import type { WorkflowProgressEntry } from "../../lib/rpc";
 import s from "./SubagentCard.module.scss";
 
 interface SubagentCardProps {
@@ -31,17 +36,19 @@ interface SubagentCardProps {
   fallbackMs?: number;
 }
 
-/** Statuses that mean the agent stopped without producing its answer. */
-const FAILED = new Set(["failed", "error", "cancelled", "canceled"]);
-
 export function SubagentCard({ task, fallbackMs }: SubagentCardProps) {
   const [open, setOpen] = useState(false);
 
-  const running = !task.status || task.status === "running";
-  const failed = FAILED.has(task.status ?? "");
-  const interrupted = task.status === "interrupted";
+  const outcome = subagentOutcome(task.status);
+  const running = outcome === "running";
+  const failed = outcome === "failed";
+  const interrupted = outcome === "interrupted";
   const ms = task.durationMs ?? fallbackMs;
-  const body = task.summary?.trim();
+  // Never while it runs: an answer belongs to a task that has finished, and a
+  // card offering one mid-flight is claiming a result nobody produced. The
+  // provider gates this too — this is the second lock, because the card is
+  // where it would be visible and the card has no render test.
+  const body = running ? undefined : task.summary?.trim();
   const outputFile = task.outputFile;
   // A workflow reaches this card through the same events an agent does and
   // means something different by half of them — see `SubagentTask.taskType`.
@@ -81,19 +88,22 @@ export function SubagentCard({ task, fallbackMs }: SubagentCardProps) {
         </span>
         <span className={s.desc}>{headline(task, running)}</span>
         <span className={s.meta}>
-          {/* A workflow's `tool_uses` counts the orchestrator's own calls, which
-              is 0 for a script that only dispatches. What it has instead of
-              steps is agents, so that is what the header counts. */}
-          {isWorkflow && agentCount(phases) > 0 && (
+          {/* A workflow counts agents rather than steps when it can. It cannot
+              always: `workflow_progress` rides the live path only, so a card
+              restored from a stored session has none — and a header that then
+              said nothing at all was worse than the step count it replaced. */}
+          {isWorkflow && agentCount(phases) > 0 ? (
             <span className={s.count}>
               {agentCount(phases)}{" "}
               {agentCount(phases) === 1 ? "agent" : "agents"}
             </span>
-          )}
-          {!isWorkflow && task.toolUses !== undefined && task.toolUses > 0 && (
-            <span className={s.count}>
-              {task.toolUses} {task.toolUses === 1 ? "step" : "steps"}
-            </span>
+          ) : (
+            task.toolUses !== undefined &&
+            task.toolUses > 0 && (
+              <span className={s.count}>
+                {task.toolUses} {task.toolUses === 1 ? "step" : "steps"}
+              </span>
+            )
           )}
           {ms !== undefined && (
             <span className={s.count}>{formatDuration(ms)}</span>
@@ -159,31 +169,20 @@ export function SubagentCard({ task, fallbackMs }: SubagentCardProps) {
                         <div className={s.phaseTitle}>{phase.title}</div>
                       )}
                       {phase.agents.map((agent, i) => (
-                        <div
-                          key={agent.agentId ?? `${phase.index}-${i}`}
-                          className={[
-                            s.agent,
-                            isWorkflowAgentDone(agent) ? s.agentDone : ""
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}
-                        >
-                          <span className={s.agentState} aria-hidden>
-                            {isWorkflowAgentDone(agent) ? (
-                              <Icon name="check" size={9} />
-                            ) : (
-                              <span className={s.agentSpinner} />
-                            )}
-                          </span>
-                          <span className={s.agentLabel}>
-                            {agent.label ?? agent.promptPreview ?? "Agent"}
-                          </span>
-                          {agent.durationMs !== undefined && (
-                            <span className={s.agentMeta}>
-                              {formatDuration(agent.durationMs)}
-                            </span>
-                          )}
-                        </div>
+                        <WorkflowAgentRow
+                          // The CLI resends the whole array on every move, so
+                          // the row has to be keyed by the agent's own identity
+                          // — `agentId`, else the index it was given. A
+                          // position key relabels a row in place when two
+                          // agents in a phase swap order.
+                          key={
+                            agent.agentId ??
+                            (agent.index !== undefined
+                              ? `i${agent.index}`
+                              : `${phase.index}-${i}`)
+                          }
+                          agent={agent}
+                        />
                       ))}
                     </div>
                   ))}
@@ -214,6 +213,49 @@ export function SubagentCard({ task, fallbackMs }: SubagentCardProps) {
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+/**
+ * One agent inside a running workflow.
+ *
+ * Reads its outcome through the same mapping the card itself uses. A boolean
+ * here is what let an errored agent draw a tick and a failed one spin forever:
+ * two words out of the CLI's eight, treated as the whole vocabulary.
+ */
+function WorkflowAgentRow({ agent }: { agent: WorkflowProgressEntry }) {
+  const outcome = workflowAgentOutcome(agent);
+  const result = agent.resultPreview?.trim();
+  return (
+    <div
+      className={[s.agent, outcome === "running" ? "" : s.agentDone]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <span
+        className={[
+          s.agentState,
+          outcome === "failed" ? s.agentFailed : "",
+          outcome === "interrupted" ? s.agentInterrupted : ""
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        aria-hidden
+      >
+        {outcome === "running" && <span className={s.agentSpinner} />}
+        {outcome === "done" && <Icon name="check" size={9} />}
+        {(outcome === "failed" || outcome === "interrupted") && (
+          <Icon name="x" size={9} />
+        )}
+      </span>
+      <span className={s.agentLabel}>
+        {agent.label ?? agent.promptPreview ?? "Agent"}
+        {result && <span className={s.agentResult}>{result}</span>}
+      </span>
+      {agent.durationMs !== undefined && (
+        <span className={s.agentMeta}>{formatDuration(agent.durationMs)}</span>
+      )}
+    </div>
   );
 }
 

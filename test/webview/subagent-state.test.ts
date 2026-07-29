@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   foldSubagents,
   groupWorkflowProgress,
-  isWorkflowAgentDone,
+  workflowAgentOutcome,
+  subagentOutcome,
   TASK_TOOL_NAMES
 } from "../../webview/src/features/chat/subagent-state";
 import type { TimelineEvent } from "../../webview/src/lib/rpc";
@@ -211,18 +212,95 @@ describe("workflow progress", () => {
     expect(groups[0].agents[0].label).toBe("loose");
   });
 
-  // Unknown states read as still running, the same way an unknown task status
-  // does — a spinner corrects itself, a premature tick does not.
-  it("counts only the states that mean the agent stopped", () => {
-    expect(isWorkflowAgentDone({ type: "workflow_agent", state: "done" })).toBe(
-      true
-    );
-    expect(
-      isWorkflowAgentDone({ type: "workflow_agent", state: "error" })
-    ).toBe(true);
-    expect(
-      isWorkflowAgentDone({ type: "workflow_agent", state: "start" })
-    ).toBe(false);
-    expect(isWorkflowAgentDone({ type: "workflow_agent" })).toBe(false);
+  // An agent with no phase must sort *after* the real ones. Its group renders
+  // without a heading, and at the front that headless list read as an
+  // unlabelled first phase sitting above the workflow's actual work.
+  it("puts agents that named no phase last, not first", () => {
+    const groups = groupWorkflowProgress([
+      phase(1, "Find"),
+      phase(2, "Verify"),
+      { type: "workflow_agent", label: "loose" },
+      agent(1, "grep the logs")
+    ]);
+
+    expect(groups.map((g) => g.title)).toEqual(["Find", "Verify", ""]);
+    expect(groups[2].agents[0].label).toBe("loose");
+  });
+
+  // The row's outcome comes from the same mapping the card uses. A boolean here
+  // drew a tick on an errored agent and span forever on a failed one — the CLI
+  // sends eight words and the predicate knew two.
+  it("reads every state the CLI actually sends", () => {
+    const state = (s?: string) =>
+      workflowAgentOutcome({ type: "workflow_agent", state: s });
+
+    expect(state("start")).toBe("running");
+    expect(state("running")).toBe("running");
+    expect(state(undefined)).toBe("running");
+    expect(state("done")).toBe("done");
+    expect(state("completed")).toBe("done");
+    expect(state("error")).toBe("failed");
+    expect(state("failed")).toBe("failed");
+    expect(state("killed")).toBe("interrupted");
+    expect(state("skipped")).toBe("interrupted");
+  });
+
+  // The regression this pair exists to prevent: two functions in one file
+  // disagreeing about the same word.
+  it("agrees with the card's own mapping on every word", () => {
+    for (const word of [
+      "start",
+      "running",
+      "done",
+      "completed",
+      "error",
+      "failed",
+      "killed",
+      "skipped",
+      "stopped",
+      "interrupted",
+      "cancelled",
+      "whatever_comes_next"
+    ]) {
+      expect(
+        workflowAgentOutcome({ type: "workflow_agent", state: word })
+      ).toBe(subagentOutcome(word));
+    }
+  });
+});
+
+// The status the card reads is a free string the CLI adds to between releases,
+// and the card had no render test — so a value the host already treated as
+// terminal could reach it and quietly take the success branch. `stopped` did.
+describe("subagentOutcome", () => {
+  it("treats a missing or running status as still working", () => {
+    expect(subagentOutcome(undefined)).toBe("running");
+    expect(subagentOutcome("")).toBe("running");
+    expect(subagentOutcome("running")).toBe("running");
+  });
+
+  it("names the four ways an agent fails", () => {
+    for (const s of ["failed", "error", "cancelled", "canceled"]) {
+      expect(subagentOutcome(s)).toBe("failed");
+    }
+  });
+
+  // The defect this function was extracted for. `isTerminalTaskStatus` counts
+  // `stopped` terminal and documents it as a backgrounded agent whose process
+  // was killed under it — so the neutral branch drew a green tick on an agent
+  // that never finished.
+  it("reads a killed background agent as interrupted, not as done", () => {
+    expect(subagentOutcome("stopped")).toBe("interrupted");
+    expect(subagentOutcome("interrupted")).toBe("interrupted");
+  });
+
+  it("closes normally on completed", () => {
+    expect(subagentOutcome("completed")).toBe("done");
+  });
+
+  // A word we have not seen is not evidence of failure, and claiming one would
+  // be the worse lie of the two.
+  it("does not invent a failure out of a status it does not know", () => {
+    expect(subagentOutcome("some_future_state")).toBe("done");
   });
 });

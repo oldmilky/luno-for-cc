@@ -76,11 +76,17 @@ export interface TokenUsage {
   sessionId?: string;
   /**
    * How much of the model's context the last request occupied, and how much
-   * there is. Both come from the CLI's own numbers: the size is
-   * `input + cache_creation + cache_read`, which is the sum the CLI itself
-   * uses, and the window is what it reports for the model that ran.
+   * there is.
    *
-   * Unlike the plan caps in the meter, these are not estimates.
+   * The size is `input + cache_creation + cache_read + output` of the most
+   * recent assistant message — one message is one request, and its reply is
+   * already part of what the next one carries. Anthropic's own extension sums
+   * the same four fields. Not the `result` event's usage: that is the turn's
+   * running total across every request in it, and dividing it by the window
+   * reported 173% of a million-token context.
+   *
+   * The window is what the CLI reports for the model that ran the main loop.
+   * Both are the CLI's numbers, not estimates.
    */
   contextTokens?: number;
   contextWindow?: number;

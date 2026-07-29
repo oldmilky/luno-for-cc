@@ -9,6 +9,14 @@ import * as path from "node:path";
 // turn it spawns uses it.
 const disposable = { dispose: () => {} };
 const folder = vi.hoisted(() => ({ root: "" }));
+/**
+ * What the CLI knew when each turn opened, one entry per turn.
+ *
+ * Not what it was spawned with: one process now serves the whole conversation,
+ * so the posture a turn runs under arrives through `updateOptions` on a process
+ * that already exists. Spawn options and every update since are merged here,
+ * which is the only view that answers "what was this turn sent under".
+ */
 const spawned = vi.hoisted(
   () =>
     [] as {
@@ -34,10 +42,15 @@ const contexts = vi.hoisted(() => [] as { key: string; value: unknown }[]);
 
 vi.mock("../../src/providers/factory.js", () => ({
   createProvider: (opts: { permissionMode: string; effort: string }) => {
-    spawned.push(opts);
+    let live = { ...opts };
     return {
       id: "fake",
+      updateOptions(patch: Record<string, unknown>) {
+        live = { ...live, ...patch };
+      },
+      disposeSession() {},
       async *stream() {
+        spawned.push(live);
         for (const d of stream.deltas) yield d;
         if (stream.hang) await new Promise(() => {});
       }

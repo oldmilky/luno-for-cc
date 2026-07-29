@@ -62,6 +62,21 @@ interface TokenMeterProps {
   streaming: string;
 }
 
+/** Why the account's figures are missing. Mirrors `OAuthUsageOutcome`. */
+type AccountStatus = "ok" | "no-token" | "unreachable" | "never";
+
+/** What the panel says instead of a percentage, per reason. Naming the cause is
+ *  the difference between "LUNO is broken" and "sign in" / "try again". */
+const ACCOUNT_STATUS_NOTE: Record<AccountStatus, string> = {
+  ok: "Token counts from this machine's session files. Your account reported no limits for this window.",
+  "no-token":
+    "No Claude Code login found on this machine, so your account's own percentages cannot be fetched. Counts below come from its session files.",
+  unreachable:
+    "Your account's figures could not be fetched just now — Refresh asks again. Counts below come from this machine's session files.",
+  never:
+    "Token counts from this machine's session files. Your account's own percentages have not been fetched yet — Refresh asks for them."
+};
+
 /** Display names for the tier the account reports. Nothing hangs off these any
  *  more — the plan used to select a cap, and there are no caps here now. */
 const PLAN_NAMES: Record<string, string> = {
@@ -122,6 +137,8 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
   // The account's own figures, fetched by the host. Null until they arrive,
   // and for good on an API key.
   const [util, setUtil] = useState<UsageUtilization | null>(null);
+  // Why they are missing, when they are.
+  const [accountStatus, setAccountStatus] = useState<AccountStatus>("never");
   // How full the model's context was on the last request. The CLI reports both
   // halves, so this is the one row here that can show a fraction we did not
   // have to guess at.
@@ -150,6 +167,7 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
         });
         setLimits(m.limits ?? []);
         setUtil(m.utilization ?? null);
+        setAccountStatus(m.accountStatus ?? "never");
       } else if (
         m.type === "tokenUsage" &&
         m.contextTokens !== undefined &&
@@ -291,10 +309,14 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
                   window={context.window}
                   sub={
                     pctOf(context.used, context.window) >= 70
-                      ? "Filling up — the CLI will fold earlier messages into a summary before it runs out"
+                      ? "Filling up — the CLI summarises earlier messages before this reaches 100%"
                       : "Last request, reported by the CLI"
                   }
-                  tooltip="Both halves of this one come from the CLI, so the percentage is exact."
+                  // The old line said the fold happens "before it runs out",
+                  // which reads as "at 100% of this bar". It does not: the CLI
+                  // compacts against its own threshold, lower than the window
+                  // and configurable, so this bar never reaches the end.
+                  tooltip="Share of the model's full context window. Both numbers come from the CLI, so this one is exact — but auto-compaction runs at the CLI's own threshold, which is lower than 100%."
                 />
               )}
 
@@ -361,9 +383,7 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
 
               {!server && (
                 <div className={s.disclaimer}>
-                  Token counts from this machine&apos;s session files. Your
-                  account&apos;s own percentages are not available right now —
-                  Refresh asks for them again.
+                  {ACCOUNT_STATUS_NOTE[accountStatus]}
                 </div>
               )}
             </div>
@@ -547,18 +567,23 @@ function ServerRow({
           style={{ width: fillWidth }}
         />
       </div>
-      {/* A scoped limit the account has never touched carries no reset time at
-          all. Printing one from a zero said "resets shortly", which is a claim
-          about a window nobody mentioned. */}
-      {limit.resetsAt > 0 && (
-        <div className={s.rowFoot}>
-          <span>
-            {hasReset(limit.resetsAt, tick)
+      <div className={s.rowFoot}>
+        {/* A scoped limit the account has never touched carries no reset time
+            at all. Printing one from a zero said "resets shortly", which is a
+            claim about a window nobody mentioned. */}
+        <span>
+          {limit.resetsAt === 0
+            ? ""
+            : hasReset(limit.resetsAt, tick)
               ? "Resets shortly"
               : `Resets in ${formatCountdown(limit.resetsAt, tick)}`}
-          </span>
-        </div>
-      )}
+        </span>
+        {/* The other half of the same number. It is the question the panel is
+            actually asked — how much is left — and the account's percentage is
+            the only honest way to answer it, since the cap itself is never
+            disclosed. */}
+        <span className={s.rowLeft}>{100 - limit.percent}% left</span>
+      </div>
     </div>
   );
 }

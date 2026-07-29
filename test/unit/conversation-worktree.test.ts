@@ -20,6 +20,8 @@ vi.mock("../../src/providers/factory.js", () => ({
     spawned.push(opts);
     return {
       id: "fake",
+      updateOptions() {},
+      disposeSession() {},
       // eslint-disable-next-line require-yield
       async *stream() {
         return;
@@ -241,8 +243,12 @@ describe("worktree isolation", () => {
     surface.webview.deliver({ type: "prompt", text: "two" });
     await settle();
 
-    expect(spawned).toHaveLength(2);
-    expect(spawned[1].cwd).toBe(spawned[0].cwd);
+    // Stronger than it used to be, and worth saying why the number changed:
+    // the second turn does not resolve a checkout of its own because there is
+    // no second spawn to resolve one for. One process holds the conversation,
+    // and it holds this cwd for as long as the conversation lives.
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].cwd).not.toBe(repo.root);
   });
 
   it("gives the checkout back when the conversation closes", async () => {

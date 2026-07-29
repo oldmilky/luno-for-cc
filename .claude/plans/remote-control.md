@@ -334,6 +334,69 @@ sharing its rule rather than restating it.
 Still only a second device can prove the round trip: that answering on the phone
 is what produces the cancel we now act on.
 
+## The phone went quiet after the first turn — 2026-07-28
+
+Reported from a real session: `/rc`, the phone showed the whole conversation,
+and then it stopped following along the moment the panel carried on. Not a sync
+bug — the session the phone was attached to no longer existed.
+
+Two defects were found on the way, both real and both proven by test. Which of
+them the user was actually hitting was never established, and the record should
+not pretend otherwise — they shipped together in 0.28.0, the symptom went away,
+and nobody re-ran the middle case. The honest reading is below; the log line at
+the end of this section is what settles it next time.
+
+**First: every turn was replacing the CLI process.** `respawnFingerprint`
+compares argv, and two things in it are rebuilt per turn and cannot be told to a
+running CLI:
+
+- `--mcp-config <path>` — written through `mkdtemp`, so the path is new every
+  turn even when the servers behind it are identical. Unconditional: any LUNO
+  connector being connected was enough.
+- the plan-mode task-type playbook, on `--append-system-prompt`. `classifyTask`
+  runs on each prompt, so the process was replaced whenever the conversation
+  changed subject.
+
+A replaced process re-establishes the bridge by itself — **on a new session
+URL**. The panel is fine and the pill even shows the new link; the phone is
+holding the old one and simply never hears anything again. That is the whole
+symptom.
+
+Fixed on both sides: the fingerprint ignores the MCP config _path_ (the server
+set still counts — it reaches argv separately as `--allowedTools mcp__<name>`),
+and a live session keeps the playbook it was spawned with, recorded on the
+session rather than reclassified per turn. Reproduced before fixing — with the
+fixes reverted, the second turn spawns a second process in both cases — and
+pinned by three tests, including one that a genuine argv-only change (`--effort`,
+which has no control request) still does replace it.
+
+**Second: our messages carried no `origin`.** The official client stamps
+`origin: {kind:"human"}` on every message it writes to stdin — `send(…,
+{kind:"human"})` in its webview, landing beside the `uuid` it also mints. We
+sent neither field. `uuid` came out of the audit; `origin` was added here, on
+the theory that a session shared with another device is exactly where "who sent
+this" stops being obvious from the fact that it arrived.
+
+Verified 2026-07-28, 20:16, on 0.28.0: four turns sent from the panel, all four
+mirrored to the phone — text, the user's own bubbles, two subagents, a workflow,
+and the progressive completion lines as each finished. Multi-turn desktop → phone
+is what had never worked before.
+
+**What that run does not establish:** which fix carried it. The build the user
+tested at 19:49 already contained the respawn fix (0.26.0, built 19:19) — if the
+window had been reloaded after that install, the respawn was not the cause and
+`origin` is. If it had not been reloaded, the old process was still running and
+either fix could be the one. Nothing distinguishes the two after the fact.
+
+The discriminator is free and permanent: every replacement now logs
+`[luno] session options changed — replacing the CLI process: -flag +flag`, naming
+the argument that did it. A quiet phone with no such line in `LUNO: Show Logs` is
+not this bug; a quiet phone with one names its own cause.
+
+Still untested end to end: a prompt typed **on the phone** reaching the panel
+(Ф4's own direction), an approval answered there (Ф5), and Stop during a remote
+turn.
+
 ## Audit against the official implementation — 2026-07-28
 
 Read against `anthropic.claude-code` 2.1.220 (`extension.js` and its webview

@@ -327,6 +327,13 @@ $pop-gutter: 12px;
   font-family: var(--font-mono);
 }
 
+// The remaining share, opposite the reset time. Monospaced so it does not
+// jitter as the number ticks down.
+.rowLeft {
+  color: var(--t3);
+  font-family: var(--font-mono);
+}
+
 // The amount a fraction-less row carries, in the head where a percentage would
 // otherwise sit — so both vocabularies put their number in the same place.
 .rowAmount {

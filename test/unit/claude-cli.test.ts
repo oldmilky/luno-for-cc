@@ -19,7 +19,8 @@ import {
   respawnFingerprint,
   exitFailure,
   isReadOnlyShellCommand,
-  bridgeStatus
+  bridgeStatus,
+  mcpToolPatterns
 } from "../../src/providers/claude-cli.js";
 
 describe("claude-cli mapEvent (single event)", () => {
@@ -281,6 +282,38 @@ describe("claude-cli respawnFingerprint", () => {
     expect(respawnFingerprint(a)).toBe(respawnFingerprint(["--verbose"]));
   });
 
+  it("ignores the MCP config path, which is a fresh temp dir every turn", () => {
+    // The file is written through `mkdtemp`, so the path differs on every turn
+    // even when the servers behind it are identical. Counting it replaced the
+    // CLI process once per turn — and with Remote Control on, each replacement
+    // hands out a new session URL, which is what leaves a phone connected to a
+    // conversation that has stopped talking to it.
+    const a = ["--verbose", "--mcp-config", "/tmp/luno-mcp-aaa/mcp.json"];
+    const b = ["--verbose", "--mcp-config", "/tmp/luno-mcp-bbb/mcp.json"];
+    expect(respawnFingerprint(a)).toBe(respawnFingerprint(b));
+  });
+
+  it("is unmoved by the same MCP servers arriving in a different order", () => {
+    // The names are merged from three sources through a Set, one of them a
+    // cache a background probe rewrites, so the order is not ours to rely on.
+    const a = ["--allowedTools", ...mcpToolPatterns(["figma", "mongodb"])];
+    const b = ["--allowedTools", ...mcpToolPatterns(["mongodb", "figma"])];
+    expect(respawnFingerprint(a)).toBe(respawnFingerprint(b));
+  });
+
+  it("still reacts to the server set behind that path", () => {
+    // Dropping the path is only safe because the servers reach argv separately.
+    const a = ["--allowedTools", "mcp__figma", "--mcp-config", "/tmp/a/m.json"];
+    const b = [
+      "--allowedTools",
+      "mcp__figma",
+      "mcp__mongodb",
+      "--mcp-config",
+      "/tmp/b/m.json"
+    ];
+    expect(respawnFingerprint(a)).not.toBe(respawnFingerprint(b));
+  });
+
   it("reacts to --effort, which no control request can change", () => {
     // There is no set_effort in the control protocol — verified against the
     // binary — so a changed effort level has to replace the process.
@@ -366,16 +399,37 @@ describe("claude-cli buildArgs", () => {
     expect(args).not.toContain("hi");
   });
 
-  it("plan mode keeps the text-input path (no prompt tool, positional prompt)", () => {
+  it("plan mode takes stdin input without the prompt tool", () => {
     const args = buildArgs("hi", "sonnet", {
       binary: "claude",
       cwd: "/tmp",
       permissionMode: "plan"
     });
+    // No approvals to route in plan mode — but the prompt still travels on
+    // stdin, because argv delivery is what opens the CLI's print wind-down and
+    // gets background work terminated ten minutes in.
     expect(args).not.toContain("--permission-prompt-tool");
-    expect(args).not.toContain("--input-format");
-    // Plan mode passes the prompt as a positional argument after -p.
-    expect(args[args.indexOf("-p") + 1]).toBe("hi");
+    expect(args).toContain("--input-format");
+    expect(args).not.toContain("hi");
+  });
+
+  it("never puts the prompt in argv, in any mode", () => {
+    for (const permissionMode of [
+      "default",
+      "auto",
+      "plan",
+      "bypass"
+    ] as const) {
+      const args = buildArgs("hi", "sonnet", {
+        binary: "claude",
+        cwd: "/tmp",
+        permissionMode
+      });
+      expect(args).not.toContain("hi");
+      const idx = args.indexOf("--input-format");
+      expect(idx).toBeGreaterThan(-1);
+      expect(args[idx + 1]).toBe("stream-json");
+    }
   });
 
   it("includes --resume when resume id present", () => {
@@ -1379,8 +1433,9 @@ describe("compaction and context size", () => {
   });
 
   // Cached tokens are most of a long conversation's prompt. Counting only
-  // `input_tokens` would report a nearly-full window as nearly empty.
-  it("counts cache reads and writes as context, the way the CLI does", () => {
+  // `input_tokens` would report a nearly-full window as nearly empty. The
+  // reply counts too — it is history by the time the next request goes out.
+  it("counts cache reads, writes and the reply as context", () => {
     expect(
       contextSize({
         input_tokens: 2,
@@ -1388,16 +1443,18 @@ describe("compaction and context size", () => {
         cache_creation_input_tokens: 17_240,
         cache_read_input_tokens: 24_004
       })
-    ).toBe(41_246);
+    ).toBe(41_251);
   });
 
-  it("takes the main loop's window, not a side-call's smaller one", () => {
-    expect(
-      contextWindowOf({
-        "claude-opus-5[1m]": { contextWindow: 1_000_000 },
-        "claude-haiku-4-5": { contextWindow: 200_000 }
-      })
-    ).toBe(1_000_000);
+  it("takes the main loop's own window when the CLI named the model", () => {
+    const modelUsage = {
+      "claude-opus-5[1m]": { contextWindow: 1_000_000 },
+      "claude-haiku-4-5": { contextWindow: 200_000 }
+    };
+    expect(contextWindowOf(modelUsage, "claude-haiku-4-5")).toBe(200_000);
+    // Unnamed, it falls back to the largest: a side-call's smaller window
+    // would understate the room left.
+    expect(contextWindowOf(modelUsage)).toBe(1_000_000);
   });
 
   it("has no opinion on the window when the CLI reports none", () => {
@@ -1641,16 +1698,17 @@ describe("workflows on the task protocol", () => {
     expect(out[0].task!.subagentType).toBeUndefined();
   });
 
-  // `last_tool_name` on a workflow holds the *agent's label*, not a tool that
-  // ran. Rendered in the last-tool slot it invents a tool nobody called, and
-  // the same string is already the activity.
-  it("does not report an agent label as the last tool run", () => {
+  // Measured on 2.1.219: `task_type` rides `task_started` and no other phase.
+  // Anything downstream that gates on it — which both the workflow-progress
+  // passthrough and the last-tool suppression once did — is therefore off on
+  // every event after the dispatch. The fixture carries no `task_type` because
+  // the real event carries none.
+  it("names the kind of task only on the dispatch, as the CLI does", () => {
     const out = makeProcessor()({
       type: "system",
       subtype: "task_progress",
       task_id: WF,
       tool_use_id: TOOL,
-      task_type: "local_workflow",
       description: "One: Reply with exactly the word OK and nothing else.",
       last_tool_name: "Reply with exactly the word OK and nothing else.",
       usage: { total_tokens: 19_210, tool_uses: 0, duration_ms: 2_324 }
@@ -1658,10 +1716,36 @@ describe("workflows on the task protocol", () => {
 
     expect(out[0].task).toMatchObject({
       phase: "progress",
-      taskType: "local_workflow",
       activity: "One: Reply with exactly the word OK and nothing else."
     });
-    expect(out[0].task!.lastToolName).toBeUndefined();
+    expect(out[0].task!.taskType).toBeUndefined();
+  });
+
+  // `summary` on a progress event is not an answer — the CLI echoes the task's
+  // own description there. Verbatim from the fixture, where the first such
+  // record is stamped `duration_ms: 22`: copied through, it reached the card as
+  // a finished answer 22ms after launch, under the heading "Answered".
+  it("does not mistake a progress echo for the answer", () => {
+    const progress = makeProcessor()({
+      type: "system",
+      subtype: "task_progress",
+      task_id: WF,
+      description: "One: …",
+      summary: "probe run for a stream audit",
+      usage: { total_tokens: 19_210, tool_uses: 0, duration_ms: 22 }
+    } as never);
+    expect(progress[0].task!.summary).toBeUndefined();
+
+    const answered = makeProcessor()({
+      type: "system",
+      subtype: "task_notification",
+      task_id: WF,
+      status: "completed",
+      summary: 'Dynamic workflow "probe run for a stream audit" completed'
+    } as never);
+    expect(answered[0].task!.summary).toBe(
+      'Dynamic workflow "probe run for a stream audit" completed'
+    );
   });
 
   // The phase-and-agent breakdown the CLI has already computed. It is the only
@@ -1671,7 +1755,6 @@ describe("workflows on the task protocol", () => {
       type: "system",
       subtype: "task_progress",
       task_id: WF,
-      task_type: "local_workflow",
       description: "One: …",
       workflow_progress: [
         { type: "workflow_phase", index: 1, title: "One" },
@@ -1697,17 +1780,16 @@ describe("workflows on the task protocol", () => {
     });
   });
 
-  // A subagent has no `workflow_progress` and must not grow one — the field is
-  // what the card branches on to decide it is looking at a workflow.
-  it("leaves a subagent's update without workflow progress", () => {
+  // A subagent sends no `workflow_progress` at all, so nothing has to be
+  // filtered out here — and filtering on `task_type` is what discarded the real
+  // thing.
+  it("leaves a subagent's update alone", () => {
     const out = makeProcessor()({
       type: "system",
       subtype: "task_progress",
       task_id: "ad0748687a4aac2a8",
-      task_type: "local_agent",
       description: "Searching",
-      last_tool_name: "Grep",
-      workflow_progress: [{ type: "workflow_phase", index: 1, title: "One" }]
+      last_tool_name: "Grep"
     } as never);
 
     expect(out[0].task!.workflowProgress).toBeUndefined();

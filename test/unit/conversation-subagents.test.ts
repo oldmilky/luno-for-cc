@@ -280,10 +280,12 @@ describe("subagents on the timeline", () => {
     webview.deliver({ type: "prompt", text: "find it" });
     await settle();
 
-    // One row for the dispatch and one for the sweep closing it — never one
-    // for the progress in between, which is the whole point.
+    // One row for the dispatch and nothing else: progress reaches the card as a
+    // live message and is never written down, which is the whole point. The
+    // closing row is not here either — the agent is still running, and the turn
+    // ending no longer says otherwise.
     const phases = cards(webview).map((r) => r.meta?.phase);
-    expect(phases).toEqual(["start", "end"]);
+    expect(phases).toEqual(["start"]);
     expect(progressPosts(webview)[0].task).toMatchObject({
       taskId: TASK,
       activity: "Searching for makeProcessor",
@@ -318,12 +320,51 @@ describe("subagents on the timeline", () => {
     });
   });
 
-  // The CLI process does not outlive the turn, so an agent that never reported
-  // a terminal status did not keep running — it died with the turn.
-  it("closes an agent the turn ended under rather than leaving it spinning", async () => {
+  // Measured in the run behind the ten-minute-cutoff audit: a `task_progress`
+  // landed 1.4s *after* the `task_notification` that ended the task. Every
+  // phase but `notification` puts its task back among the live ones, so that
+  // one late event resurrected a finished workflow — reopening a closed card,
+  // and leaving the turn-end sweep to stamp `interrupted` over the `stopped`
+  // the CLI had itself reported.
+  it("ignores anything that arrives after the CLI closed the task", async () => {
+    script.push(started, notification, progress);
+    const { webview } = open();
+    webview.deliver({ type: "prompt", text: "find it" });
+    await settle();
+
+    const rows = cards(webview);
+    expect(rows).toHaveLength(2);
+    expect(rows[1].meta).toMatchObject({ phase: "end", status: "completed" });
+    // The late progress reached neither the surface nor a second row.
+    expect(progressPosts(webview)).toHaveLength(0);
+  });
+
+  // One process per conversation: the turn ending says nothing about the agent,
+  // which is still running inside a process nobody killed and will report
+  // through `onOutOfTurn` minutes later. Closing its card here is what put
+  // `interrupted` on an agent that was about to answer — and `emitSubagentEnd`
+  // writes that to the stored session, so it outlived the mistake.
+  it("leaves an agent still running when the turn ends under it", async () => {
     script.push(started, progress);
     const { webview } = open();
     webview.deliver({ type: "prompt", text: "find it" });
+    await settle();
+
+    const rows = cards(webview);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].meta).toMatchObject({ phase: "start", taskId: TASK });
+  });
+
+  // The other half of the same rule: when the process really is gone nothing
+  // more is coming, and a card left spinning would spin for ever.
+  it("closes it once the process itself is gone", async () => {
+    script.push(started, progress);
+    const { webview } = open();
+    webview.deliver({ type: "prompt", text: "find it" });
+    await settle();
+    expect(cards(webview)).toHaveLength(1);
+
+    outOfTurn[outOfTurn.length - 1]({ type: "done", sessionEnded: true });
     await settle();
 
     const rows = cards(webview);
@@ -386,6 +427,69 @@ describe("subagents on the timeline", () => {
       workflowName: "probe",
       status: "completed"
     });
+  });
+
+  // The CLI names the kind of task on the dispatch and on nothing after it, so
+  // only the merged state knows a progress event belongs to a workflow. Both of
+  // these were gated on the raw event's `task_type` and so never fired: the
+  // phases view got no data at all, and an agent's label went on rendering as
+  // the name of a tool nobody ran.
+  it("reads a later workflow event through what the dispatch said", async () => {
+    script.push(
+      {
+        type: "task",
+        task: {
+          phase: "started",
+          taskId: "w3",
+          toolUseId: "toolu_w3",
+          taskType: "local_workflow",
+          workflowName: "probe",
+          description: "probe run"
+        }
+      },
+      {
+        type: "task",
+        task: {
+          phase: "progress",
+          taskId: "w3",
+          activity: "Find: grep the logs",
+          lastToolName: "grep the logs",
+          workflowProgress: [
+            { type: "workflow_phase", index: 1, title: "Find" },
+            { type: "workflow_agent", index: 1, phaseIndex: 1, state: "done" }
+          ]
+        }
+      },
+      {
+        type: "task",
+        task: { phase: "notification", taskId: "w3", status: "completed" }
+      }
+    );
+    const { webview } = open();
+    webview.deliver({ type: "prompt", text: "run it" });
+    await settle();
+
+    const live = progressPosts(webview).pop()!.task!;
+    expect(live.lastToolName).toBeUndefined();
+    expect(live.workflowProgress).toHaveLength(2);
+
+    // And the closing row keeps that last snapshot, so the phases survive the
+    // turn rather than dying with the live-only progress channel.
+    const closed = cards(webview).pop()!;
+    expect(closed.meta).toMatchObject({ phase: "end", status: "completed" });
+    expect(
+      (closed.meta as { workflowProgress?: unknown[] }).workflowProgress
+    ).toHaveLength(2);
+  });
+
+  // A subagent's last tool is a real tool and must survive the same merge.
+  it("keeps a subagent's last tool name", async () => {
+    script.push(started, progress);
+    const { webview } = open();
+    webview.deliver({ type: "prompt", text: "find it" });
+    await settle();
+
+    expect(progressPosts(webview).pop()!.task!.lastToolName).toBe("Grep");
   });
 
   it("falls back to the bare word when the workflow named itself nothing", async () => {
@@ -562,6 +666,53 @@ describe("subagents that outlive their turn", () => {
         (m) => m.type === "timeline" && m.event?.kind === "assistant"
       )
     ).toHaveLength(0);
+  });
+
+  // A prompt from the phone opens a turn here, and that turn ends on a `done`
+  // like any other. While it is live that `done` goes into the remote queue
+  // rather than the guarded branch, so the sweep in its `finally` ran on every
+  // one of them — filing agents that were still working as `interrupted`, and
+  // persisting it. A workflow always outlives its launching turn, so any phone
+  // prompt mid-run hit this.
+  it("leaves a working agent alone when a phone turn ends", async () => {
+    script.push(started);
+    const { webview } = open();
+    await enableRemote(webview);
+    webview.deliver({ type: "prompt", text: "launch it" });
+    await settle();
+    expect(cards(webview)).toHaveLength(1);
+
+    const push = outOfTurn[outOfTurn.length - 1];
+    push({ type: "remote_prompt", prompt: "what is going on?" });
+    await settle();
+    push({ type: "text", text: "Still working on it." });
+    push({ type: "done" });
+    await settle();
+
+    expect(cards(webview).map((r) => r.meta?.phase)).toEqual(["start"]);
+  });
+
+  // The same path must still close cards when the process really is gone.
+  it("still closes them when a phone turn ends because the process died", async () => {
+    script.push(started);
+    const { webview } = open();
+    await enableRemote(webview);
+    webview.deliver({ type: "prompt", text: "launch it" });
+    await settle();
+
+    const push = outOfTurn[outOfTurn.length - 1];
+    push({ type: "remote_prompt", prompt: "what is going on?" });
+    await settle();
+    push({ type: "done", sessionEnded: true });
+    await settle();
+
+    const rows = cards(webview);
+    expect(rows).toHaveLength(2);
+    expect(rows[1].meta).toMatchObject({
+      phase: "end",
+      status: "interrupted",
+      taskId: TASK
+    });
   });
 
   // The process finally going away is the one moment nothing more can arrive.

@@ -10,8 +10,21 @@
 //   · The glow tints (accent-soft/mid/shadow, aurora) derive from a
 //     white accent, which reads as a cool haze rather than a colour
 //     wash — the intended "frosted" look.
+//
+// The default palette, so it doubles as the fallback: the `:root`
+// selector keeps every token defined even where nothing stamps
+// `data-theme` — the host writes no attribute into the page
+// (`src/ui/webview-html.ts`), so this is what paints the first frame
+// before `initTheme()` runs, and what the artifact editor tab reads
+// before the store mounts.
+//
+// `:root` and `[data-theme="…"]` both weigh (0,1,0), so order alone
+// decides: this file is `@use`d before every other palette in
+// index.scss precisely so their blocks can still override it. Moving
+// it down that list silently freezes the whole app on this palette.
 // ─────────────────────────────────────────────────────────────
 
+:root,
 [data-theme="white"] {
   --s0: #0a0b0e;
   --s1: #111319;

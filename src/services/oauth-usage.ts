@@ -52,6 +52,15 @@ export interface OAuthUsageDeps {
   now?: () => number;
 }
 
+/**
+ * Why there are no account figures, when there are none.
+ *
+ * The panel used to say only "not available right now", which reads as a bug
+ * whichever of these it is. They call for different actions: one is a login,
+ * one is a retry.
+ */
+export type OAuthUsageOutcome = "ok" | "no-token" | "unreachable" | "never";
+
 export interface OAuthUsageReader {
   /**
    * The account's figures, or null when there are none to show.
@@ -61,6 +70,8 @@ export interface OAuthUsageReader {
    * against a dead endpoint still returns whatever is left within MAX_STALE.
    */
   read(force?: boolean): Promise<OAuthUsageSnapshot | null>;
+  /** How the last attempt went, for the panel to explain itself with. */
+  outcome(): OAuthUsageOutcome;
 }
 
 function credentialsPath(): string {
@@ -155,6 +166,7 @@ export function createOAuthUsageReader(
   const request = deps.requestUsage ?? requestUsage;
 
   let last: OAuthUsageSnapshot | null = null;
+  let lastOutcome: OAuthUsageOutcome = "never";
   /** When we last *tried*, which is what the TTL bounds — a failure has to
    *  back off exactly as a success does, or a logged-out user generates a
    *  request every minute forever. Negative infinity rather than 0: "never"
@@ -169,11 +181,16 @@ export function createOAuthUsageReader(
     attemptedAt = now();
     try {
       const token = await getToken();
-      if (!token) return fresh();
+      if (!token) {
+        lastOutcome = "no-token";
+        return fresh();
+      }
       last = { payload: await request(token), fetchedAt: now() };
+      lastOutcome = "ok";
       return last;
     } catch {
       // Keep serving the previous answer while it is still worth serving.
+      lastOutcome = "unreachable";
       return fresh();
     } finally {
       inFlight = null;
@@ -188,6 +205,7 @@ export function createOAuthUsageReader(
       // The 60s poll and a click can land together; one request answers both.
       inFlight ??= attempt();
       return inFlight;
-    }
+    },
+    outcome: () => lastOutcome
   };
 }

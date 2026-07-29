@@ -15,6 +15,19 @@ export class DeltaQueue implements AsyncIterable<StreamDelta> {
   private readonly buffer: StreamDelta[] = [];
   private wake: (() => void) | null = null;
   private closed = false;
+  private endedWithSession = false;
+
+  /**
+   * Whether the `done` that closed this queue meant the CLI process is gone,
+   * rather than merely that a turn finished.
+   *
+   * The consumer only sees the queue end; the reason arrives on the delta and
+   * would otherwise be lost. It decides whether the caller may close cards for
+   * agents still running — see `sweepLiveTasks`.
+   */
+  get sessionEnded(): boolean {
+    return this.endedWithSession;
+  }
 
   /** Feed one delta. `done` closes the queue, matching the provider's own
    *  contract — the consumer stops there rather than waiting for a source that
@@ -22,6 +35,7 @@ export class DeltaQueue implements AsyncIterable<StreamDelta> {
   push(d: StreamDelta): void {
     if (this.closed) return;
     if (d.type === "done") {
+      this.endedWithSession = d.sessionEnded === true;
       this.close();
       return;
     }

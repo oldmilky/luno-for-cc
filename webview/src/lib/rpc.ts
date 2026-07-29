@@ -53,14 +53,6 @@ export interface TimelineEvent {
   meta?: Record<string, unknown>;
 }
 
-/**
- * One subagent the main agent dispatched, as the chat renders it. Mirrors
- * `SubagentTask` in src/core/types.ts.
- *
- * Arrives two ways and both are needed: `subagent` timeline events open and
- * close the card and survive a reload, while `subagentProgress` messages carry
- * what the agent is doing mid-run and are deliberately not persisted.
- */
 /** Mirrors `WorkflowProgressEntry` in src/core/types.ts. */
 export interface WorkflowProgressEntry {
   type: string;
@@ -80,6 +72,14 @@ export interface WorkflowProgressEntry {
   resultPreview?: string;
 }
 
+/**
+ * One subagent the main agent dispatched, as the chat renders it. Mirrors
+ * `SubagentTask` in src/core/types.ts.
+ *
+ * Arrives two ways and both are needed: `subagent` timeline events open and
+ * close the card and survive a reload, while `subagentProgress` messages carry
+ * what the agent is doing mid-run and are deliberately not persisted.
+ */
 export interface SubagentTaskView {
   taskId: string;
   toolUseId?: string;
@@ -787,6 +787,10 @@ export type Inbound =
        *  a fresh install or an API key, where the meter falls back to its own
        *  estimate and says so. */
       utilization?: UsageUtilization;
+      /** Why those figures are missing, when they are. `no-token` wants a
+       *  login, `unreachable` wants a retry — the panel must not present the
+       *  two as one shrug. */
+      accountStatus?: "ok" | "no-token" | "unreachable" | "never";
     };
 
 /** One quota the account is subject to. Mirrors `UtilizationLimit` in

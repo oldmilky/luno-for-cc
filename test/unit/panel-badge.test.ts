@@ -29,7 +29,9 @@ vi.mock("../../src/providers/factory.js", () => ({
     },
     cancel() {
       turns[turns.length - 1]?.release();
-    }
+    },
+    updateOptions() {},
+    disposeSession() {}
   }),
   resolveClaudeBinary: () => "claude"
 }));

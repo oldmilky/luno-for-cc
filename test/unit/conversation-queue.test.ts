@@ -8,6 +8,10 @@ import * as path from "node:path";
 // the only thing standing between a user and that. With the gate gone, the
 // host is the whole safety net — so every path that ends a turn is asserted
 // here, not just the happy one.
+//
+// And, since the two are the same question asked twice: when the conversation's
+// CLI process may die. It outlives the turn now, which turns every teardown
+// path into a decision rather than a consequence.
 const disposable = { dispose: () => {} };
 const root = vi.hoisted(() => ({ path: "" }));
 const settings = vi.hoisted(() => ({}) as Record<string, unknown>);
@@ -23,9 +27,17 @@ const turns = vi.hoisted(
     }[]
 );
 
+/** Every time the host ended the conversation's CLI process. The process now
+ *  outlives the turn, so *when* it is released is behaviour worth asserting. */
+const disposals = vi.hoisted(() => [] as string[]);
+
+/** How many processes the conversation has asked for. One per conversation is
+ *  the claim; one per turn is what it replaced. */
+const spawns = vi.hoisted(() => ({ count: 0 }));
+
 vi.mock("../../src/providers/factory.js", () => ({
   createProvider: () => ({
-    id: "fake",
+    id: `fake-${++spawns.count}`,
     async *stream() {
       let release!: () => void;
       let fail!: (message: string) => void;
@@ -44,6 +56,14 @@ vi.mock("../../src/providers/factory.js", () => ({
     },
     cancel() {
       turns[turns.length - 1]?.release();
+    },
+    // One process per conversation: the host reuses the provider and pushes
+    // what changed since the last turn through here, then ends the process
+    // itself when the conversation is over. Both are called on every turn now,
+    // so a fake without them fails before the stream opens.
+    updateOptions() {},
+    disposeSession() {
+      disposals.push("session");
     }
   }),
   resolveClaudeBinary: () => "claude"
@@ -155,6 +175,8 @@ let storage: string;
 
 beforeEach(() => {
   turns.length = 0;
+  disposals.length = 0;
+  spawns.count = 0;
   for (const key of Object.keys(settings)) delete settings[key];
   settings.worktree = "off";
   storage = fs.mkdtempSync(path.join(os.tmpdir(), "luno-queue-storage-"));
@@ -372,5 +394,105 @@ describe("two conversations", () => {
 
     expect(queuedNow(wOne)).toBe("only for one");
     expect(queuedNow(wTwo)).toBeUndefined();
+  });
+});
+
+/**
+ * One CLI process serves the whole conversation instead of one per turn.
+ *
+ * The thing that makes this worth its own block: the process now outlives the
+ * turn on purpose, so every rule about when it *may* die is load-bearing. Too
+ * eager and Stop ends the conversation; too shy and a closed tab leaves a
+ * `claude` running with nobody reading it.
+ */
+describe("one process per conversation", () => {
+  it("does not spawn a second one for the second turn", async () => {
+    const { webview } = open();
+    webview.deliver({ type: "prompt", text: "first" });
+    await settle();
+    turns[0].release();
+    await settle();
+
+    webview.deliver({ type: "prompt", text: "second" });
+    await settle();
+
+    expect(turns).toHaveLength(2);
+    expect(spawns.count).toBe(1);
+  });
+
+  it("survives Stop — the turn ends, the conversation does not", async () => {
+    const { webview } = open();
+    webview.deliver({ type: "prompt", text: "first" });
+    await settle();
+
+    webview.deliver({ type: "cancel" });
+    await settle();
+
+    // Killing the process here would end the conversation and drop any Remote
+    // Control bridge, when all the user asked for was to stop this turn.
+    expect(disposals).toHaveLength(0);
+    webview.deliver({ type: "prompt", text: "again" });
+    await settle();
+    expect(turns).toHaveLength(2);
+    expect(spawns.count).toBe(1);
+  });
+
+  it("survives a turn that failed", async () => {
+    const { webview } = open();
+    webview.deliver({ type: "prompt", text: "first" });
+    await settle();
+
+    turns[0].fail("the model refused");
+    await settle();
+
+    // "This turn failed" and "the session died" stopped being the same event
+    // the moment the process outlived the turn. Only the second may tear
+    // anything down.
+    expect(disposals).toHaveLength(0);
+  });
+
+  it("ends it when the user starts a new chat", async () => {
+    const { webview } = open();
+    webview.deliver({ type: "prompt", text: "first" });
+    await settle();
+    turns[0].release();
+    await settle();
+
+    webview.deliver({ type: "newSession" });
+    await settle();
+
+    // `--resume` is applied at spawn and nowhere else, so a process kept here
+    // would answer the new chat out of the old one's history.
+    expect(disposals).toEqual(["session"]);
+  });
+
+  it("ends it when the conversation is closed", async () => {
+    const { registry, host, webview } = open();
+    webview.deliver({ type: "prompt", text: "first" });
+    await settle();
+    turns[0].release();
+    await settle();
+
+    registry.close(host);
+    await settle();
+
+    expect(disposals).toEqual(["session"]);
+  });
+
+  it("ends it for a tab closed between turns, with no turn to abort", async () => {
+    const { registry, host, webview } = open();
+    webview.deliver({ type: "prompt", text: "first" });
+    await settle();
+    turns[0].release();
+    await settle();
+    expect(spawns.count).toBe(1);
+
+    // The leak this closes: `abortTurn` reaches the provider through
+    // `activeProvider`, which is undefined once the turn is over — so between
+    // turns there was nothing holding a reference to the process at all.
+    registry.close(host);
+    await settle();
+
+    expect(disposals).toEqual(["session"]);
   });
 });

@@ -5,6 +5,7 @@ import { Session } from "../../src/core/session.js";
 import { DeltaQueue } from "../../src/core/delta-queue.js";
 import {
   replayedPrompt,
+  isCliControlMarker,
   takeEcho,
   type CliEvent
 } from "../../src/providers/claude-cli.js";
@@ -35,9 +36,31 @@ describe("replayedPrompt", () => {
   it("reads the block form too", () => {
     const ev = {
       type: "user",
+      isReplay: true,
       message: { content: [{ type: "text", text: "from the phone" }] }
     } as CliEvent;
     expect(replayedPrompt(ev)).toBe("from the phone");
+  });
+
+  // The flag is what `--replay-user-messages` puts on what it replays, and it
+  // is the only thing separating a prompt someone typed from a `user` record
+  // the CLI wrote for its own bookkeeping.
+  it("ignores a user record the CLI did not replay", () => {
+    const ev = {
+      type: "user",
+      message: { content: "[Request interrupted by user]" }
+    } as CliEvent;
+    expect(replayedPrompt(ev)).toBeNull();
+  });
+
+  // Observed with Remote Control on: Stop put this on the timeline as the
+  // user's own message three times in one session, each opening a turn against
+  // the CLI — so the model answered a control marker as if it were a prompt.
+  it("knows the CLI's own control markers are not prompts", () => {
+    expect(isCliControlMarker("[Request interrupted by user]")).toBe(true);
+    expect(isCliControlMarker("  [Request interrupted by user]  ")).toBe(true);
+    expect(isCliControlMarker("please interrupt the build")).toBe(false);
+    expect(isCliControlMarker("")).toBe(false);
   });
 
   it("is not fooled by the tool_result envelope, which is also a user event", () => {
@@ -46,6 +69,7 @@ describe("replayedPrompt", () => {
     // supposedly typed, and start a turn on top of the one already running.
     const ev = {
       type: "user",
+      isReplay: true,
       message: {
         content: [
           { type: "tool_result", tool_use_id: "t1", content: "ok" },

@@ -71,7 +71,8 @@ export async function broadcastUsage(
       generatedAt: agg.generatedAt,
       available: agg.available,
       limits: rateLimits?.live() ?? [],
-      utilization: utilization ?? undefined
+      utilization: utilization ?? undefined,
+      accountStatus: accountUsage.outcome()
     });
   } catch {
     // best-effort; the chip falls back to its estimate

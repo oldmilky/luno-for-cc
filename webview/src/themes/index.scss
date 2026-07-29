@@ -4,15 +4,19 @@
 //   both land at equal specificity, so a palette can override any
 //   derived token simply by declaring it.
 //
+// `white` comes before the rest because it carries the `:root`
+// fallback, which weighs the same as every `[data-theme="…"]` block.
+// Last one wins at equal specificity, so it has to be first.
+//
 // Adding a theme = one file here + one entry in `lib/theme.ts`.
 // Components are never touched. See `docs/TOKENS.md`.
 // ─────────────────────────────────────────────────────────────
 
 @use "base";
+@use "white";
 @use "copper";
 @use "purple";
 @use "red";
 @use "blue";
 @use "green";
 @use "pink";
-@use "white";

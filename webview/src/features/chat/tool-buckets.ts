@@ -72,7 +72,12 @@ export function classifyTool(name: string, input?: string): ToolBucket {
   const n = name.toLowerCase();
 
   if (n === "skill" || n.startsWith("skill")) return "skill";
-  if (n === "task") return "task";
+  // `Agent` is what the shipped CLI sends and `Workflow` launches one the same
+  // way; `Task` is the older name that only stored sessions still carry.
+  // Matching `task` alone made this bucket dead code — across the transcripts
+  // on disk, `Agent` appears 219 times, `Workflow` 71, `Task` none — and both
+  // live names fell through to "other", rendering as "Ran Agent".
+  if (n === "task" || n === "agent" || n === "workflow") return "task";
   if (n === "webfetch" || n === "web_fetch") return "web";
 
   if (/glob|ls$|^ls /.test(n)) return "explore";

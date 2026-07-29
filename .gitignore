@@ -43,3 +43,6 @@ TESTING.md
 # Playwright MCP scratch — screenshots and console logs from the harness.
 .playwright-mcp/
 .luno/
+
+# Scratch from probe agents reading the CLI binary.
+.tmp-cli-probe/

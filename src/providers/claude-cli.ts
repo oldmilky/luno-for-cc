@@ -18,7 +18,6 @@ import {
   PermissionSuggestion,
   RemoteControlStatus,
   isTerminalTaskStatus,
-  isWorkflowTask,
   StreamDelta,
   SubagentPhase,
   SubagentUpdate,
@@ -59,16 +58,22 @@ const STALL_WATCHDOG_TOOLS: ReadonlySet<string> = new Set([
 const WEB_TOOL_STALL_MS = 60 * 1000;
 
 /**
- * How long the turn waits for a backgrounded subagent after the CLI's `result`,
- * measured from that agent's last sign of life rather than from `result`.
+ * How often the turn re-checks whether background work is still outstanding.
  *
  * A `run_in_background` agent keeps working past the end of the turn: timed
  * against 2.1.220, one reported `completed` with its full answer 5.6s after
  * `result` arrived. Ending the turn there — which is what closing stdin does —
  * exits the child and kills the agent mid-step, so its card could only ever
- * read "interrupted". 90s is generous against `task_progress`, which fires per
- * nested tool call, so an agent that is visibly working keeps the turn open
- * while a silent one is still cut loose well before the 10-minute hard kill.
+ * read "interrupted".
+ *
+ * This used to be a deadline: quiet for 90s and the turn ended. That reading of
+ * quiet was wrong. `task_progress` fires *around* a nested tool call, never
+ * during one — measured, the parent's stdout said nothing for the full 47.1s a
+ * workflow agent spent inside a single `sleep 50`, and 33.2s was the worst gap
+ * in a second run. So the deadline was really a cap on how long any one nested
+ * tool call a workflow makes may take, which is not a thing this file can know.
+ * `armGrace` now holds the turn while the CLI reports work outstanding, and
+ * this is only how long it waits between looks.
  */
 const BACKGROUND_TASK_GRACE_MS = 90 * 1000;
 
@@ -476,6 +481,10 @@ interface CliSession {
    *  them back. It echoes ours alongside the phone's, and this is what tells
    *  them apart — see takeEcho(). */
   pendingEchoes: Set<string>;
+  /** The task-type playbook this process was spawned with. Held for the life of
+   *  the session: it rides on `--append-system-prompt`, which cannot be changed
+   *  on a running CLI, and reclassifying per turn replaced the process. */
+  taskType?: TaskType;
 }
 
 /** How long the next turn waits for an interrupted one to report its `result`
@@ -711,8 +720,6 @@ export class ClaudeCliProvider implements ChatProvider {
       return;
     }
 
-    const mode = this.opts.permissionMode ?? "default";
-    const permissionProtocol = usesPermissionProtocol(mode);
     // Fresh per turn: a prior "allow edits this turn" must not leak into the next.
     this.autoAllowEdits = false;
 
@@ -723,34 +730,20 @@ export class ClaudeCliProvider implements ChatProvider {
 
     const args = buildArgs(userText, req.model, this.opts);
 
-    // Inject the user's token as ANTHROPIC_API_KEY when present. The CLI
-    // prefers env-supplied keys over its own on-disk credentials, so this
-    // is the cleanest way to make Luno's stored token authoritative
-    // without touching ~/.claude/ files.
-    const childEnv: NodeJS.ProcessEnv = { ...process.env };
-    if (this.opts.token) childEnv.ANTHROPIC_API_KEY = this.opts.token;
-    // There is no max-output-tokens flag — the CLI reads this env var per run.
-    // Anything at or below zero means "whatever the CLI decides", so the
-    // variable is left unset rather than pinned to a number we invented.
-    if (Number.isFinite(req.maxTokens) && req.maxTokens > 0) {
-      childEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(
-        Math.floor(req.maxTokens)
-      );
-    }
     const child = spawn(this.opts.binary, args, {
       cwd: this.opts.cwd,
-      env: childEnv,
-      // The permission path needs stdin open both to deliver the prompt
-      // (stream-json input) and to write control_responses; the plan path
-      // passes the prompt as a positional arg and never writes back.
-      stdio: [permissionProtocol ? "pipe" : "ignore", "pipe", "pipe"]
+      env: this.childEnv(req.maxTokens),
+      // stdin is a pipe in every mode. It carries the prompt, it carries
+      // control responses where the protocol is live, and — the reason it is
+      // no longer conditional — an open stdin is what keeps the CLI out of the
+      // print wind-down that terminates background work. See buildArgs.
+      stdio: ["pipe", "pipe", "pipe"]
     });
     this.child = child;
 
-    // Deliver the user turn as a stream-json message so the CLI accepts
-    // realtime control responses on the same channel. stdin is intentionally
-    // left OPEN — it's closed when the turn's `result` event lands below.
-    if (permissionProtocol && child.stdin) {
+    // Deliver the user turn as a stream-json message. stdin is intentionally
+    // left OPEN — it is closed by endTurn(), which is what ends the turn.
+    if (child.stdin) {
       const userMsg = JSON.stringify({
         type: "user",
         message: { role: "user", content: userText }
@@ -762,6 +755,25 @@ export class ClaudeCliProvider implements ChatProvider {
       }
     }
 
+    // Subagents launched with `run_in_background` that have not reported a
+    // terminal status. Declared here because the silence watchdog below reads
+    // it: a turn running background work is not wedged just because it is
+    // quiet.
+    const openTasks = new Set<string>();
+    /**
+     * How many background tasks the CLI itself says are registered, from its
+     * `background_tasks_changed` roster.
+     *
+     * A second, independent answer to "is anything still running", and the
+     * authoritative one — `openTasks` is our own bookkeeping off `task_*`
+     * events, and twice now it has read empty while a workflow was demonstrably
+     * alive, letting the grace timer end the turn and kill it at ten minutes.
+     * Either source saying "busy" is enough to hold the turn.
+     */
+    let rosterSize = 0;
+    /** Whether anything is still running, by either account. */
+    const busyWithTasks = () => openTasks.size > 0 || rosterSize > 0;
+
     let silenceTimer: ReturnType<typeof setTimeout> | undefined;
     const clearSilence = () => {
       if (silenceTimer) clearTimeout(silenceTimer);
@@ -771,12 +783,41 @@ export class ClaudeCliProvider implements ChatProvider {
      *  of life, so the budget it gets is measured from here. */
     const armSilence = () => {
       if (silenceTimer) clearTimeout(silenceTimer);
-      silenceTimer = setTimeout(
-        () => child.kill("SIGKILL"),
-        this.opts.silenceTimeoutMs ?? SILENCE_TIMEOUT_MS
-      );
+      silenceTimer = setTimeout(() => {
+        // A workflow is silent by construction. Its agents report on state
+        // change, not on a clock, so a phase whose agents are each grinding
+        // through one long tool call produces nothing on stdout for as long as
+        // that takes. Measured: a 4-agent phase reading a 265 MB binary went
+        // quiet for ten minutes and was SIGKILLed here — all four sidechains
+        // recorded `[Request interrupted by user]` within 10ms of each other,
+        // ten minutes of work lost, and nothing anywhere said why.
+        //
+        // Nothing outside the CLI can tell that apart from a wedge, so while
+        // the CLI says work is outstanding it gets the benefit of the doubt.
+        // Stop is the user's lever, and it always was.
+        if (busyWithTasks()) {
+          armSilence();
+          return;
+        }
+        // Never silently. This kill used to leave no log line, no error and no
+        // trace in the transcript, which is the only reason it took three
+        // sessions to find.
+        logInfo(
+          "[luno] claude produced nothing for the silence budget; killing it"
+        );
+        push({
+          type: "error",
+          error:
+            "The Claude CLI stopped responding and was ended. Nothing it had " +
+            "not already sent was recovered."
+        });
+        child.kill("SIGKILL");
+        // Not waiting on `exit`: the thing being killed is by definition not
+        // responding, and a turn that hangs on its death rattle is the bug
+        // over again. Same reason the tool-stall watchdog ends the turn itself.
+        push({ type: "done" });
+      }, this.opts.silenceTimeoutMs ?? SILENCE_TIMEOUT_MS);
     };
-    armSilence();
 
     const rl = readline.createInterface({
       input: child.stdout!,
@@ -787,6 +828,7 @@ export class ClaudeCliProvider implements ChatProvider {
       armSilence();
       stderrBuf += b.toString("utf8");
     });
+    armSilence();
 
     const queue: StreamDelta[] = [];
     let resolver: (() => void) | null = null;
@@ -843,11 +885,9 @@ export class ClaudeCliProvider implements ChatProvider {
       this.opts.onSlashCommands
     );
 
-    // Subagents launched with `run_in_background` that have not reported a
-    // terminal status. While any are open the turn is deliberately held past
-    // `result` — see BACKGROUND_TASK_GRACE_MS for what that buys and why the
-    // wait has to be bounded.
-    const openTasks = new Set<string>();
+    // While any task is open the turn is deliberately held past `result` — see
+    // BACKGROUND_TASK_GRACE_MS for what that buys. `openTasks` itself is
+    // declared above, with the silence watchdog that also reads it.
     /** A task has finished and the model has not said anything since — so the
      *  turn the CLI opens to report it has not run yet. See
      *  TASK_REPORT_GRACE_MS. */
@@ -874,17 +914,33 @@ export class ClaudeCliProvider implements ChatProvider {
       if (turnEnded) return;
       if (graceTimer) clearTimeout(graceTimer);
       graceTimer = setTimeout(() => {
-        logInfo(
-          `[luno] ${openTasks.size} background agent(s) went quiet; ending the turn`
-        );
+        // Quiet is not evidence, and this is where believing it cost ten
+        // minutes of work. Measured: the parent's stdout is silent for the
+        // *whole* of a nested tool call — 47.1s across one `sleep 50` inside a
+        // workflow agent — so a run doing anything slow looks exactly like a
+        // run doing nothing. While the CLI still says work is outstanding the
+        // turn is held rather than ended, the same benefit of the doubt the
+        // silence watchdog gives, and for the same reason: ending here closes
+        // stdin and the `finally` SIGTERMs the process, taking the work with
+        // it. Stop is the user's lever.
+        if (busyWithTasks()) {
+          logInfo(
+            `[luno] quiet, but ${openTasks.size} task(s) tracked and ${rosterSize} on the CLI roster; holding the turn`
+          );
+          armGrace(ms);
+          return;
+        }
+        logInfo("[luno] quiet with nothing outstanding; ending the turn");
         endTurn();
       }, ms);
     };
 
-    /** The generous budget while something is still running, the short one
-     *  while only the model's report on a finished task is outstanding. */
+    /** How long to wait before looking again. While work is outstanding this is
+     *  only a re-check interval — see armGrace, which holds rather than ends —
+     *  and otherwise it is the whole budget the model's report on a finished
+     *  task gets. */
     const graceBudget = () =>
-      openTasks.size > 0
+      busyWithTasks()
         ? (this.opts.backgroundGraceMs ?? BACKGROUND_TASK_GRACE_MS)
         : (this.opts.taskReportGraceMs ?? TASK_REPORT_GRACE_MS);
 
@@ -909,6 +965,14 @@ export class ClaudeCliProvider implements ChatProvider {
       }
       // Acks to control requests *we* sent (e.g. set_permission_mode) — ignore.
       if (ev.type === "control_response") return;
+      // The CLI's own roster of registered background work. Read here rather
+      // than through the processor because nothing downstream needs it — it
+      // exists so the turn-end timers have a source of truth that is not our
+      // own `task_*` bookkeeping.
+      if (ev.type === "system" && ev.subtype === "background_tasks_changed") {
+        rosterSize = ev.tasks?.length ?? 0;
+        logInfo(`[luno] CLI roster: ${rosterSize} background task(s)`);
+      }
       for (const d of processor(ev)) {
         push(d);
         // Anything the model says settles the report a finished task is owed.
@@ -919,10 +983,13 @@ export class ClaudeCliProvider implements ChatProvider {
         }
         if (d.type !== "task" || !d.task) continue;
         const { phase, taskId, status } = d.task;
-        if (phase === "started") openTasks.add(taskId);
-        else if (phase === "notification" || isTerminalTaskStatus(status)) {
+        if (phase === "started") {
+          openTasks.add(taskId);
+          logInfo(`[luno] task opened: ${taskId} (${openTasks.size} open)`);
+        } else if (phase === "notification" || isTerminalTaskStatus(status)) {
           openTasks.delete(taskId);
           pendingTaskReport = true;
+          logInfo(`[luno] task closed: ${taskId} (${openTasks.size} open)`);
         }
       }
       // Under stream-json input the CLI keeps the session open for more input
@@ -935,16 +1002,15 @@ export class ClaudeCliProvider implements ChatProvider {
       // came back — measured on 2.1.220, a second `result` followed the first by
       // ten seconds with a whole paragraph in between. Ending on the last agent
       // rather than on that second `result` cut the model off mid-sentence.
-      // Set outside the `permissionProtocol` gate below: the text-input path
-      // gets a `result` too, and `onExit` reads this to tell a turn that failed
-      // from a process that exited after answering in full.
-      if (ev.type === "result") sawResult = true;
-      if (permissionProtocol && ev.type === "result") {
+      // Recorded separately from the branch below because `onExit` reads it to
+      // tell a turn that failed from a process that exited after answering.
+      if (ev.type === "result") {
+        sawResult = true;
         // A task that finished *before* this `result` leaves the turn owed one
         // more: the CLI answers its own `<task-notification>` in a fresh turn,
         // and that turn holds the only account of what the task produced.
         // Short workflows always land this way — ending here discarded it.
-        if (openTasks.size === 0 && !pendingTaskReport) endTurn();
+        if (!busyWithTasks() && !pendingTaskReport) endTurn();
         else armGrace(graceBudget());
         return;
       }
@@ -957,9 +1023,23 @@ export class ClaudeCliProvider implements ChatProvider {
     const onExit = () => {
       clearSilence();
       stallWatch?.clearAll();
+      const said = usefulStderr(stderrBuf);
       if (child.exitCode !== 0 && child.signalCode !== "SIGTERM") {
         const msg = exitFailure(stderrBuf, child.exitCode, sawResult);
         if (msg) push({ type: "error", error: msg });
+      } else if (said.length) {
+        // Never drop what the CLI said just because it left politely.
+        logInfo(
+          `[luno] claude exited ${child.exitCode ?? "?"} saying: ${said.join(" ")}`
+        );
+      }
+      // A clean exit is still bad news when it takes running work with it, and
+      // the CLI does explain itself: `Background tasks still running after
+      // 600s; terminating.` was on stderr every time, and reading stderr only
+      // on a bad exit code is why finding that cost four sessions. Not for our
+      // own SIGTERM — that one is Stop, and the user knows.
+      if (child.signalCode !== "SIGTERM" && busyWithTasks() && said.length) {
+        push({ type: "error", error: said.join("\n") });
       }
       push({ type: "done" });
       done = true;
@@ -1007,10 +1087,20 @@ export class ClaudeCliProvider implements ChatProvider {
     req: ProviderRequest,
     userText: string
   ): AsyncIterable<StreamDelta> {
-    const args = buildArgs(userText, req.model, this.opts);
+    // The task-type playbook is classified from the prompt, so it changes the
+    // moment the conversation shifts subject — and it reaches the CLI as
+    // `--append-system-prompt`, which a live process cannot be told about. Left
+    // to vary it replaced the process mid-conversation, which under Remote
+    // Control means a new session URL and a phone that goes quiet. A running
+    // session keeps the playbook it was spawned with; the next process picks up
+    // whatever is current.
+    const taskType = this.session?.exited
+      ? this.opts.taskType
+      : (this.session?.taskType ?? this.opts.taskType);
+    const args = buildArgs(userText, req.model, { ...this.opts, taskType });
     let session: CliSession;
     try {
-      session = this.ensureSession(args, req);
+      session = this.ensureSession(args, req, taskType);
     } catch (err) {
       yield {
         type: "error",
@@ -1077,6 +1167,11 @@ export class ClaudeCliProvider implements ChatProvider {
       uuid,
       session_id: "",
       parent_tool_use_id: null,
+      // Says a person typed this, here. The official extension stamps the same
+      // field on every message it sends — `send(…, {kind:"human"})` in its
+      // webview — and a session shared with another device is the one place
+      // where "who sent this" is not obvious from the fact that it arrived.
+      origin: { kind: "human" },
       message: { role: "user", content: sent }
     });
     if (!wrote) {
@@ -1120,9 +1215,15 @@ export class ClaudeCliProvider implements ChatProvider {
    * conversation survives that (`--resume` carries it), but a Remote Control
    * bridge does not: it has to be re-established afterwards.
    */
+  /**
+   * @param taskType the playbook `args` were built with, recorded on the
+   *   session so the next turn can keep using it rather than reclassifying and
+   *   replacing the process underneath a connected device.
+   */
   private ensureSession(
     args: string[],
-    req: ProviderRequest | undefined
+    req: ProviderRequest | undefined,
+    taskType?: TaskType
   ): CliSession {
     const live = this.session;
     if (live && !live.exited) {
@@ -1130,7 +1231,14 @@ export class ClaudeCliProvider implements ChatProvider {
         if (req) this.applyLiveOptions(live, req);
         return live;
       }
-      logInfo("[luno] session options changed — replacing the CLI process");
+      // Names the flag rather than just the fact. A replacement is invisible
+      // from the panel and expensive under Remote Control — it hands the phone
+      // a session URL it is not holding — so when one happens the log has to
+      // say which option did it, or the next report is another round of
+      // guessing.
+      logInfo(
+        `[luno] session options changed — replacing the CLI process: ${argvDiff(live.args, args)}`
+      );
       this.disposeSession();
     }
 
@@ -1151,6 +1259,7 @@ export class ClaudeCliProvider implements ChatProvider {
       exited: false,
       model: req?.model,
       permissionMode: this.opts.permissionMode ?? "default",
+      taskType,
       busy: false,
       idleWaiters: [],
       pendingEchoes: new Set()
@@ -1231,6 +1340,7 @@ export class ClaudeCliProvider implements ChatProvider {
       // envelope a tool_result travels in.
       const prompt = replayedPrompt(ev);
       if (prompt !== null) {
+        if (isCliControlMarker(prompt)) return;
         if (!takeEcho(session.pendingEchoes, ev.uuid)) {
           // The CLI is now working for the other surface. Marking the session
           // busy is what makes a prompt sent from here wait for that turn's
@@ -1242,6 +1352,15 @@ export class ClaudeCliProvider implements ChatProvider {
       }
       for (const d of session.processor(ev)) route(d);
       if (ev.type === "result") {
+        // Not every `result` belongs to the turn currently holding the sink.
+        // The CLI opens a turn of its own to answer a `<task-notification>`,
+        // and it stamps that turn's result `origin: {kind: "task-notification"}`
+        // — measured, `test/fixtures/workflow-stream.jsonl` line 24. That turn
+        // sets neither of the two places `session.busy` is raised (it replays
+        // no `user` message, so `replayedPrompt` cannot fire), so a panel turn
+        // submitted while it runs installs its sink into a session that is
+        // mid-turn, and this `result` would end it before it had said anything.
+        if (ev.origin?.kind === "task-notification" && session.busy) return;
         session.busy = false;
         for (const wake of session.idleWaiters.splice(0)) wake();
         route({ type: "done" });
@@ -1255,11 +1374,22 @@ export class ClaudeCliProvider implements ChatProvider {
         this.child = null;
       }
       const unexpected = child.exitCode !== 0 && child.signalCode !== "SIGTERM";
-      if (unexpected) {
-        // A session process has answered many turns by the time it exits, so a
-        // late non-zero code is never the current turn failing.
-        const msg = exitFailure(session.stderr, child.exitCode, true);
-        if (msg) route({ type: "error", error: msg });
+      const said = usefulStderr(session.stderr);
+      // Whatever it said on the way out, say it somewhere. Passing `answered:
+      // true` to exitFailure — which a session process always has — makes it
+      // return null every time, so this handler used to surface nothing at all,
+      // however loudly the CLI explained itself. That is the same hole the
+      // per-turn path had, and it is how a terminated workflow read as silence.
+      if (said.length) {
+        logInfo(
+          `[luno] claude session exited ${child.exitCode ?? "?"} saying: ${said.join(" ")}`
+        );
+      }
+      // A session process has answered many turns by the time it exits, so a
+      // late non-zero code is never the current turn failing — but an
+      // unexplained death mid-conversation is worth a line on screen.
+      if (unexpected && said.length) {
+        route({ type: "error", error: said.join("\n") });
       }
       route({ type: "done", sessionEnded: true });
     });
@@ -1511,6 +1641,12 @@ export class ClaudeCliProvider implements ChatProvider {
     if (Number.isFinite(maxTokens) && (maxTokens ?? 0) > 0) {
       env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(Math.floor(maxTokens!));
     }
+    // Belt to buildArgs' braces. Stream-json input already keeps the CLI out of
+    // its print wind-down, but if any configuration ever falls back to the argv
+    // path this stops the CLI terminating background work behind our back: `0`
+    // is its own documented value for "wait indefinitely", and the bounds that
+    // remain are ours — the silence watchdog, and Stop.
+    env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS ??= "0";
     return env;
   }
 
@@ -1539,10 +1675,45 @@ export function turnPreamble(opts: ClaudeCliOpts): string {
 /** argv reduced to what forces a respawn. `--resume` is dropped: it only
  *  matters at spawn, and it changes as soon as the first turn reports a
  *  session id, which would otherwise replace the process every turn. */
+/**
+ * What changed between two argv lists, short enough for one log line.
+ *
+ * Values are truncated: a `--append-system-prompt` payload is a whole document,
+ * and the useful part is which flag moved, not what it now says.
+ */
+export function argvDiff(
+  before: ReadonlyArray<string>,
+  after: ReadonlyArray<string>
+): string {
+  const clip = (s: string) => (s.length > 60 ? `${s.slice(0, 57)}…` : s);
+  const gone = before.filter((a) => !after.includes(a));
+  const added = after.filter((a) => !before.includes(a));
+  const parts: string[] = [];
+  if (gone.length) parts.push(`-${gone.map(clip).join(" -")}`);
+  if (added.length) parts.push(`+${added.map(clip).join(" +")}`);
+  return parts.join(" ") || "argument order";
+}
+
+/** `--allowedTools` patterns for connected MCP servers, in a fixed order — see
+ *  the note at the call site for why the order is load-bearing. */
+export function mcpToolPatterns(names: ReadonlyArray<string> = []): string[] {
+  return [...new Set(names)].sort().map((n) => `mcp__${n}`);
+}
+
 export function respawnFingerprint(args: ReadonlyArray<string>): string {
   const kept: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--resume") {
+      i++;
+      continue;
+    }
+    // The MCP config is written to a fresh `mkdtemp` directory every turn, so
+    // its path differs even when nothing about the servers did. Left in, it
+    // replaced the process on *every* turn — and with Remote Control on, each
+    // replacement hands out a new session URL and silently strands the phone on
+    // the old one. The server set still counts: it reaches argv separately, as
+    // `--allowedTools mcp__<name>`.
+    if (args[i] === "--mcp-config") {
       i++;
       continue;
     }
@@ -1616,8 +1787,13 @@ function terminateChild(child: ChildProcess): Promise<void> {
   });
 }
 
+/**
+ * @param _userText kept so every caller still reads as "the args for this
+ *   prompt", but no configuration puts the prompt in argv any more — it is
+ *   written to stdin by the caller.
+ */
 export function buildArgs(
-  userText: string,
+  _userText: string,
   model: string | undefined,
   opts: ClaudeCliOpts
 ): string[] {
@@ -1630,21 +1806,24 @@ export function buildArgs(
   // exercised upstream in the no-print configuration, so we run the one that
   // is known to work rather than the one that merely should.
   const args = opts.sessionMode ? [] : ["-p"];
-  // In the permission-protocol path the prompt is delivered as a stream-json
-  // message on stdin (see stream()); only the legacy text path passes it as a
-  // positional argument. A session has no prompt at spawn time at all.
-  if (!permissionProtocol && !opts.sessionMode) args.push(userText);
   args.push(
     "--output-format",
     "stream-json",
     "--include-partial-messages",
     "--verbose"
   );
+  // The prompt always travels on stdin (see stream()), never as a positional
+  // argument. Measured on 2.1.219: with the prompt in argv the CLI reports
+  // `no stdin data received in 3s, proceeding without it` and opens its print
+  // wind-down window, which terminates every background task still running
+  // CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS later — a workflow was stopped at
+  // 10m07s with `status: "stopped"`. The same workflow under stream-json input,
+  // where stdin never closes and the window never opens, ran 13m14s to its own
+  // completion. Bypass and Plan were the two modes still on the argv path.
+  args.push("--input-format", "stream-json");
   if (permissionProtocol || opts.sessionMode) {
-    // Accept the prompt + control responses on stdin, and route per-tool
-    // approval back to us over the control channel instead of the CLI's own
-    // interactive prompt (which a headless run can't service).
-    args.push("--input-format", "stream-json");
+    // Route per-tool approval back to us over the control channel instead of
+    // the CLI's own interactive prompt (which a headless run can't service).
     args.push("--permission-prompt-tool", "stdio");
   }
   if (opts.sessionMode) {
@@ -1731,7 +1910,14 @@ export function buildArgs(
       ),
       // Pre-allow every tool from each connected MCP server. Pattern is
       // `mcp__<server>` per Claude Code's MCP tool naming convention.
-      ...(opts.mcpServerNames ?? []).map((n) => `mcp__${n}`)
+      //
+      // Sorted, because argv decides whether a session-mode process survives
+      // the turn: these names arrive from three sources merged through a Set,
+      // one of them a cache a probe rewrites, so the same servers can come back
+      // in a different order. A reordered argv replaced the CLI process — and
+      // with Remote Control on, that hands the phone a session URL it is not
+      // holding.
+      ...mcpToolPatterns(opts.mcpServerNames)
     ];
     args.push("--allowedTools", ...tools);
   } else if (opts.permissionMode === "default" && opts.mcpServerNames?.length) {
@@ -1741,7 +1927,7 @@ export function buildArgs(
     // an MCP server via the Connectors page is an explicit consent grant
     // (OAuth + click-through), so pre-allow that server's tools here.
     // Plan mode is intentionally not covered — it's read-only by design.
-    args.push("--allowedTools", ...opts.mcpServerNames.map((n) => `mcp__${n}`));
+    args.push("--allowedTools", ...mcpToolPatterns(opts.mcpServerNames));
   }
 
   // Skills the user has toggled off in the picker need to be *actually*
@@ -2112,6 +2298,10 @@ export interface CliEvent {
   /** Resolved model id on the `system`/`init` event (alias → concrete id). */
   model?: string;
   /** Every slash command the CLI knows, reported on `system`/`init`. */
+  /** On a `result` — what opened the turn it ends. `task-notification` marks
+   *  the turn the CLI opens by itself to report a finished background task,
+   *  which is not a turn any surface here asked for. */
+  origin?: { kind?: string };
   slash_commands?: string[];
   /** The same list, republished on `system`/`commands_changed` when it changes
    *  mid-session. Named differently on the wire from `slash_commands`. */
@@ -2278,6 +2468,11 @@ type Processor = (ev: CliEvent) => StreamDelta[];
  */
 export function replayedPrompt(ev: CliEvent): string | null {
   if (ev.type !== "user" || ev.parent_tool_use_id) return null;
+  // `--replay-user-messages` is what this reads, and the CLI marks what it
+  // replays. Without the check any `user` record the CLI injects for its own
+  // bookkeeping was taken for a prompt someone typed. Measured: real prompts
+  // carry the flag in both recordings under `test/fixtures/`.
+  if (ev.isReplay !== true) return null;
   const content = ev.message?.content;
   if (typeof content === "string") return content || null;
   if (!Array.isArray(content)) return null;
@@ -2287,6 +2482,29 @@ export function replayedPrompt(ev: CliEvent): string | null {
     .join("")
     .trim();
   return text || null;
+}
+
+/**
+ * Markers the CLI writes into the conversation as `user` records that no one
+ * typed. They are its own bookkeeping and must never open a turn.
+ *
+ * Observed rather than designed: with Remote Control on, a Stop put
+ * `[Request interrupted by user]` on the timeline **as the user's own message**
+ * three times in one session, each stamped to the same second as an
+ * `aborting turn` log line — and each opened a turn against the CLI, so the
+ * model answered a control marker as if it were a prompt. The string is the
+ * CLI's (it occurs in `claude.exe`, nowhere in this repo).
+ *
+ * A string match, and deliberately so: the wire shape of that record was not
+ * captured — an interrupt sent after generation ends does not produce it — so
+ * there is no field here worth gating on yet. Widen this to the field once
+ * someone catches one mid-generation.
+ */
+const CLI_CONTROL_MARKERS = new Set(["[Request interrupted by user]"]);
+
+/** Whether this replayed prompt is the CLI talking to itself. */
+export function isCliControlMarker(prompt: string): boolean {
+  return CLI_CONTROL_MARKERS.has(prompt.trim());
 }
 
 /**
@@ -2351,6 +2569,18 @@ export function makeProcessor(
   // concrete id). Emit it once per change so the UI can show what's actually
   // running rather than the alias the user picked.
   let reportedModel: string | null = null;
+  /**
+   * How much context the most recent *request* occupied, and the window it ran
+   * in.
+   *
+   * Kept per stream because the `result` event cannot answer the first
+   * question: its `usage` is the turn's running total, summed over every
+   * request in it. Measured on a two-request turn — 33,453 then 34,372 — the
+   * result reported 67,825, which is neither request and grows without bound
+   * as a turn goes on. A twenty-request turn read 173% of a 1M window.
+   */
+  let lastRequestContext: number | undefined;
+  let lastContextWindow: number | undefined;
   const emitModel = (model: string | undefined, out: StreamDelta[]) => {
     if (model && model !== reportedModel) {
       reportedModel = model;
@@ -2382,6 +2612,9 @@ export function makeProcessor(
     // which reads as the product losing the user's work.
     if (ev.type === "system" && ev.subtype === "compact_boundary") {
       const meta = ev.compact_metadata ?? ev.compactMetadata;
+      const postTokens =
+        (meta as { post_tokens?: number } | undefined)?.post_tokens ??
+        (meta as { postTokens?: number } | undefined)?.postTokens;
       out.push({
         type: "compact",
         compaction: {
@@ -2389,11 +2622,26 @@ export function makeProcessor(
           preTokens:
             (meta as { pre_tokens?: number } | undefined)?.pre_tokens ??
             (meta as { preTokens?: number } | undefined)?.preTokens,
-          postTokens:
-            (meta as { post_tokens?: number } | undefined)?.post_tokens ??
-            (meta as { postTokens?: number } | undefined)?.postTokens
+          postTokens
         }
       });
+      // The context just shrank, and the next request is what would otherwise
+      // report it — until then the row would keep showing a window that is no
+      // longer full, at exactly the moment the user is watching it. The CLI
+      // says how much survived; Anthropic's extension zeroes the count here,
+      // which is the same move with less information.
+      lastRequestContext = typeof postTokens === "number" ? postTokens : 0;
+      if (lastContextWindow !== undefined) {
+        out.push({
+          type: "usage",
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            contextTokens: lastRequestContext,
+            contextWindow: lastContextWindow
+          }
+        });
+      }
       return out;
     }
 
@@ -2503,8 +2751,22 @@ export function makeProcessor(
       // Some CLI versions ship per-assistant-message usage. Forward it so the
       // meter shows live counts as the turn streams (the final result event
       // sends a corrected total later).
+      //
+      // This is also the only place the context occupancy can be read: one
+      // assistant message is one request, so its own input + cache figures are
+      // what that request put in front of the model. The window is not on this
+      // event, so a live update only happens once a `result` in this stream has
+      // named it.
       const u = ev.message.usage;
-      if (u) out.push(makeUsageDelta(u, ev.session_id));
+      if (u) {
+        lastRequestContext = contextSize(u);
+        const delta = makeUsageDelta(u, ev.session_id);
+        if (delta.usage && lastContextWindow !== undefined) {
+          delta.usage.contextTokens = lastRequestContext;
+          delta.usage.contextWindow = lastContextWindow;
+        }
+        out.push(delta);
+      }
       return out;
     }
 
@@ -2545,8 +2807,16 @@ export function makeProcessor(
           u.usage.costUsd = ev.total_cost_usd;
         }
         if (u.usage) {
-          u.usage.contextTokens = contextSize(ev.usage);
-          u.usage.contextWindow = contextWindowOf(ev.modelUsage);
+          // Not `contextSize(ev.usage)`: this event's usage is the turn's sum
+          // across every request, so a long turn reports several times the
+          // window it ran in. The last request's own figure is the answer, and
+          // when the CLI shipped no per-message usage there is none — the row
+          // then holds its previous value rather than showing a total as an
+          // occupancy.
+          lastContextWindow =
+            contextWindowOf(ev.modelUsage, reportedModel) ?? lastContextWindow;
+          u.usage.contextTokens = lastRequestContext;
+          u.usage.contextWindow = lastContextWindow;
         }
         out.push(u);
       }
@@ -2701,17 +2971,23 @@ const STDERR_ADVISORIES: ReadonlyArray<RegExp> = [
  * is reading. Those go to the log instead, where a real diagnosis can find
  * them.
  */
-export function exitFailure(
-  stderr: string,
-  code: number | null,
-  answered: boolean
-): string | null {
-  const lines = stderr
+/** The lines of stderr worth reading back. The advisories the CLI prints on
+ *  runs that went fine are not among them. */
+function usefulStderr(stderr: string): string[] {
+  return stderr
     .split("\n")
     .map((line) => line.trim())
     .filter(
       (line) => line && !STDERR_ADVISORIES.some((advice) => advice.test(line))
     );
+}
+
+export function exitFailure(
+  stderr: string,
+  code: number | null,
+  answered: boolean
+): string | null {
+  const lines = usefulStderr(stderr);
   if (answered) {
     logInfo(
       `[luno] claude exited ${code ?? "?"} after answering` +
@@ -2725,7 +3001,6 @@ export function exitFailure(
 function taskUpdate(ev: CliEvent, phase: SubagentPhase): SubagentUpdate | null {
   if (!ev.task_id) return null;
   const u = ev.usage;
-  const isWorkflow = isWorkflowTask(ev.task_type);
   return {
     phase,
     taskId: ev.task_id,
@@ -2742,14 +3017,22 @@ function taskUpdate(ev: CliEvent, phase: SubagentPhase): SubagentUpdate | null {
     durationMs: u?.duration_ms,
     toolUses: u?.tool_uses,
     totalTokens: u?.total_tokens,
-    // A workflow puts the *agent's label* here — "Reply with exactly the word
-    // OK" — not the name of a tool. Measured on 2.1.219. Rendering it in the
-    // last-tool slot invents a tool that was never run, and the same string is
-    // already in `activity`.
-    lastToolName: isWorkflow ? undefined : ev.last_tool_name,
-    summary: ev.summary,
+    lastToolName: ev.last_tool_name,
+    // Phase-gated for the same reason `description` is, and the contract says
+    // so: `notification` is the only phase whose `summary` is an answer. On
+    // `task_progress` the CLI echoes the *task's own description* there —
+    // measured in `test/fixtures/workflow-stream.jsonl`, where four progress
+    // records repeat "probe run for a stream audit" and the first is stamped
+    // `duration_ms: 22`. Copied through, that string reached the card as a
+    // finished answer 22ms after launch, under the heading "Answered".
+    summary: phase === "notification" ? ev.summary : undefined,
     outputFile: ev.output_file,
-    workflowProgress: isWorkflow ? ev.workflow_progress : undefined
+    // Passed through on its own merit, never gated on `task_type`: measured on
+    // 2.1.219, the CLI sends `task_type` on `task_started` and on no other
+    // phase, so a gate here discards `workflow_progress` on every event that
+    // actually carries it. Which kind of task this is belongs to the host,
+    // which has the dispatch merged in — see `onSubagentUpdate`.
+    workflowProgress: ev.workflow_progress
   };
 }
 
@@ -2784,7 +3067,11 @@ export function contextSize(u: CliUsage): number {
   return (
     (u.input_tokens ?? 0) +
     (u.cache_creation_input_tokens ?? 0) +
-    (u.cache_read_input_tokens ?? 0)
+    (u.cache_read_input_tokens ?? 0) +
+    // The reply counts too: it is already written, and the next request carries
+    // it as history. Anthropic's own extension sums the same four fields —
+    // `updateUsage` in its webview bundle, 2.1.220.
+    (u.output_tokens ?? 0)
   );
 }
 
@@ -2797,12 +3084,21 @@ export function contextSize(u: CliUsage): number {
  * meter at 5× the truth.
  */
 export function contextWindowOf(
-  modelUsage: Record<string, { contextWindow?: number }> | undefined
+  modelUsage: Record<string, { contextWindow?: number }> | undefined,
+  mainLoopModel?: string | null
 ): number | undefined {
   if (!modelUsage) return undefined;
-  // Several models can appear in one turn (a haiku side-call alongside the main
-  // model). The largest window is the main loop's; a side-call's smaller one
-  // would understate the room left.
+  // The model that ran the main loop, when the CLI named it — that is the
+  // conversation's own window, and it is what Anthropic's extension reads
+  // (`modelUsage[currentMainLoopModel]`).
+  const named = mainLoopModel
+    ? modelUsage[mainLoopModel]?.contextWindow
+    : undefined;
+  if (typeof named === "number" && named > 0) return named;
+
+  // Otherwise the largest of them. Several models can appear in one turn (a
+  // haiku side-call alongside the main model), and a side-call's smaller
+  // window would understate the room left.
   let largest: number | undefined;
   for (const entry of Object.values(modelUsage)) {
     const w = entry?.contextWindow;

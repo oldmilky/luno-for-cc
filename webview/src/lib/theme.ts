@@ -35,7 +35,7 @@ export const THEMES: ThemeDef[] = [
   { id: "white", label: "White", note: "Studio silver on graphite" }
 ];
 
-export const DEFAULT_THEME: ThemeId = "copper";
+export const DEFAULT_THEME: ThemeId = "white";
 
 const THEMES_BY_ID = new Map(THEMES.map((t) => [t.id, t]));
 

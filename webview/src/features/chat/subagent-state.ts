@@ -69,9 +69,19 @@ export function foldSubagents(events: TimelineEvent[]): FoldedSubagents {
   return { byTaskId, taskIdByToolUse, elapsed };
 }
 
+/**
+ * Where agents that named no phase are collected.
+ *
+ * Sorts last rather than first: the group renders without a heading (there is
+ * no title to draw), and at index -1 that headless list appeared *above* the
+ * workflow's real phases, reading as an unlabelled first phase.
+ */
+const ORPHAN_PHASE_INDEX = Number.MAX_SAFE_INTEGER;
+
 /** One phase of a workflow with the agents the CLI reported under it. */
 export interface WorkflowPhaseGroup {
-  /** Phase index as the CLI numbered it, or -1 for agents that named no phase. */
+  /** Phase index as the CLI numbered it, or {@link ORPHAN_PHASE_INDEX} for
+   *  agents that named no phase. */
   index: number;
   title: string;
   agents: WorkflowProgressEntry[];
@@ -106,18 +116,65 @@ export function groupWorkflowProgress(
   };
 
   for (const e of entries) {
-    if (e.type === "workflow_phase") groupFor(e.index ?? -1, e.title ?? "");
+    if (e.type === "workflow_phase") {
+      groupFor(e.index ?? ORPHAN_PHASE_INDEX, e.title ?? "");
+    }
   }
   for (const e of entries) {
     if (e.type !== "workflow_agent") continue;
-    groupFor(e.phaseIndex ?? -1, e.phaseTitle ?? "").agents.push(e);
+    groupFor(
+      e.phaseIndex ?? ORPHAN_PHASE_INDEX,
+      e.phaseTitle ?? ""
+    ).agents.push(e);
   }
 
   return [...groups.values()].sort((a, b) => a.index - b.index);
 }
 
-/** Whether this workflow agent has stopped. Anything unrecognised reads as
- *  still running, the same way an unknown task status does. */
-export function isWorkflowAgentDone(entry: WorkflowProgressEntry): boolean {
-  return entry.state === "done" || entry.state === "error";
+/** How a card or an agent row reads: what the reported word actually means. */
+export type SubagentOutcome = "running" | "failed" | "interrupted" | "done";
+
+const RUNNING_WORDS = new Set(["running", "start", "queued"]);
+/** Stopped by something going wrong. `cancelled` has always been counted here
+ *  rather than as an interruption; unifying the two vocabularies was not the
+ *  moment to quietly re-colour it. */
+const FAILED_WORDS = new Set(["failed", "error", "cancelled", "canceled"]);
+/** Stopped by something outside it, with nothing having gone wrong. */
+const INTERRUPTED_WORDS = new Set([
+  "interrupted",
+  "stopped",
+  "killed",
+  "skipped"
+]);
+
+/**
+ * Map a CLI status word onto what the UI shows.
+ *
+ * **One function on purpose.** A task's `status` and a workflow agent's `state`
+ * are two vocabularies from the same CLI describing the same four outcomes, and
+ * keeping a predicate per call site is precisely how this went wrong twice: a
+ * card drew a green tick on an agent whose process had been killed (`stopped`),
+ * and a workflow row drew one on an agent that had errored while spinning
+ * forever on one that had merely failed. Both are the same missing branch.
+ *
+ * Vocabulary read off the shipped 2.1.220 binary around `workflow_agent`:
+ * `start`, `running`, `done`, `completed`, `error`, `failed`, `killed`,
+ * `skipped` — plus what the host already treats as terminal for a task.
+ *
+ * Anything unrecognised reads as `done`: a word we have not seen is not
+ * evidence of failure, and a row that spins forever claims work nothing is
+ * doing. Neither is true, and the tick is the cheaper lie to correct.
+ */
+export function subagentOutcome(word: string | undefined): SubagentOutcome {
+  if (!word || RUNNING_WORDS.has(word)) return "running";
+  if (FAILED_WORDS.has(word)) return "failed";
+  if (INTERRUPTED_WORDS.has(word)) return "interrupted";
+  return "done";
+}
+
+/** The same mapping for one row of a workflow's progress. */
+export function workflowAgentOutcome(
+  entry: WorkflowProgressEntry
+): SubagentOutcome {
+  return subagentOutcome(entry.state);
 }

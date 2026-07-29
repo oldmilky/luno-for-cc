@@ -62,3 +62,8 @@ TESTING.md
 # too, but vsce reads this file, not .gitignore, so it shipped a 185 kB
 # screenshot inside 0.22.2 before this line existed.
 .luno/
+
+# Scratch left in the repo root by probe agents reading the CLI binary. Not
+# gitignored either, and vsce reads this file rather than .gitignore — it
+# swept 14 files and 107 kB of probe output into 0.31.0 before this line.
+.tmp-cli-probe/

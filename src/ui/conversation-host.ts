@@ -266,7 +266,10 @@ export class ConversationHost {
    * ends with its process — so this one persists and is handed the turn's
    * options through `updateOptions()` instead of being rebuilt.
    */
-  private remoteProvider: ClaudeCliProvider | null = null;
+  /** The conversation's own CLI process, alive across turns. Built by
+   *  `ensureSessionProvider` on the first turn and released only when the
+   *  conversation is — see `dispose`. */
+  private sessionProvider: ClaudeCliProvider | null = null;
   private remoteControl: RemoteControlStatus = { state: "off" };
   /** Where a turn started on another device is being fed from. Present only
    *  while such a turn runs — it is also what tells the out-of-turn reader that
@@ -310,6 +313,25 @@ export class ConversationHost {
    * dead rather than slow, and a card left spinning would claim otherwise.
    */
   private readonly liveTasks = new Map<string, SubagentUpdate>();
+  /**
+   * Tasks the CLI has itself reported a terminal status for.
+   *
+   * A `task_progress` can land *after* the `task_notification` that ended a
+   * task — measured, 1.4s after, in the run behind the ten-minute-cutoff audit.
+   * Any phase but `notification` puts its task back into `liveTasks`, so that
+   * one late event resurrected a finished workflow and the turn-end sweep then
+   * filed it `interrupted`. That fabricated status is what the card showed,
+   * over the `stopped` the CLI had actually reported a second earlier.
+   *
+   * Only a status the CLI reported gets an entry here. A card closed by the
+   * sweep does not, so a late notification can still heal one — measured, an
+   * agent closed yellow at 38.6s and reopened green at 107.6s.
+   */
+  private readonly reportedTasks = new Set<string>();
+  /** Identity of every task seen this conversation: the fields that arrive once
+   *  on `task_started` and never again. Kept past the end of the card so a late
+   *  event cannot degrade a workflow's row to a bare "Agent". */
+  private readonly taskIdentity = new Map<string, SubagentUpdate>();
   /** Text the model produced with no turn running — see the `text` branch in
    *  `onOutOfTurn`. Buffered because it arrives as a stream of fragments and
    *  only reads as a message once. */
@@ -420,6 +442,12 @@ export class ConversationHost {
    */
   dispose(): void {
     this.abortTurn();
+    // `abortTurn` interrupts the turn; it deliberately leaves the process
+    // alive, which is the whole point of a session that outlives a turn. Here
+    // the conversation itself is over, so the process has to go with it — and
+    // it has to happen even when no turn was running, which is the common case
+    // for a tab closed between turns.
+    this.releaseSessionProvider();
     this.artifacts.closeAll();
     this.sessions.dispose();
     // Nothing may be posted after this: the webview behind a closed tab is
@@ -436,6 +464,7 @@ export class ConversationHost {
    */
   abandonTurnOnSignOut(): void {
     this.abortTurn();
+    this.releaseSessionProvider();
     this.orchestrator = undefined;
     this.resumeId = undefined;
   }
@@ -839,6 +868,10 @@ export class ConversationHost {
   async adoptStored(id: string): Promise<void> {
     const stored = await this.history.load(id);
     if (!stored) return;
+    // A process spawned for the conversation being replaced holds that one, and
+    // holds it in its own memory where `--resume` cannot reach. Usually a no-op:
+    // adopting happens at boot, before any turn has spawned anything.
+    this.releaseSessionProvider();
     this.sessions.adopt(stored);
     this.applyStoredSettings(stored);
     this.armCheckpoints();
@@ -886,6 +919,7 @@ export class ConversationHost {
       // chat the user just cleared.
       if (!stored || !stored.timeline.some((e) => e.kind === "user")) return;
 
+      this.releaseSessionProvider();
       this.sessions.adopt(stored);
       this.applyStoredSettings(stored);
       this.armCheckpoints();
@@ -978,6 +1012,7 @@ export class ConversationHost {
     // "new" chat inherits the old one's rewind history.
     this.sessions.reset();
     this.abortTurn();
+    this.releaseSessionProvider();
     this.orchestrator = undefined;
     this.post({ type: "reset", sessionId: this.session.id });
   }
@@ -1232,7 +1267,7 @@ export class ConversationHost {
     toggleRemoteControl: async (m) => {
       const enabled = bool(m, "enabled") ?? false;
       if (!enabled) {
-        await this.remoteProvider?.disableRemoteControl();
+        await this.sessionProvider?.disableRemoteControl();
         this.publishRemoteControl({ state: "off" });
         return;
       }
@@ -1241,7 +1276,7 @@ export class ConversationHost {
       // seconds reads as broken.
       this.publishRemoteControl({ state: "ready" });
       try {
-        const provider = await this.ensureRemoteProvider();
+        const provider = await this.ensureSessionProvider();
         const status = await provider.enableRemoteControl(
           this.session.title || undefined
         );
@@ -1698,6 +1733,7 @@ export class ConversationHost {
       return;
     }
     this.artifacts.closeAll();
+    this.releaseSessionProvider();
     // Splices the stored session in keeping its original id, so the next save
     // overwrites the same file instead of forking the conversation into a
     // second history entry — and drops the previous session's checkpoints.
@@ -1731,6 +1767,7 @@ export class ConversationHost {
     // regardless of what happens during file restore.
     const surviving = this.session.truncateAt(turnId);
     this.resumeId = undefined;
+    this.releaseSessionProvider();
 
     // If the user is rewinding to a proceeded plan revision, unlock it so
     // they can comment / modify steps / re-Proceed, and restore the
@@ -1827,6 +1864,7 @@ export class ConversationHost {
     }
     const surviving = this.session.truncateAt(turnId);
     this.resumeId = undefined;
+    this.releaseSessionProvider();
     this.post({ type: "rewind", events: surviving });
     await this.handlePrompt(trimmed);
   }
@@ -1834,9 +1872,10 @@ export class ConversationHost {
   private async handlePrompt(text: string) {
     if (!text.trim()) return;
     // A turn already running takes the text as an addition, not a replacement.
-    // Two CLI processes must never contend for the same resumed session, and
-    // the alternative — killing the running turn to make room — throws away
-    // work nobody asked to lose.
+    // Two turns must never write to one stdin, and the alternative — killing
+    // the running turn to make room — throws away work nobody asked to lose.
+    // (Phase 2 of the steering plan replaces this with a write into the turn
+    // in flight, which is what the CLI has supported all along.)
     if (this.activeTurn) {
       this.enqueue(text);
       return;
@@ -1907,22 +1946,38 @@ export class ConversationHost {
   }
 
   /**
-   * The long-lived provider Remote Control needs, built on demand.
+   * The conversation's CLI process, built on demand and kept across turns.
+   *
+   * One process per conversation, not per turn: a `run_in_background` agent
+   * keeps working after the turn that launched it ends, and on a process that
+   * died with the turn the only way to keep it alive was to hold the turn open
+   * — which held the thinking indicator and the composer with it.
    *
    * Per-turn options are deliberately absent: `runPromptTurn` pushes them in
    * through `updateOptions()` every turn, which is the only way they stay
    * fresh on a provider that is no longer rebuilt.
+   *
+   * @param root the working root the caller already resolved, if it has one.
+   *   Remote Control's toggle has no turn behind it and resolves its own.
+   * @param token likewise for the credential — `ensureAuthedForTurn` repairs a
+   *   stale signed-out flag on the way through, so it is not free to re-run.
    */
-  private async ensureRemoteProvider(): Promise<ClaudeCliProvider> {
-    const live = this.remoteProvider;
+  private async ensureSessionProvider(
+    root?: string,
+    token?: string
+  ): Promise<ClaudeCliProvider> {
+    const live = this.sessionProvider;
     if (live) return live;
-    const workspaceRoot = await this.ensureWorkingRoot();
+    const workspaceRoot = root ?? (await this.ensureWorkingRoot());
     if (!workspaceRoot) {
-      throw new Error("Open a folder before starting Remote Control.");
+      throw new Error("Open a folder to use Luno.");
     }
-    const credential = await this.auth.ensureAuthedForTurn();
-    if (!credential.ok) {
-      throw new Error("Sign in to Claude Code before starting Remote Control.");
+    if (!token) {
+      const credential = await this.auth.ensureAuthedForTurn();
+      if (!credential.ok) {
+        throw new Error("Sign in to Claude Code before sending a message.");
+      }
+      token = credential.token;
     }
     const cfg = vscode.workspace.getConfiguration("luno");
     const provider = createProvider({
@@ -1940,7 +1995,7 @@ export class ConversationHost {
         rememberCliCommands(this.ctx, names);
         void broadcastSlashCommands(this.post, this.ctx, this.workingRoot);
       },
-      token: credential.token,
+      token,
       effort: this.settings.effort,
       thinking: this.settings.thinking,
       sessionMode: true,
@@ -2000,8 +2055,30 @@ export class ConversationHost {
         this.remoteTurn?.push(d);
       }
     });
-    this.remoteProvider = provider;
+    this.sessionProvider = provider;
     return provider;
+  }
+
+  /**
+   * End the conversation's process and forget it.
+   *
+   * Called wherever the conversation the process is holding stops being the one
+   * we are in: a new chat, a rewind or edit that truncates the history, a
+   * sign-out that invalidates the credential it runs on, and the conversation
+   * being disposed. `--resume` is applied at spawn and nowhere else, so a
+   * process kept across any of those would answer from a history the panel has
+   * already thrown away — the model remembering what the user just rewound past
+   * is the visible form of that.
+   *
+   * Not called at the end of a turn. That is the entire point of it.
+   */
+  private releaseSessionProvider(): void {
+    const provider = this.sessionProvider;
+    if (!provider) return;
+    this.sessionProvider = null;
+    if (this.activeProvider === provider) this.activeProvider = undefined;
+    provider.disposeSession();
+    this.publishRemoteControl({ state: "off" });
   }
 
   private async runPromptTurn(text: string) {
@@ -2079,65 +2156,36 @@ export class ConversationHost {
       mcpConfig = null;
     }
 
-    let providerInstance;
-    // With the bridge up the process has to survive the turn, so the provider
-    // is reused rather than rebuilt — and handed everything that changed since
-    // the last one. Without that, diagnostics and the editor's selection would
-    // stay frozen at whatever they were when Remote Control was switched on.
-    if (this.remoteProvider) {
-      this.remoteProvider.updateOptions({
-        permissionMode: permMode,
-        allowedBashPatterns: bashAllowlist,
-        disabledSkills,
-        taskType,
-        conventions,
-        diagnostics: collectDiagnostics(workspaceRoot),
-        editorContext: collectEditorContext(workspaceRoot),
-        token,
-        mcpConfigPath: mcpConfig?.path,
-        mcpServerNames: mcpConfig?.serverNames,
-        effort,
-        thinking,
-        ultracode
-      });
-      providerInstance = this.remoteProvider;
-    } else {
-      try {
-        providerInstance = createProvider({
-          cwd: workspaceRoot,
-          permissionMode: permMode,
-          allowedBashPatterns: bashAllowlist,
-          disabledSkills,
-          taskType,
-          conventions,
-          diagnostics: collectDiagnostics(workspaceRoot),
-          editorContext: collectEditorContext(workspaceRoot),
-          getResumeSessionId: () => this.resumeId,
-          setResumeSessionId: (id) => {
-            this.resumeId = id;
-          },
-          // Read per decision, not captured here: granting one from a card
-          // has to silence the very next call of the same turn.
-          getToolGrants: () => readGrants(this.ctx),
-          onSlashCommands: (names) => {
-            rememberCliCommands(this.ctx, names);
-            void broadcastSlashCommands(this.post, this.ctx, this.workingRoot);
-          },
-          token,
-          mcpConfigPath: mcpConfig?.path,
-          mcpServerNames: mcpConfig?.serverNames,
-          effort,
-          thinking,
-          ultracode
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logError(`[luno] turn failed before the stream opened: ${msg}`);
-        this.post({ type: "error", message: msg });
-        void mcpConfig?.cleanup();
-        return;
-      }
+    // One process for the whole conversation, so it is reused rather than
+    // rebuilt — and handed everything that changed since the last turn. Without
+    // that, diagnostics and the editor's selection would stay frozen at whatever
+    // they were when the process was spawned, because a running CLI cannot be
+    // told a new system prompt.
+    let providerInstance: ClaudeCliProvider;
+    try {
+      providerInstance = await this.ensureSessionProvider(workspaceRoot, token);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logError(`[luno] turn failed before the stream opened: ${msg}`);
+      this.post({ type: "error", message: msg });
+      void mcpConfig?.cleanup();
+      return;
     }
+    providerInstance.updateOptions({
+      permissionMode: permMode,
+      allowedBashPatterns: bashAllowlist,
+      disabledSkills,
+      taskType,
+      conventions,
+      diagnostics: collectDiagnostics(workspaceRoot),
+      editorContext: collectEditorContext(workspaceRoot),
+      token,
+      mcpConfigPath: mcpConfig?.path,
+      mcpServerNames: mcpConfig?.serverNames,
+      effort,
+      thinking,
+      ultracode
+    });
 
     // In `default`/`auto` the provider routes each mutating tool call back to
     // us over the stream-json control channel; we surface it as an inline
@@ -2166,10 +2214,12 @@ export class ConversationHost {
       } finally {
         this.activeProvider = undefined;
         this.awaitingApproval = false;
-        // Only where the process died with the turn. On the session provider it
-        // does not, and a backgrounded agent is still working — see
-        // `sweepLiveTasks` and the `task` branch in `onOutOfTurn`.
-        if (providerInstance !== this.remoteProvider) this.sweepLiveTasks();
+        // No sweep here, deliberately. The process outlives the turn now, so a
+        // `run_in_background` agent really is still working and will report
+        // later through `onOutOfTurn` — closing its card would put
+        // `interrupted` on an agent that is about to answer, and
+        // `emitSubagentEnd` persists that. Only the `done` that says the
+        // process itself is gone may sweep.
         // A turn that landed while the user was looking elsewhere is the other
         // thing worth a glyph: the answer is sitting there unread.
         if (!this.visible) this.finishedWhileHidden = true;
@@ -2205,7 +2255,7 @@ export class ConversationHost {
    * because `activeProvider` is what the cancel and approval paths reach for.
    */
   private beginRemoteTurn(text: string): void {
-    const provider = this.remoteProvider;
+    const provider = this.sessionProvider;
     if (!provider) return;
     // Two prompts typed on the phone in quick succession: the CLI takes both
     // and replays the second while the first turn is still open here. Ending
@@ -2250,7 +2300,14 @@ export class ConversationHost {
         if (this.remoteTurn === queue) this.remoteTurn = undefined;
         if (this.activeProvider === provider) this.activeProvider = undefined;
         this.awaitingApproval = false;
-        this.sweepLiveTasks();
+        // Only when the process itself is gone. A remote turn ends on a `done`
+        // like any other, and while one is live that `done` reaches the queue
+        // rather than the guarded branch in `onOutOfTurn` — so sweeping here
+        // unconditionally filed every agent still working as `interrupted`,
+        // and `emitSubagentEnd` wrote that to disk. A workflow always outlives
+        // the turn that launched it, so this was reachable whenever a prompt
+        // arrived from another device mid-run.
+        if (queue.sessionEnded) this.sweepLiveTasks();
         if (!this.visible) this.finishedWhileHidden = true;
         this.refreshSurface();
         this.post({ type: "turnEnd" });
@@ -2369,7 +2426,14 @@ export class ConversationHost {
    * summary, and the pair arrives back to back.
    */
   private onSubagentUpdate(update: SubagentUpdate): void {
+    // The CLI has already said how this one ended. Nothing arriving afterwards
+    // can add to that, and letting it through is what put a task the CLI had
+    // reported `stopped` back among the live ones, to be swept as
+    // `interrupted` — see `reportedTasks`.
+    if (this.reportedTasks.has(update.taskId)) return;
+
     const merged: SubagentUpdate = {
+      ...this.taskIdentity.get(update.taskId),
       ...this.liveTasks.get(update.taskId),
       ...stripUndefined(update),
       // Restated because `stripUndefined` widens both to optional; they are the
@@ -2378,8 +2442,16 @@ export class ConversationHost {
       phase: update.phase
     };
 
+    // `task_type` rides on `task_started` and on no other phase, so this is the
+    // first point that knows a progress event belongs to a workflow — the
+    // dispatch has been merged in by now. A workflow puts the *agent's label*
+    // in `last_tool_name` ("Reply with exactly the word OK"), not the name of a
+    // tool, and the same string is already the activity.
+    if (isWorkflowTask(merged.taskType)) delete merged.lastToolName;
+
     if (update.phase === "notification") {
       this.liveTasks.delete(update.taskId);
+      this.reportedTasks.add(update.taskId);
       this.emitSubagentEnd(merged);
       return;
     }
@@ -2387,6 +2459,10 @@ export class ConversationHost {
     this.liveTasks.set(update.taskId, merged);
 
     if (update.phase === "started") {
+      // The only phase carrying description, task type and workflow name. Kept
+      // apart from `liveTasks` because that map is cleared when the card
+      // closes, and a row rebuilt without these reads as an anonymous "Agent".
+      this.taskIdentity.set(update.taskId, merged);
       this.session.emit({
         kind: "subagent",
         title: subagentTitle(merged),
@@ -2414,19 +2490,6 @@ export class ConversationHost {
   }
 
   /**
-   * Close every subagent still open, because nothing more is coming for them.
-   *
-   * Called when the process that was running them is gone: the end of a turn on
-   * the per-turn path, or the session process exiting on the other one. A task
-   * that never reported a terminal status did not keep working — it died there,
-   * whether that was Stop, a crash, or the hard timeout.
-   *
-   * Deliberately NOT called at the end of a session-mode turn. There the
-   * process survives the turn, so a `run_in_background` agent really is still
-   * running and will report later through `onOutOfTurn`; sweeping would put
-   * "interrupted" on a card that is about to answer.
-   */
-  /**
    * Put the model's out-of-turn report on the timeline, if it said anything.
    *
    * Written as an ordinary assistant row rather than through the streaming
@@ -2443,6 +2506,21 @@ export class ConversationHost {
     this.refreshSurface();
   }
 
+  /**
+   * Close every subagent still open, because nothing more is coming for them.
+   *
+   * Called when the process that was running them is gone: the end of a turn on
+   * the per-turn path, or the session process exiting on the other one. A task
+   * that never reported a terminal status did not keep working — it died there,
+   * whether that was Stop, a crash, or the hard timeout.
+   *
+   * **Never call this because a turn ended.** In session mode the process
+   * survives the turn, so a `run_in_background` agent really is still running
+   * and will report later through `onOutOfTurn`; sweeping would put
+   * "interrupted" on a card that is about to answer — and `emitSubagentEnd`
+   * persists it. Every call site is gated on the process being gone, and the
+   * one that was not is what D1 in the parity audit was.
+   */
   private sweepLiveTasks(): void {
     if (this.liveTasks.size === 0) return;
     const open = [...this.liveTasks.values()];

@@ -20,6 +20,15 @@ describe("classifyTool", () => {
     expect(classifyTool("SomethingElse")).toBe("other");
   });
 
+  // `Task` is the legacy name and only stored sessions still carry it. Counted
+  // across the transcripts on disk: `Agent` 219, `Workflow` 71, `Task` none —
+  // so matching the legacy name alone left this bucket dead and rendered a
+  // dispatch as "Ran Agent".
+  it("knows the names the shipped CLI actually dispatches under", () => {
+    expect(classifyTool("Agent")).toBe("task");
+    expect(classifyTool("Workflow")).toBe("task");
+  });
+
   it("sniffs the bash command to sub-classify shell calls", () => {
     expect(
       classifyTool("Bash", JSON.stringify({ command: "find . -name x" }))
