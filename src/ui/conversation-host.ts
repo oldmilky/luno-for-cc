@@ -164,6 +164,17 @@ export interface SharedServices {
    */
   showConversation(sessionId: string): void;
   /**
+   * Start a new chat on the surface `host` is on.
+   *
+   * The registry decides whether that means clearing this conversation or
+   * taking a fresh one alongside it, because only the registry knows what the
+   * surface can do. A conversation with work in it is never cleared in place:
+   * `newSession` aborts the turn and releases the CLI process, and a
+   * `run_in_background` workflow dies with it — measured, a 19m52s audit lost
+   * two agents at 15:08:28 to exactly this, one blank chat later.
+   */
+  startNewConversation(host: ConversationHost): void;
+  /**
    * End the conversation showing `sessionId`, if one is open.
    *
    * Its history entry is being deleted. Left running it would rewrite that file
@@ -270,6 +281,10 @@ export class ConversationHost {
    *  `ensureSessionProvider` on the first turn and released only when the
    *  conversation is — see `dispose`. */
   private sessionProvider: ClaudeCliProvider | null = null;
+
+  /** The spawn in flight, so two sends cannot start two `claude` processes.
+   *  See `ensureSessionProvider`. */
+  private sessionProviderStarting: Promise<ClaudeCliProvider> | null = null;
   private remoteControl: RemoteControlStatus = { state: "off" };
   /** Where a turn started on another device is being fed from. Present only
    *  while such a turn runs — it is also what tells the out-of-turn reader that
@@ -348,19 +363,7 @@ export class ConversationHost {
     PermissionRequestPayload
   >();
   /**
-   * What the user typed while this conversation was mid-turn, waiting for the
-   * turn to end. It lives here rather than in the webview because a
-   * conversation outlives its surface: switching chats or opening one in a tab
-   * must not lose the sentence someone was halfway through.
-   *
-   * The CLI cannot take a hint mid-generation — a `user` message written to a
-   * running turn's stdin is queued and answered only after that turn's
-   * `result` (verified against 2.1.219), so waiting here costs nothing the
-   * process would not cost anyway.
-   */
-  private queued = "";
-  /** Whether the turn in flight has already reported a failure. A queued
-   *  follow-up is held back rather than fired into a session that just broke. */
+  /** Whether the turn in flight has already reported a failure. */
   private turnFailed = false;
   /** The posture this conversation runs in. Born from the `luno.*` defaults,
    *  then owned here and saved with the session. */
@@ -574,6 +577,11 @@ export class ConversationHost {
   get live(): LiveState {
     if (this.awaitingApproval) return { status: "needs-you" };
     if (this.busy) return { status: "working" };
+    // The turn is over and the work is not. Its own state rather than `working`
+    // because nothing is streaming and nobody is being waited on — and because
+    // this is precisely the row the user is looking for in the list, which
+    // would otherwise read `done` while twenty agents run.
+    if (this.liveTasks.size > 0) return { status: "agents" };
     return {};
   }
 
@@ -677,6 +685,19 @@ export class ConversationHost {
     return this.activeTurn !== undefined || this.session.timeline.length > 0;
   }
 
+  /**
+   * Whether something is running in this conversation *right now*.
+   *
+   * Distinct from `hasWork`, which is true of any chat that has ever said
+   * anything. This one decides whether a conversation may be cleared in place:
+   * a turn — including one parked on an approval, which is how the measured
+   * incident sat for 11 minutes — or a background agent nobody has heard back
+   * from. Both die with the CLI process, and neither is recoverable.
+   */
+  get hasLiveWork(): boolean {
+    return this.activeTurn !== undefined || this.liveTasks.size > 0;
+  }
+
   /** Whether some surface is currently showing this conversation. */
   get hasSurface(): boolean {
     return this.target !== undefined;
@@ -731,9 +752,6 @@ export class ConversationHost {
     });
     void this.publishAuthState();
     if (this.busy) void webview.postMessage({ type: "turnStart" });
-    if (this.queued) {
-      void webview.postMessage({ type: "queued", text: this.queued });
-    }
     if (this.streamed) {
       void webview.postMessage({
         type: "delta",
@@ -1006,7 +1024,6 @@ export class ConversationHost {
     this.artifacts.closeAll();
     // Cleared, not returned: the follow-up belonged to the conversation being
     // left behind, and a blank chat is the one place it would read as noise.
-    this.clearQueued();
     // `reset` covers the session, the resume id and the checkpoints together.
     // They were three separate statements here, and forgetting one is how a
     // "new" chat inherits the old one's rewind history.
@@ -1171,12 +1188,11 @@ export class ConversationHost {
     prompt: async (m) => {
       await this.handlePrompt(String(m.text ?? ""));
     },
-    cancel: () => {
-      this.returnQueued();
-      this.abortTurn();
-    },
-    dropQueued: () => this.clearQueued(),
-    newSession: () => this.newSession(),
+    cancel: () => this.abortTurn(),
+    // Through the registry, never straight to `newSession`: this button used to
+    // clear the conversation in place, which aborts its turn and kills the CLI
+    // process a background workflow is living in.
+    newSession: () => this.shared.startNewConversation(this),
     permissionResponse: async (m) => {
       const requestId = str(m, "requestId");
       const behavior = oneOf(m, "behavior", ["allow", "deny"] as const);
@@ -1755,7 +1771,6 @@ export class ConversationHost {
   // ── Marketplace handlers ────────────────────────────────────
 
   private async rewindTo(turnId: string) {
-    this.returnQueued();
     this.abortTurn();
     await this.forkBeforeTruncating(turnId);
     // Truncate the conversation and clear the UI FIRST. File restore (below)
@@ -1852,7 +1867,6 @@ export class ConversationHost {
   private async editAt(turnId: string, text: string, revertFiles: boolean) {
     const trimmed = text.trim();
     if (!trimmed) return;
-    this.returnQueued();
     this.abortTurn();
     await this.forkBeforeTruncating(turnId);
     if (revertFiles && this.checkpoints?.hasCheckpoint(turnId)) {
@@ -1870,18 +1884,34 @@ export class ConversationHost {
   }
 
   private async handlePrompt(text: string) {
-    if (!text.trim()) return;
-    // A turn already running takes the text as an addition, not a replacement.
-    // Two turns must never write to one stdin, and the alternative — killing
-    // the running turn to make room — throws away work nobody asked to lose.
-    // (Phase 2 of the steering plan replaces this with a write into the turn
-    // in flight, which is what the CLI has supported all along.)
-    if (this.activeTurn) {
-      this.enqueue(text);
-      return;
-    }
-    await this.runTurnReportingFailure(text);
-    await this.flushQueued();
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    // Sending never queues. A turn already in flight takes the message as an
+    // addition: the CLI picks it off stdin at the next tool boundary and
+    // continues the same turn, which is what makes a correction land while the
+    // work it corrects is still happening rather than after it.
+    if (this.activeTurn && (await this.steerIntoRunningTurn(trimmed))) return;
+    await this.runTurnReportingFailure(trimmed);
+  }
+
+  /**
+   * Add a message to the turn already running.
+   *
+   * Written first, recorded second. Upstream records first, and this diverges
+   * on purpose: a write that stdin refuses must not leave a message on the
+   * timeline that nobody ever received. `false` sends the caller back to
+   * opening an ordinary turn, which records it itself.
+   *
+   * Recording is this method's job and nothing else's — `addUser` lives inside
+   * `Orchestrator.turn`/`observe`, and a steered message opens neither. Without
+   * it the bubble would render, the model would answer, and the message would
+   * be absent from the stored session and from every later turn's context.
+   */
+  private async steerIntoRunningTurn(text: string): Promise<boolean> {
+    if (!this.sessionProvider?.steer(text)) return false;
+    await this.session.addUser(text);
+    this.scheduleSave();
+    return true;
   }
 
   private async runTurnReportingFailure(text: string): Promise<void> {
@@ -1898,44 +1928,20 @@ export class ConversationHost {
     }
   }
 
-  /** Append to what is waiting on the running turn. Everything typed during
-   *  one turn arrives as a single message, so the model weighs the additions
-   *  together instead of answering the first one blind to the rest. */
-  private enqueue(text: string): void {
-    const trimmed = text.trim();
-    this.queued = this.queued ? `${this.queued}\n\n${trimmed}` : trimmed;
-    this.post({ type: "queued", text: this.queued });
-  }
-
   /**
-   * Send what accumulated while the turn ran, and keep going while more keeps
-   * arriving — the answer to a follow-up is itself long enough to type behind.
-   * A failed turn stops the loop: the follow-up goes back to the composer
-   * rather than into a session that just broke.
+   * Hand back what the CLI never got to read.
+   *
+   * The queue lives inside the CLI now, and `interrupt` answers with what it
+   * still held. Measured against 2.1.219: a message the turn had already
+   * *accepted* comes back as `[]` — accepted is gone, not returned — so this
+   * is narrower than the local queue it replaces, and honestly so.
+   *
+   * The official extension asks for the same field and drops it. Returning it
+   * is a deliberate divergence, matching the TUI, which consumes it.
    */
-  private async flushQueued(): Promise<void> {
-    while (this.queued && !this.turnFailed) {
-      const text = this.queued;
-      this.queued = "";
-      this.post({ type: "queued", text: "" });
-      await this.runTurnReportingFailure(text);
-    }
-    if (this.queued) this.returnQueued();
-  }
-
-  /** Hand the queue back to the composer: nothing typed is lost, and nothing
-   *  is sent without the user pressing send again. */
-  private returnQueued(): void {
-    if (!this.queued) return;
-    const text = this.queued;
-    this.clearQueued();
+  private returnStillQueued(text: string): void {
+    if (!text.trim()) return;
     this.post({ type: "returnToComposer", text });
-  }
-
-  private clearQueued(): void {
-    if (!this.queued) return;
-    this.queued = "";
-    this.post({ type: "queued", text: "" });
   }
 
   /** Remember it as well as send it: the webview is rebuilt on reload and asks
@@ -1962,12 +1968,31 @@ export class ConversationHost {
    * @param token likewise for the credential — `ensureAuthedForTurn` repairs a
    *   stale signed-out flag on the way through, so it is not free to re-run.
    */
-  private async ensureSessionProvider(
+  private ensureSessionProvider(
     root?: string,
     token?: string
   ): Promise<ClaudeCliProvider> {
     const live = this.sessionProvider;
-    if (live) return live;
+    if (live) return Promise.resolve(live);
+    // The lock is this phase's, not an afterthought: the `activeTurn` gate that
+    // used to queue a second send was also serialising the spawn. Now that
+    // sending never queues, two sends against a conversation with no process
+    // both reach here — and `session.busy` is set after the spawn, so it cannot
+    // cover the gap. The promise is what the second caller waits on.
+    this.sessionProviderStarting ??= this.startSessionProvider(
+      root,
+      token
+    ).finally(() => {
+      this.sessionProviderStarting = null;
+    });
+    return this.sessionProviderStarting;
+  }
+
+  /** The half of `ensureSessionProvider` that may only run once at a time. */
+  private async startSessionProvider(
+    root?: string,
+    token?: string
+  ): Promise<ClaudeCliProvider> {
     const workspaceRoot = root ?? (await this.ensureWorkingRoot());
     if (!workspaceRoot) {
       throw new Error("Open a folder to use Luno.");
@@ -1999,6 +2024,7 @@ export class ConversationHost {
       effort: this.settings.effort,
       thinking: this.settings.thinking,
       sessionMode: true,
+      onStillQueued: (text) => this.returnStillQueued(text),
       onOutOfTurn: (d) => {
         // The other device talking while the panel is not driving the turn.
         if (d.type === "remote_control" && d.remoteControl) {
@@ -2010,6 +2036,15 @@ export class ConversationHost {
         // exist before this call returns.
         if (d.type === "remote_prompt" && d.prompt) {
           this.beginRemoteTurn(d.prompt);
+          return;
+        }
+        // A steered message that found no tool boundary before its turn ended.
+        // The CLI opened one of its own for it, and it gets a full turn here
+        // rather than the out-of-turn text path — that path keeps only `text`,
+        // so the answer would arrive as one bare paragraph with every tool call
+        // missing. `null` because the message is already on the timeline.
+        if (d.type === "steer_turn") {
+          this.beginRemoteTurn(null);
           return;
         }
         // A subagent that outlived the turn that launched it. In session mode
@@ -2075,6 +2110,15 @@ export class ConversationHost {
   private releaseSessionProvider(): void {
     const provider = this.sessionProvider;
     if (!provider) return;
+    // Say what is being taken down with it. Nothing anywhere logged the end of
+    // a session process, so when one took a background workflow with it the log
+    // could not even establish that it had happened, let alone why.
+    logInfo(
+      `[luno] releasing the CLI process` +
+        (this.hasLiveWork
+          ? ` — with a turn ${this.activeTurn ? "running" : "idle"} and ${this.liveTasks.size} task(s) still open`
+          : "")
+    );
     this.sessionProvider = null;
     if (this.activeProvider === provider) this.activeProvider = undefined;
     provider.disposeSession();
@@ -2254,7 +2298,7 @@ export class ConversationHost {
    * orchestrator, same delta handler, same busy state, and Stop still stops it,
    * because `activeProvider` is what the cancel and approval paths reach for.
    */
-  private beginRemoteTurn(text: string): void {
+  private beginRemoteTurn(text: string | null): void {
     const provider = this.sessionProvider;
     if (!provider) return;
     // Two prompts typed on the phone in quick succession: the CLI takes both
@@ -2318,10 +2362,6 @@ export class ConversationHost {
     this.activeTurn = turn;
     void turn.finally(() => {
       if (this.activeTurn === turn) this.activeTurn = undefined;
-      // Anything typed here while the phone held the session was queued rather
-      // than sent. Nothing else will flush it: `handlePrompt` only drains the
-      // queue behind a turn it started itself.
-      void this.flushQueued();
     });
   }
 

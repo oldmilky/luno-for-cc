@@ -39,6 +39,9 @@ interface HeaderProps {
   busy: boolean;
   awaitingApproval: boolean;
   errored: boolean;
+  /** Background agents still running with the turn over. The CLI process
+   *  outlives its turn, so the panel can be idle while the work is not. */
+  agentsRunning: boolean;
   events: ReadonlyArray<TimelineEvent>;
   streaming: string;
   onOpenHistory: () => void;
@@ -50,16 +53,24 @@ interface HeaderProps {
   remoteControl: RemoteControlStatus;
 }
 
-/** Icon and tone per state; the words come from `chat-status.ts`. `working`
- *  carries the spinner instead of an icon, so it names none. */
+/** Icon and tone per state; the words come from `chat-status.ts`. The two live
+ *  states carry the spinner instead of an icon, so they name none. */
 const LOOK: Record<ChatStatus, { icon: IconName | null; tone: ChipTone }> = {
   "needs-you": { icon: "danger", tone: "warn" },
   working: { icon: null, tone: "accent" },
+  agents: { icon: null, tone: "info" },
   failed: { icon: "x", tone: "error" },
   interrupted: { icon: "stop", tone: "warn" },
   "no-reply": { icon: "clock", tone: "warn" },
   done: { icon: "check", tone: "default" }
 };
+
+/** The states that spin: something is running, whether or not it is composing
+ *  text at you. */
+const LIVE: ReadonlySet<ChatStatus> = new Set<ChatStatus>([
+  "working",
+  "agents"
+]);
 
 export function Header({
   title,
@@ -67,6 +78,7 @@ export function Header({
   busy,
   awaitingApproval,
   errored,
+  agentsRunning,
   events,
   streaming,
   onOpenHistory,
@@ -84,6 +96,7 @@ export function Header({
     busy,
     awaitingApproval,
     errored,
+    agentsRunning,
     stored: storedStatus
   });
   // Nothing has been said yet, so whatever the host called this is its
@@ -116,7 +129,6 @@ export function Header({
               </Chip>
             </Tooltip>
           </span>
-          <RemoteControlPill status={remoteControl} />
           <TokenMeter events={events} streaming={streaming} />
         </div>
 
@@ -192,6 +204,9 @@ export function Header({
         <span className={named ? s.sessionName : s.sessionPlaceholder}>
           {named ? title : "New chat"}
         </span>
+        {/* Reachability belongs to the conversation, not to the panel, so it
+            reads beside the name and ahead of the status it qualifies. */}
+        <RemoteControlPill status={remoteControl} />
         {status && (
           <>
             <span className={s.sessionRule} aria-hidden />
@@ -200,7 +215,7 @@ export function Header({
             <AnimatePresence mode="wait" initial={false}>
               <motion.span key={status} className={s.sessionStatus} {...SWAP}>
                 <Chip tone={LOOK[status].tone} pulse={status === "working"}>
-                  {status === "working" ? (
+                  {LIVE.has(status) ? (
                     // The rotation is the `spin` mixin's, in the stylesheet —
                     // see the note there for why framer could not hold it.
                     <span className={s.chipSpinner} />

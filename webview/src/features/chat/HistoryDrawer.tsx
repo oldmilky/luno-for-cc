@@ -276,6 +276,10 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
 const STATUS: Record<ChatStatus, { label: string; tone: string }> = {
   "needs-you": { label: STATUS_LABEL["needs-you"], tone: "toneWarn" },
   working: { label: STATUS_LABEL.working, tone: "toneWorking" },
+  // Its own tone, not `working`'s: this is the row the user opened the list to
+  // find — a chat running a workflow with nothing streaming — and it has to be
+  // tellable from the one they are mid-turn in.
+  agents: { label: STATUS_LABEL.agents, tone: "toneAgents" },
   failed: { label: STATUS_LABEL.failed, tone: "toneErr" },
   interrupted: { label: STATUS_LABEL.interrupted, tone: "toneErr" },
   "no-reply": { label: STATUS_LABEL["no-reply"], tone: "toneWarn" },

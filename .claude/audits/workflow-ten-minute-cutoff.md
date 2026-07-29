@@ -185,7 +185,53 @@ All five landed on 2026-07-29. What each one turned into is noted under it.
    Verified live in both plan and bypass. The larger half —
    one-process-per-conversation — landed alongside this in the same session.
 
-## 7. Reproduction
+## 7. The second failure — a blank chat, 2026-07-29 15:08
+
+With the ceiling gone a workflow reached **19m52s** — nearly double the old cap
+— and then died anyway. Different cause, same family.
+
+The LUNO log for that window (VS Code does persist the output channel:
+`logs/<window>/exthost/output_logging_*/`, which an earlier pass looked for in
+the wrong window directory):
+
+```
+15:08:28.692 [luno] aborting turn (cancel/rewind/new-session)
+```
+
+and no `session options changed — replacing the CLI process`, so it was not a
+respawn. Both agents' last records are 15:08:25.2 and 15:08:25.6, mid-Bash;
+three seconds later `abortTurn` tore the process down under them. The turn
+itself had been parked on an approval for eleven minutes (a `Monitor` call
+containing `rm -f`, correctly gated), which is why it still counted as live.
+
+**Cause.** New Chat has two routes and only one is guarded.
+`luno.newChat` → `panel.newSession()` → `registry.startNewSidebarConversation()`
+checks the conversation first. The button inside the webview went straight to
+the host's own `newSession()` through the handler table, which calls
+`abortTurn()` and `releaseSessionProvider()` on the conversation the user is
+leaving. A blank chat therefore killed a running one.
+
+**Fix.** The webview message now goes through `SharedServices.startNewConversation`,
+and the registry decides on one rule for every surface: a conversation with
+**live work** — `hasLiveWork`: a turn in flight, including one parked on an
+approval, or a background agent that has not reported — keeps its turn, its
+agents and its process, and the sidebar hands its surface to a fresh
+conversation (a tab, which is built around one conversation, opens another).
+An idle one is still cleared in place, which releases its process: `--resume` is
+applied at spawn and nowhere else, so a kept process would answer the new chat
+out of the old one's history.
+
+The predicate changed from `hasWork` — true of any chat that ever said anything,
+which would have leaked a process per conversation — to `hasLiveWork`.
+`releaseSessionProvider` now also logs what it takes down, naming the open task
+count; nothing anywhere recorded the end of a session process before.
+
+**Still unguarded, deliberately:** `rewindTo`, `editAt` and `adoptStored` release
+the process without checking. Rewinding or editing rewrites the conversation
+those agents belong to, so ending them is defensible — but it is silent, and
+that part is not defensible. Open.
+
+## 8. Reproduction
 
 `probe6.log` / `err6.log` in the session scratchpad. To re-run:
 

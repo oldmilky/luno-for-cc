@@ -417,6 +417,9 @@ export interface ClaudeCliOpts {
    * drops the Remote Control bridge and needs it re-established.
    */
   sessionMode?: boolean;
+  /** Text the CLI was holding and never read, handed back on Stop so nothing
+   *  typed is lost. See `interruptReturningQueued`. */
+  onStillQueued?: (text: string) => void;
   /** Called with events that arrive while no turn is streaming — the phone
    *  talking to a session the panel is not currently driving. Session mode
    *  only; without it those deltas would be read off the pipe and dropped. */
@@ -555,7 +558,7 @@ export class ClaudeCliProvider implements ChatProvider {
     // conversation and drop any Remote Control bridge, when all the user asked
     // for was to stop this turn. Interrupt over the control channel instead.
     if (this.session && !this.session.exited) {
-      this.interrupt();
+      void this.interruptReturningQueued();
       return;
     }
     if (this.child && !this.child.killed) {
@@ -1153,31 +1156,10 @@ export class ClaudeCliProvider implements ChatProvider {
 
     session.sink = push;
     session.busy = true;
-    const preamble = turnPreamble(this.opts);
-    const sent = preamble ? preamble + userText : userText;
-    // Our own id on our own message. The CLI keeps it and returns it on the
-    // replay, which is how the echo is recognised without guessing from the
-    // text. Registered before the write, not after: the replay can be back
-    // before the next tick, and an unregistered echo would land on the timeline
-    // as a prompt the user never typed on the phone.
-    const uuid = randomUUID();
-    session.pendingEchoes.add(uuid);
-    const wrote = this.writeToChild(session, {
-      type: "user",
-      uuid,
-      session_id: "",
-      parent_tool_use_id: null,
-      // Says a person typed this, here. The official extension stamps the same
-      // field on every message it sends — `send(…, {kind:"human"})` in its
-      // webview — and a session shared with another device is the one place
-      // where "who sent this" is not obvious from the fact that it arrived.
-      origin: { kind: "human" },
-      message: { role: "user", content: sent }
-    });
-    if (!wrote) {
+    const uuid = this.writeUserMessage(session, userText);
+    if (!uuid) {
       session.sink = null;
       this.abortCurrent = null;
-      takeEcho(session.pendingEchoes, uuid);
       yield {
         type: "error",
         error: "The Claude session is no longer accepting input."
@@ -1341,13 +1323,23 @@ export class ClaudeCliProvider implements ChatProvider {
       const prompt = replayedPrompt(ev);
       if (prompt !== null) {
         if (isCliControlMarker(prompt)) return;
-        if (!takeEcho(session.pendingEchoes, ev.uuid)) {
-          // The CLI is now working for the other surface. Marking the session
-          // busy is what makes a prompt sent from here wait for that turn's
-          // `result` instead of interleaving with it.
-          session.busy = true;
-          route({ type: "remote_prompt", prompt });
+        if (takeEcho(session.pendingEchoes, ev.uuid)) {
+          // Ours. With a turn reading, the message was taken into that turn and
+          // there is nothing to announce. With none — a steered message that
+          // found no tool boundary before the turn ended — the CLI is opening a
+          // turn of its own to answer it, and that answer needs a turn here to
+          // arrive into.
+          if (!session.sink) {
+            session.busy = true;
+            route({ type: "steer_turn", prompt });
+          }
+          return;
         }
+        // The CLI is now working for the other surface. Marking the session
+        // busy is what makes a prompt sent from here wait for that turn's
+        // `result` instead of interleaving with it.
+        session.busy = true;
+        route({ type: "remote_prompt", prompt });
         return;
       }
       for (const d of session.processor(ev)) route(d);
@@ -1602,13 +1594,106 @@ export class ClaudeCliProvider implements ChatProvider {
     }
   }
 
-  /** Stop the current turn without ending the session. */
+  /** Stop the current turn without ending the session.
+   *
+   *  Takes every background agent with it — measured against 2.1.219, a running
+   *  agent reported `status: "stopped"` 10ms after the request. So this is for
+   *  Stop and nothing else: no path that merely *sends* may come through here.
+   */
   private interrupt(): void {
     this.writeControl({
       request_id: nextControlId(),
       type: "control_request",
       request: { subtype: "interrupt" }
     });
+  }
+
+  /**
+   * Interrupt, and hand back whatever the CLI had not read yet.
+   *
+   * The queue lives inside the CLI, and its answer to `interrupt` carries
+   * `still_queued`. Measured against 2.1.219: a message the turn had already
+   * accepted comes back as `[]`, so this returns what was written and never
+   * looked at, not everything typed.
+   *
+   * Failure is not reported anywhere — the interrupt is the point, and a CLI
+   * that will not answer a control request has already left the user with a
+   * stopped turn and nothing to hand back.
+   */
+  private async interruptReturningQueued(): Promise<void> {
+    const session = this.session;
+    if (!session || session.exited) return;
+    try {
+      const res = await this.sendControl(session, { subtype: "interrupt" });
+      const queued = Array.isArray(res.still_queued)
+        ? res.still_queued.filter((t): t is string => typeof t === "string")
+        : [];
+      if (queued.length) this.opts.onStillQueued?.(queued.join("\n\n"));
+    } catch {
+      /* the turn is stopped either way */
+    }
+  }
+
+  /**
+   * Write one user message to the live session, and register its echo.
+   *
+   * Shared by the turn that opens a stream and by `steer`, because the message
+   * on the wire is identical either way — only the reader's state differs.
+   *
+   * @returns the uuid it was written under, or null if stdin would not take it.
+   */
+  private writeUserMessage(
+    session: CliSession,
+    userText: string
+  ): string | null {
+    const preamble = turnPreamble(this.opts);
+    const sent = preamble ? preamble + userText : userText;
+    // Our own id on our own message. The CLI keeps it and returns it on the
+    // replay, which is how the echo is recognised without guessing from the
+    // text. Registered before the write, not after: the replay can be back
+    // before the next tick, and an unregistered echo would land on the timeline
+    // as a prompt the user never typed on the phone.
+    const uuid = randomUUID();
+    session.pendingEchoes.add(uuid);
+    const wrote = this.writeToChild(session, {
+      type: "user",
+      uuid,
+      session_id: "",
+      parent_tool_use_id: null,
+      // Says a person typed this, here. The official extension stamps the same
+      // field on every message it sends — `send(…, {kind:"human"})` in its
+      // webview — and a session shared with another device is the one place
+      // where "who sent this" is not obvious from the fact that it arrived.
+      origin: { kind: "human" },
+      message: { role: "user", content: sent }
+    });
+    if (!wrote) {
+      takeEcho(session.pendingEchoes, uuid);
+      return null;
+    }
+    return uuid;
+  }
+
+  /**
+   * Add to the turn already in flight instead of waiting for it.
+   *
+   * The CLI picks a second `user` message off stdin at the next tool boundary
+   * and continues the *same* turn — measured on 2.1.219: written at 7.78s,
+   * echoed at 8.24s, no second `system/init`, one `result`. Pure text
+   * generation has no boundary, so a message sent into it waits and the CLI
+   * opens the next turn for it itself; that is physics, not a defect.
+   *
+   * Deliberately does **not** install a sink, raise `busy` or wait for idle.
+   * The message belongs to the turn already reading, and interrupting to make
+   * room would kill every background agent (see `interrupt`).
+   *
+   * @returns false when there is no live session to write to, which is the
+   *   caller's signal to open an ordinary turn instead.
+   */
+  steer(userText: string): boolean {
+    const session = this.session;
+    if (!session || session.exited) return false;
+    return this.writeUserMessage(session, userText) !== null;
   }
 
   private writeToChild(session: CliSession, obj: unknown): boolean {

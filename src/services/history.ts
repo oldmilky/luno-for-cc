@@ -69,8 +69,12 @@ export type StoredStatus =
  * `needs-you` is in both sets on purpose: an unanswered plan question is
  * readable off the timeline, while an unanswered tool approval exists only
  * while the process that asked is still alive.
+ *
+ * `agents` is the state that only exists once the process outlives its turn:
+ * the model has finished, background agents have not, and neither `working`
+ * (nothing is streaming) nor the stored `done` is true of it.
  */
-export type LiveStatus = "working" | "needs-you";
+export type LiveStatus = "working" | "needs-you" | "agents";
 
 /**
  * One status per chat, whether or not anything has it open.

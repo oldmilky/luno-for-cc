@@ -56,6 +56,9 @@ export interface ProviderContext {
   /** Keep one CLI process alive across turns. Required by Remote Control,
    *  whose bridge ends when the process does. */
   sessionMode?: boolean;
+  /** Text the CLI was still holding when a turn was stopped, handed back to
+   *  the composer so nothing typed is lost. */
+  onStillQueued?: (text: string) => void;
   /** Session mode only: deltas that arrive while no turn is streaming — the
    *  other device talking to a conversation the panel is not driving. */
   onOutOfTurn?: (delta: StreamDelta) => void;
@@ -278,6 +281,7 @@ export function resolveClaudeBinary(): string {
 export function createProvider(ctx: ProviderContext): ClaudeCliProvider {
   return new ClaudeCliProvider({
     sessionMode: ctx.sessionMode,
+    onStillQueued: ctx.onStillQueued,
     onOutOfTurn: ctx.onOutOfTurn,
     binary: resolveClaudeBinary(),
     cwd: ctx.cwd,

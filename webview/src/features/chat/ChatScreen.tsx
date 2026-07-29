@@ -33,7 +33,6 @@ import { Header } from "./Header";
 import { isRemoteControlCommand } from "./remote-control-command";
 import { Composer } from "./Composer";
 import { ContextStrip } from "./ContextStrip";
-import { QueuedPrompt } from "./QueuedPrompt";
 import { EmptyState } from "./EmptyState";
 import { ErrorBanner } from "./ErrorBanner";
 import { RewindModal } from "./RewindModal";
@@ -50,6 +49,7 @@ import { SubagentCard } from "./SubagentCard";
 import {
   TASK_TOOL_NAMES,
   foldSubagents,
+  subagentOutcome,
   type FoldedSubagents
 } from "./subagent-state";
 import { TurnHeader } from "./TurnHeader";
@@ -94,10 +94,6 @@ export interface ChatScreenProps {
    *  whenever the name or the attention could have moved. */
   sessionTitle: string;
   sessionStatus: ChatStatus | null;
-  /** The follow-up waiting for the running turn to end, "" when none. */
-  queued: string;
-  onQueuedEdit: (text: string) => void;
-  onQueuedDrop: () => void;
   pendingRestore: string | null;
   onRestored: () => void;
   bannerVisible: boolean;
@@ -146,9 +142,6 @@ export function ChatScreen({
   pendingInsert,
   sessionTitle,
   sessionStatus,
-  queued,
-  onQueuedEdit,
-  onQueuedDrop,
   pendingRestore,
   onRestored,
   bannerVisible,
@@ -282,6 +275,17 @@ export function ChatScreen({
   // until the turn ends. Trails at the bottom of the log so it always reads as
   // "more is coming".
   const showThinking = busy;
+  // The turn can end with the work still going: a `run_in_background` agent
+  // lives in a process that outlives its turn. The verb line above is the
+  // model's, so it goes at `turnEnd` — this is what keeps the header from
+  // calling a conversation done while a workflow runs in it.
+  const agentsRunning = useMemo(
+    () =>
+      Object.values(taskProgress).some(
+        (t) => subagentOutcome(t.status) === "running"
+      ),
+    [taskProgress]
+  );
   const planContext = useMemo<RenderCtx>(
     () => ({
       views: grouped.views,
@@ -347,6 +351,7 @@ export function ChatScreen({
         busy={busy}
         awaitingApproval={pendingPermission !== null}
         errored={error !== null}
+        agentsRunning={agentsRunning}
         events={events}
         streaming={streaming}
         onOpenHistory={() => setHistoryOpen(true)}
@@ -585,16 +590,6 @@ export function ChatScreen({
           }}
           onUnpin={() => editorContext && onUnpin(editorContext.file)}
         />
-        <AnimatePresence initial={false}>
-          {queued && (
-            <QueuedPrompt
-              key="queued"
-              text={queued}
-              onEdit={onQueuedEdit}
-              onDrop={onQueuedDrop}
-            />
-          )}
-        </AnimatePresence>
         <Composer
           value={input}
           onChange={onInput}

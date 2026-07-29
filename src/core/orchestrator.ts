@@ -69,12 +69,17 @@ export class Orchestrator {
    * path runs, and deliberately so: a remote turn gets the same checkpoint, the
    * same plan interception and the same message history, or rewinding across
    * one would restore a state the timeline no longer describes.
+   *
+   * @param userText the prompt to record, or null when it is already on the
+   *   timeline. That is the steering case: the message was written to stdin and
+   *   recorded then, and the CLI answered it in a turn of its own — recording
+   *   it again here would show the user their own words twice.
    */
   async observe(
-    userText: string,
+    userText: string | null,
     stream: AsyncIterable<StreamDelta>
   ): Promise<void> {
-    await this.session.addUser(userText);
+    if (userText !== null) await this.session.addUser(userText);
     await this.consume(stream);
   }
 

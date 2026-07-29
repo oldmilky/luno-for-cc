@@ -104,6 +104,14 @@
   font-weight: 500;
 }
 
+// The remote pill. Holds its width like the status does, so a long chat name
+// gives way to it rather than the other way round.
+.sessionPill {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
 .sessionRule {
   flex-shrink: 0;
   width: 1px;

@@ -24,7 +24,21 @@ function makeFakeChild() {
   const child = new EventEmitter() as any;
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
-  child.stdin = new Writable({ write: (_c, _e, cb) => cb() });
+  // Kept, not discarded: what goes *into* the CLI is the whole of steering, and
+  // a test that cannot read stdin can only assert that nothing crashed.
+  child.written = [] as unknown[];
+  child.stdin = new Writable({
+    write: (chunk: Buffer, _e: unknown, cb: () => void) => {
+      for (const line of String(chunk).split("\n").filter(Boolean)) {
+        try {
+          child.written.push(JSON.parse(line));
+        } catch {
+          child.written.push(line);
+        }
+      }
+      cb();
+    }
+  });
   child.killed = false;
   child.exitCode = null;
   child.signalCode = null;
@@ -729,6 +743,114 @@ describe("ClaudeCliProvider.stream — session mode result correlation", () => {
     await finished;
 
     expect(collected.some((d) => d.type === "done")).toBe(true);
+  });
+});
+
+// Steering: a second `user` message written into a turn that is already
+// running. The CLI takes it at the next tool boundary and continues the *same*
+// turn — measured on 2.1.219, written at 7.78s and echoed at 8.24s with no
+// second `system/init` and one `result`.
+//
+// The two cases below are the same write with the reader in two states, and
+// they are the whole of the attribution rule: the echo says which happened.
+describe("ClaudeCliProvider — steering a running turn", () => {
+  let child: any;
+  let outOfTurn: StreamDelta[];
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    child = makeFakeChild();
+    outOfTurn = [];
+    (spawn as unknown as ReturnType<typeof vi.fn>).mockReturnValue(child);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const sessionProvider = () =>
+    new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true,
+      onOutOfTurn: (d) => outOfTurn.push(d)
+    });
+
+  /** The `user` records the host wrote to the child, in order. */
+  const written = () =>
+    (
+      child.written as { type?: string; message?: { content?: string } }[]
+    ).filter((m) => m.type === "user");
+
+  /** The CLI's replay of a message it accepted, stamped with the same uuid. */
+  const echo = (sent: { uuid?: string; message?: { content?: string } }) => ({
+    type: "user",
+    uuid: sent.uuid,
+    isReplay: true,
+    message: { role: "user", content: sent.message?.content }
+  });
+
+  it("writes a plain user message, with no interrupt anywhere near it", async () => {
+    const provider = sessionProvider();
+    await drive(provider);
+
+    expect(provider.steer("and check the tests")).toBe(true);
+
+    const messages = written();
+    expect(messages).toHaveLength(2);
+    expect(messages[1]).toMatchObject({
+      type: "user",
+      // Says a person typed it, here — the same stamp the official extension
+      // puts on everything its composer sends.
+      origin: { kind: "human" },
+      message: { role: "user", content: "and check the tests" }
+    });
+    // An interrupt would have taken every background agent with it (measured:
+    // `status: "stopped"` 10ms later), which is why no send path may use one.
+    expect(
+      (child.written as { type?: string }[]).some(
+        (m) => m.type === "control_request"
+      )
+    ).toBe(false);
+  });
+
+  it("keeps it in the running turn: one turn, one result, no announcement", async () => {
+    const provider = sessionProvider();
+    const { collected, finished } = await drive(provider);
+
+    provider.steer("and check the tests");
+    child.emitLine(echo(written()[1] as never));
+    await new Promise((r) => setTimeout(r, 20));
+
+    // The echo of our own message is not a prompt anybody typed elsewhere, and
+    // with a turn reading it is not news either — that turn is already
+    // answering it.
+    expect(outOfTurn).toHaveLength(0);
+    expect(collected.some((d) => d.type === "done")).toBe(false);
+
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+    expect(collected.filter((d) => d.type === "done")).toHaveLength(1);
+  });
+
+  it("opens a turn of its own when the echo lands with nothing reading", async () => {
+    // Run 1 of the probes: no tool boundary existed, so the message waited and
+    // the CLI opened a second turn for it by itself. Out-of-turn *text* would
+    // arrive as one bare paragraph with every tool call dropped, so this asks
+    // for a full turn instead.
+    const provider = sessionProvider();
+    const { finished } = await drive(provider);
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+
+    provider.steer("actually, use 2FA");
+    child.emitLine(echo(written()[1] as never));
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(outOfTurn).toEqual([
+      { type: "steer_turn", prompt: "actually, use 2FA" }
+    ]);
+  });
+
+  it("refuses when there is no session, so the caller opens an ordinary turn", () => {
+    expect(sessionProvider().steer("nothing to write to")).toBe(false);
   });
 });
 

@@ -1,10 +1,14 @@
 // ─────────────────────────────────────────────────────────────
-// Header pill — whether this conversation can be driven from
-// claude.ai/code or the Claude mobile app.
+// Conversation-row pill — whether this conversation can be driven
+// from claude.ai/code or the Claude mobile app.
 //
 // Absent entirely when the bridge is off: a control for something
-// nobody has switched on is noise in a header that already drops
-// items at narrow widths.
+// nobody has switched on is noise.
+//
+// It sits beside the chat's name rather than in the identity row
+// above, because what it describes is this conversation and not the
+// panel. Unlike the row above it is not dropped at narrow widths —
+// the name ellipsises instead, which is the cheaper thing to lose.
 // ─────────────────────────────────────────────────────────────
 
 import { AnimatePresence, motion } from "framer-motion";
@@ -58,7 +62,7 @@ export function RemoteControlPill({ status }: RemoteControlPillProps) {
   return (
     <AnimatePresence initial={false}>
       {face && (
-        <motion.span {...ENTER_CARD} className={s.optional}>
+        <motion.span {...ENTER_CARD} className={s.sessionPill}>
           <Tooltip
             label={
               status.state === "error" && status.error

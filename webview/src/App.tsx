@@ -26,6 +26,7 @@ import { Spinner, type CodeInsert } from "./design/primitives";
 import { ChatScreen } from "./features/chat";
 import { WelcomeScreen } from "./features/auth/WelcomeScreen";
 import { FALLBACK_MODELS } from "./features/chat/constants";
+import { subagentOutcome } from "./features/chat/subagent-state";
 import s from "./App.module.scss";
 
 // ── Auth state ───────────────────────────────────────────────
@@ -127,10 +128,6 @@ export function App() {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [composerFocusKey, setComposerFocusKey] = useState(0);
   const [pendingInsert, setPendingInsert] = useState<CodeInsert | null>(null);
-  // Typed during a turn and held by the host until that turn ends. Mirrored
-  // here only to render it — the host owns it, because a conversation outlives
-  // the surface showing it.
-  const [queued, setQueued] = useState("");
   const [pendingRestore, setPendingRestore] = useState<string | null>(null);
   // What the host calls this conversation and how it reads its stored
   // timeline. Both arrive together because the host recomputes them together.
@@ -232,14 +229,9 @@ export function App() {
           // New Chat always lands on a usable composer, even if a turnEnd was missed.
           setBusy(false);
           setPendingPermissions([]);
-          setQueued("");
           setTaskProgress({});
           break;
-        case "queued":
-          setQueued(m.text);
-          break;
         case "returnToComposer":
-          setQueued("");
           setPendingRestore(m.text);
           break;
         // A `vscode://` link's prompt. Same path as a handed-back follow-up:
@@ -279,9 +271,20 @@ export function App() {
           // The turn is over (completed or cancelled) — no prompt can still
           // be live, so drop any card that didn't get an explicit answer.
           setPendingPermissions([]);
-          // Same for subagents: the host has just closed every open one on the
-          // timeline, so keeping live progress would fight the finished card.
-          setTaskProgress({});
+          // Subagents are not the same case, and used to be treated as one.
+          // The process outlives the turn now, so an agent still running at
+          // `turnEnd` keeps running — wiping it here left its card with a
+          // title and a spinner and nothing else: no activity line, no
+          // workflow roster, no elapsed time, because live outranks stored.
+          // A *finished* agent does have to go, or the stale progress summary
+          // beats the answer on its own closing event.
+          setTaskProgress((prev) =>
+            Object.fromEntries(
+              Object.entries(prev).filter(
+                ([, t]) => subagentOutcome(t.status) === "running"
+              )
+            )
+          );
           break;
         case "subagentProgress":
           setTaskProgress((prev) => ({
@@ -430,16 +433,6 @@ export function App() {
         skills={skills}
         composerFocusKey={composerFocusKey}
         pendingInsert={pendingInsert}
-        queued={queued}
-        onQueuedEdit={(text) => {
-          send({ type: "dropQueued" });
-          setQueued("");
-          setPendingRestore(text);
-        }}
-        onQueuedDrop={() => {
-          send({ type: "dropQueued" });
-          setQueued("");
-        }}
         pendingRestore={pendingRestore}
         onRestored={() => setPendingRestore(null)}
         sessionTitle={sessionMeta.title}

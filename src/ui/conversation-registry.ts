@@ -173,6 +173,7 @@ export class ConversationRegistry {
       conversationFor: (sessionId) => this.conversationFor(sessionId),
       openConversationInTab: (sessionId) => void this.openInTab(sessionId),
       showConversation: (sessionId) => void this.showInSidebar(sessionId),
+      startNewConversation: (host) => this.startNewConversation(host),
       discardConversation: (sessionId) => this.discardConversation(sessionId),
       markActive: (host) => {
         this.active = host;
@@ -277,11 +278,40 @@ export class ConversationRegistry {
    */
   startNewSidebarConversation(): void {
     const current = this.sidebarHost;
-    if (current && !current.hasWork) {
-      current.newSession();
+    if (current) {
+      this.startNewConversation(current);
       return;
     }
     this.swapSidebar(this.create());
+  }
+
+  /**
+   * New Chat, from whichever surface asked.
+   *
+   * Same rule on both, and the reason it has to be the registry's call: only it
+   * knows whether the surface can take a different conversation. The sidebar
+   * swaps its occupant; a tab is built around one conversation and cannot, so
+   * it opens another tab instead. Either way a conversation with work in it is
+   * left running rather than cleared underneath a live turn — clearing calls
+   * `newSession`, which aborts the turn and releases the CLI process, and a
+   * backgrounded workflow does not survive that.
+   */
+  startNewConversation(host: ConversationHost): void {
+    // An idle conversation is cleared in place, which releases its CLI process.
+    // That is deliberate: `--resume` is applied at spawn and nowhere else, so a
+    // process kept here would answer the new chat out of the old one's history.
+    if (!host.hasLiveWork) {
+      host.newSession();
+      return;
+    }
+    // Busy: it keeps its turn, its agents and its process, and stays reachable
+    // from history. The sidebar can hand its surface to a fresh conversation; a
+    // tab is built around one conversation and cannot, so it opens another.
+    if (host === this.sidebarHost) {
+      this.swapSidebar(this.create());
+      return;
+    }
+    this.openInTab();
   }
 
   private swapSidebar(host: ConversationHost): void {

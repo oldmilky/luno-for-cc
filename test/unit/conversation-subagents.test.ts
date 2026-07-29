@@ -579,6 +579,29 @@ describe("subagents that outlive their turn", () => {
     expect(cards(webview).map((r) => r.meta?.phase)).toEqual(["start"]);
   });
 
+  // What the history list reads. With the turn over and the work not, `busy`
+  // is false and the stored timeline says `done` — so a conversation running a
+  // twenty-agent workflow was reported finished in the one place the user goes
+  // to find it.
+  it("does not report itself done while an agent is still running", async () => {
+    script.push(started, progress);
+    const { host, webview } = open();
+    await enableRemote(webview);
+    webview.deliver({ type: "prompt", text: "launch it" });
+    await settle();
+
+    expect(host.live.status).toBe("agents");
+
+    outOfTurn[outOfTurn.length - 1]({
+      type: "task",
+      task: { phase: "notification", taskId: TASK, status: "completed" }
+    });
+    await settle();
+
+    // Nothing live left; whatever the timeline says now stands.
+    expect(host.live.status).toBeUndefined();
+  });
+
   it("closes the card when the agent reports after the turn", async () => {
     script.push(started, progress);
     const { webview } = open();

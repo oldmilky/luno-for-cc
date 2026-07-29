@@ -67,8 +67,9 @@ export interface ComposerProps {
   /** When set, splice this code block at the caret then call onInserted. */
   pendingInsert: CodeInsert | null;
   onInserted: () => void;
-  /** A queued follow-up the host handed back (Stop, rewind, failed turn).
-   *  Appended to whatever is already typed, then cleared via onRestored. */
+  /** Text handed back rather than sent — what the CLI still held when Stop
+   *  interrupted it, or a prompt arriving from a `vscode://` link. Appended to
+   *  whatever is already typed, then cleared via onRestored. */
   pendingRestore?: string | null;
   onRestored?: () => void;
   /** Compact in-message edit mode: hides the toolbar, swaps in a Cancel/Send footer. */
@@ -250,10 +251,10 @@ export function Composer({
 
   const handleSubmit = () => {
     // Submitting mid-turn is deliberate, in both modes. Inline (edit) rewinds
-    // and re-prompts; a normal send is queued by the host and delivered when
-    // the turn ends. Neither needs the composer to police it, and the `busy`
-    // gate that used to sit here swallowed every follow-up typed while the
-    // model was still talking.
+    // and re-prompts; a normal send goes into the turn already running, which
+    // picks it up at its next tool boundary. Neither needs the composer to
+    // police it, and the `busy` gate that used to sit here swallowed every
+    // follow-up typed while the model was still talking.
     const text = (editorRef.current?.serialize() ?? "").trim();
     const imageMd = attachments
       .map((a) => `![${a.name}](${a.dataUrl})`)

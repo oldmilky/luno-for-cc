@@ -365,7 +365,13 @@ export interface MarketplaceInstallTarget {
  * stored timeline and hold for chats nobody has open.
  */
 export type ChatStatus =
-  "working" | "needs-you" | "no-reply" | "interrupted" | "failed" | "done";
+  | "working"
+  | "agents"
+  | "needs-you"
+  | "no-reply"
+  | "interrupted"
+  | "failed"
+  | "done";
 
 export interface HistoryEntry {
   id: string;
@@ -452,13 +458,12 @@ export type Outbound =
    *  it — VS Code exposes no focus event for a webview — and turns it into the
    *  `luno.chatFocused` context key that chat keybindings are scoped to. */
   | { type: "chatFocus"; focused: boolean }
-  /** Sending during a turn is allowed: the host queues the text and sends it
-   *  when the turn ends. It never interrupts what is running. */
+  /** Sending during a turn is allowed and never waits: the host writes it into
+   *  the turn already running, where the CLI picks it up at the next tool
+   *  boundary. It never interrupts — interrupting would stop every background
+   *  agent with it. */
   | { type: "prompt"; text: string }
   | { type: "cancel" }
-  /** The user dismissed the queued follow-up. Distinct from `cancel`, which
-   *  hands the text back to the composer instead of discarding it. */
-  | { type: "dropQueued" }
   | {
       type: "permissionResponse";
       requestId: string;
@@ -620,12 +625,8 @@ export type Inbound =
   | { type: "delta"; delta: Delta }
   | { type: "turnStart" }
   | { type: "turnEnd" }
-  /** Everything typed while the turn runs, merged into the one message that
-   *  goes out when it ends. `""` means the queue is empty — it arrives on a
-   *  flush, a dismissal and a hand-back alike. */
-  | { type: "queued"; text: string }
-  /** The queue came back unsent — Stop, a rewind, an edit, or a turn that
-   *  failed. The composer takes the text so nothing typed is lost. */
+  /** The CLI was holding text it never read when the turn was stopped. The
+   *  composer takes it back so nothing typed is lost. */
   | { type: "returnToComposer"; text: string }
   /** Live-only: what a running subagent is doing right now. Never persisted —
    *  the timeline holds the dispatch and the result, this holds the middle. */

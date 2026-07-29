@@ -23,6 +23,9 @@ const remote = vi.hoisted(
 );
 /** Prompts the host asked the provider to send, in order. */
 const sentPrompts = vi.hoisted(() => [] as string[]);
+/** Messages written into a turn already running — the panel talking over the
+ *  phone's shoulder, into the same session. */
+const steered = vi.hoisted(() => [] as string[]);
 /** Permission answers routed back to the provider. */
 const answered = vi.hoisted(() => [] as string[]);
 const cancels = vi.hoisted(() => ({ count: 0 }));
@@ -38,6 +41,10 @@ vi.mock("../../src/providers/factory.js", () => ({
         if (last?.role === "user" && typeof last.content === "string") {
           sentPrompts.push(last.content);
         }
+      },
+      steer(text: string) {
+        steered.push(text);
+        return true;
       },
       cancel() {
         cancels.count += 1;
@@ -171,6 +178,7 @@ beforeEach(() => {
   for (const key of Object.keys(settings)) delete settings[key];
   settings.worktree = "off";
   sentPrompts.length = 0;
+  steered.length = 0;
   answered.length = 0;
   cancels.count = 0;
   remote.push = undefined;
@@ -302,21 +310,26 @@ describe("a turn started on another device", () => {
     expect(webview.sent.some((m) => m.type === "turnEnd")).toBe(true);
   });
 
-  it("sends what was typed here while the phone held the session", async () => {
-    // The composer stays live during a remote turn, so what it accepts is
-    // queued. Nothing else drains that queue — the local path only flushes
-    // behind a turn it started itself.
+  it("steers into the turn the phone started, rather than waiting for it", async () => {
+    // The two surfaces drive one session, so a turn started on the phone is a
+    // turn here — and typing into it is the same stdin write as typing into one
+    // started in the panel. Waiting for the phone's `done` would put the
+    // correction after the work it corrects.
     const { webview } = await openWithBridge();
     remote.push!({ type: "remote_prompt", prompt: "from the phone" });
     await settle();
 
     webview.deliver({ type: "prompt", text: "and from the panel" });
     await settle();
+
+    expect(steered).toEqual(["and from the panel"]);
+    // Not a turn of its own: that would wait on a `result` the running turn is
+    // going to spend.
     expect(sentPrompts).toEqual([]);
 
     remote.push!({ type: "done" });
     await settle();
-    expect(sentPrompts).toEqual(["and from the panel"]);
+    expect(sentPrompts).toEqual([]);
   });
 
   it("survives a second prompt arriving while the first is still open", async () => {

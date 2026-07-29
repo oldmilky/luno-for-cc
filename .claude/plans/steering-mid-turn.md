@@ -1,11 +1,10 @@
 # Steering — a message that reaches a running turn
 
-**Status:** designed, not started. Written 2026-07-28.
-**Reviewed 2026-07-29** against the working tree — every line reference below
-was re-read on disk, and five things the first draft did not cover are folded
-in: who persists a steered message, the provider entry point it needs, the
-attribution rule (no longer an open question), the spawn race the removed gate
-was hiding, and what `still_queued` actually costs.
+**Status:** written 2026-07-28, reviewed and built 2026-07-29. **Phase 1's first
+commit landed (`81e8530`); phase 2 is built, gated and verified in the harness,
+and is uncommitted pending a run in the real extension.** Per-phase status is on
+each phase below; what is still open is in [Open questions](#open-questions--probe-do-not-guess)
+and in the last line of [Sequencing](#sequencing).
 
 **Depends on** [one-process-per-conversation.md](./one-process-per-conversation.md),
 which is not optional here: it is phase 1 of this document. Companion to
@@ -152,6 +151,33 @@ still running and the composer live.
 
 One rule: **sending never queues.**
 
+**Status 2026-07-29: built, gated and verified in the harness. Not yet run in
+the real extension.**
+
+Done — `steer()` and `writeUserMessage` on the provider; `handlePrompt` writes
+into the running turn through `steerIntoRunningTurn`, which records the message
+with `addUser` + `scheduleSave`; the `steer_turn` delta and its branch in
+`onOutOfTurn`, with `Orchestrator.observe` taking `null` to mean "already on the
+timeline"; the whole local queue deleted on both sides (`this.queued`, `enqueue`,
+`flushQueued`, `clearQueued`, `returnQueued`, the `queued` inbound and the
+`dropQueued` outbound, `QueuedPrompt.tsx` and the `.queued*` rules that styled
+it); `still_queued` sourced from the CLI through `interruptReturningQueued` →
+`onStillQueued` → `returnToComposer`; `turnEnd` no longer wipes the progress of
+agents that are still running; the spawn lock; the seventh status; the suites.
+
+`bun run lint` clean, `bun run test` at **884 passed, 6 skipped**.
+
+The suites were rewritten rather than repaired. `conversation-queue.test.ts` is
+now `conversation-steering.test.ts`: every test in it asserted a mechanism that
+has been deleted — "queues the follow-up", "merges everything typed into a
+single message" — and a file named after a queue that no longer exists is the
+next reader's first wrong turn. Its `one process per conversation` block was
+kept as it was, being the part that already described the model we have.
+
+Only what is left is left: **a live run in the extension host.** Every "Done
+when" below that says _verified in the running extension_ is still open, and
+nothing here has been asked to survive a real CLI.
+
 ### Host
 
 - `handlePrompt` ([conversation-host.ts:1834](../../src/ui/conversation-host.ts#L1834))
@@ -249,7 +275,7 @@ looks asleep. Three surfaces, three different answers:
 | ----------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | the verb line (`ThinkingIndicator`) | as today                | gone. It only ever meant "the model is composing"                                                                                                                                      |
 | the subagent / workflow card        | as today                | **this** is the liveness signal, and it already works: `running` comes off `task.status` ([SubagentCard.tsx:42](../../webview/src/features/chat/SubagentCard.tsx#L42)), not off `busy` |
-| the header pill and the chat list   | `working` → "streaming" | undecided — below                                                                                                                                                                      |
+| the header pill and the chat list   | `working` → "streaming" | `agents` — a seventh state, decided below                                                                                                                                              |
 
 Two things that follow, neither of them cosmetic:
 
@@ -263,32 +289,40 @@ Two things that follow, neither of them cosmetic:
   [ChatScreen.tsx:1136](../../webview/src/features/chat/ChatScreen.tsx#L1136).
   The clear moves from `turnEnd` to the task's own terminal event.
 
-- **The header pill and the chat list need a state that does not exist yet.**
-  `headerStatus` returns `working` off `busy` alone
-  ([chat-status.ts:57](../../webview/src/features/chat/chat-status.ts#L57)), and
-  the same table feeds the history list, where `working` means "this chat is
-  mid-turn while you are looking at another one"
-  ([chat-status.ts:22-25](../../webview/src/features/chat/chat-status.ts#L22)).
-  After phase 1 a conversation with twenty agents running reports `stored` —
-  **done** — in both places. In the list that is the worse of the two: a
-  background conversation running a workflow is exactly the one the user is
-  trying to find. Choose between holding `working` while `liveTasks` is
-  non-empty (which needs its own label — "streaming" is untrue there) and a
-  seventh status in the table. One decision, two surfaces, one vocabulary.
+- **The header pill and the chat list needed a state that did not exist yet.**
+  `headerStatus` returned `working` off `busy` alone, and the same table feeds
+  the history list, where `working` means "this chat is mid-turn while you are
+  looking at another one". After phase 1 a conversation with twenty agents
+  running reported `stored` — **done** — in both places. In the list that is the
+  worse of the two: a background conversation running a workflow is exactly the
+  one the user is trying to find.
 
-What that means file by file, so it is not hunted for twice:
-[QueuedPrompt.tsx](../../webview/src/features/chat/QueuedPrompt.tsx) in whole,
-`.queued*` in
-[ChatBits.module.scss:293-350](../../webview/src/features/chat/ChatBits.module.scss#L293),
-the `queued` state and its prop in
-[App.tsx:133](../../webview/src/App.tsx#L133),
-[:238](../../webview/src/App.tsx#L238), [:433](../../webview/src/App.tsx#L433)
-and [ChatScreen.tsx:98](../../webview/src/features/chat/ChatScreen.tsx#L98),
-[:589](../../webview/src/features/chat/ChatScreen.tsx#L589), and both directions
-of the protocol — `queued` at
-[rpc.ts:626](../../webview/src/lib/rpc.ts#L626) and `dropQueued` at
-[rpc.ts:459](../../webview/src/lib/rpc.ts#L459).
-`returnToComposer` **stays**: it is what Stop still uses (see below).
+  **Decided: a seventh status, `agents`.** Holding `working` was the other
+  option and it fails on the word — "streaming" is untrue with nothing
+  streaming, so it would have needed a second label per surface, which is two
+  vocabularies wearing one name. `agents` means the same thing on both surfaces
+  and is spelt the same on both. It is live where it is read from: the host's
+  `live` getter answers it off `liveTasks` for the list
+  ([conversation-host.ts:584](../../src/ui/conversation-host.ts#L584)), and the
+  header derives it in the webview off `taskProgress`, which is where `busy`
+  is already derived and a message earlier than the host's own view.
+
+  Precedence: an approval, then `busy`, then a failure, then `agents`, then
+  whatever the timeline says. `agents` sits under the failure because how the
+  turn ended is what the user has to act on; it sits above `stored` because the
+  stored reading is of a timeline whose work has not finished.
+
+  What it looks like, measured in the harness: the chip carries the spinner —
+  it is live work — in `--info` rather than the accent, which stays reserved for
+  a turn you can watch, and the list dot breathes on the same 1.8 s period as
+  `working`. Chip text contrast 6.57–6.77:1 across all seven palettes; the list
+  pill 4.96:1.
+
+All of it is gone as of 2026-07-29 — `QueuedPrompt.tsx`, the `.queued*` rules
+that styled it, the `queued` state and its props through `App.tsx` and
+`ChatScreen.tsx`, and both directions of the protocol (`queued` inbound,
+`dropQueued` outbound). `returnToComposer` **stays**: it is what Stop still
+uses, now carrying `still_queued` from the CLI rather than a local queue.
 
 ### Remote Control
 
@@ -332,35 +366,58 @@ written:
 1. **A turn parked on a permission prompt** has no tool boundary until it is
    answered. Where does a written message sit, and does it survive a deny?
 2. **After `interrupt`** — is an already-written message still delivered, or
-   does it come back in `still_queued`?
+   does it come back in `still_queued`? **Half-answered 2026-07-29:** neither.
+   A message the turn has already _accepted_ — the echo had come back 1.0 s
+   before the interrupt — was not in `still_queued`, which returned `[]`, and
+   was never answered: the turn died at `result/error_during_execution`. So
+   `still_queued` holds only what was written and not yet accepted, which is a
+   much narrower thing than "everything typed and undelivered". Still open: what
+   comes back when a message is written with no window to accept it.
 3. **A respawn on `--effort`** leaves a written message in the old process's
    stdin. Likely rule: refuse the effort change while an echo is outstanding.
    Confirm the message is genuinely lost before building the guard.
-4. **Does `interrupt` stop background agents, or only the turn?** This decides
-   what Stop even means in the state the whole document is for — the model
-   finished, twenty agents are still running, and there is no turn left to stop.
-   If it takes the agents with it, Stop needs a second meaning while
-   `liveTasks` is non-empty; if it does not, the button is simply idle there.
+4. ~~**Does `interrupt` stop background agents, or only the turn?**~~
+   **Answered 2026-07-29 against 2.1.219 — it stops them.** `interrupt` written
+   at 9.28s; `task_updated` and `task_notification` with `status: "stopped"` for
+   the running agent at **9.29s**, 10 ms later. Capture:
+   `…/scratchpad/probe-interrupt-events.json`.
+
+   The consequence is a prohibition, not a design choice: **no send path may go
+   through `interrupt`.** Steering is a plain stdin write and disturbs nothing —
+   measured in the same run, the agent kept working from the write at 7.78s
+   until the interrupt 1.5 s later. The use case this protects is the ordinary
+   one: asking "how far along are the agents?" mid-run must not cost the run.
+
+   What it does still change is Stop's honesty, since Stop _is_ an interrupt and
+   takes every running agent with it. Noted here rather than acted on — it is a
+   separate decision from steering, and steering does not depend on it.
 
 ## Tests
 
-| Layer   | What                                                                                      |
-| ------- | ----------------------------------------------------------------------------------------- |
-| host    | `handlePrompt` writes to stdin while a turn is active; no session → spawn                 |
-| host    | a steered message reaches the stored timeline — reload shows it, and it is in the context |
-| host    | two sends before any process exists spawn **one** CLI, not two                            |
-| stream  | echo before `result` → one turn, two user messages, one `result`                          |
-| stream  | echo after `result` → a full turn attributed to us, tool calls intact, `addUser` not run  |
-| cancel  | `interrupt` ends the turn and leaves the process alive                                    |
-| cancel  | `still_queued` comes back to the composer                                                 |
-| webview | the QUEUED state is gone; the composer is live while `busy`                               |
-| webview | `turnEnd` with a task still running keeps that task's live progress                       |
-| webview | a conversation whose turn ended with agents running is not reported `done`                |
-| harness | composer usable with background agents running, on two palettes                           |
-| harness | turn ends mid-workflow: verb line gone, card still ticking, header still truthful         |
+All written, all green. Where each one landed:
 
-`conversation-queue.test.ts` is rewritten, not deleted — it describes a process
-model that no longer exists, and the replacement describes the one that does.
+| Layer   | What                                                                                      | Where                                                    |
+| ------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| host    | `handlePrompt` writes to stdin while a turn is active; no session → spawn                 | `conversation-steering.test.ts`                          |
+| host    | a steered message reaches the stored timeline — reload shows it, and it is in the context | ″ (asserted off the session file on disk)                |
+| host    | two sends before any process exists spawn **one** CLI, not two                            | ″ (fails without the lock — checked both ways)           |
+| host    | echo after `result` → a full turn, `addUser` not run twice                                | ″                                                        |
+| stream  | echo before `result` → one turn, two user messages, one `result`                          | `claude-cli-stream.test.ts`                              |
+| stream  | echo after `result` → `steer_turn` on the out-of-turn seam                                | ″                                                        |
+| stream  | the write is a plain `user` line — no control request anywhere near it                    | ″                                                        |
+| cancel  | `interrupt` ends the turn and leaves the process alive                                    | `conversation-steering.test.ts`                          |
+| cancel  | `still_queued` comes back to the composer, and `[]` returns nothing                       | ″                                                        |
+| webview | the status vocabulary and its precedence                                                  | `test/webview/chat-status.test.ts`                       |
+| webview | a conversation whose turn ended with agents running is not reported `done`                | `conversation-subagents.test.ts` + the header unit above |
+| harness | composer live while `busy` and after `turnEnd`; no QUEUED anywhere; Enter sends           | measured 2026-07-29                                      |
+| harness | turn ends mid-workflow: verb line gone, card keeps its activity, chip reads `agents`      | ″, on all seven palettes                                 |
+
+`conversation-queue.test.ts` became `conversation-steering.test.ts` — same
+subject, a name that is no longer a lie about what the code does.
+
+Not covered by a test, deliberately: `turnEnd` keeping a running agent's live
+progress is App-level React state with no DOM harness in this repo, so it is
+harness evidence only.
 
 ## Done when
 
@@ -381,21 +438,17 @@ model that no longer exists, and the replacement describes the one that does.
 
 ## Sequencing
 
-Phase 1 deletes `pendingTaskReport`, which is uncommitted in the working tree
-right now alongside F2, F3, F5 and F8. **Commit that work first** — it is green
-and carries its own tests — so the deletion arrives as a clean diff instead of
-mixing with unlanded work.
+Phase 1's first commit landed as `81e8530` — one process per conversation, with
+cancellation through `interrupt`. The rest of that phase (deleting the hold:
+`BACKGROUND_TASK_GRACE_MS`, `armGrace`, `openTasks`, `pendingTaskReport`, the
+deferred `endTurn`) is pure deletion and is still waiting on a live run, which
+is what it is safe to the degree of.
 
-Then phase 1 itself lands in **two commits, not one**. What is risky in it is
-not pointing the turn at the long-lived provider — it is Stop, and the suites
-that encode a process dying with the turn:
-
-1. One provider for every turn, cancellation through `interrupt`, the affected
-   suites rewritten. Verified in the running extension before anything is
-   deleted.
-2. The hold removed — `BACKGROUND_TASK_GRACE_MS`, `armGrace`, `openTasks`,
-   `pendingTaskReport`, the deferred `endTurn` and their tests. Pure deletion,
-   and safe exactly to the degree that the first commit was verified live.
+Phase 2 is uncommitted in the working tree and is one commit's worth: steering,
+the queue's removal on both sides, the spawn lock, the `agents` status, and the
+suites. It has no live run behind it either — **F5 first, then commit.** What to
+watch there is the thing no fake can produce: a real echo, arriving before or
+after a real `result`.
 
 ## Evidence
 

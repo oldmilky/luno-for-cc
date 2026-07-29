@@ -305,6 +305,12 @@ export interface StreamDelta {
     | "task"
     | "remote_control"
     | "remote_prompt"
+    /** Our own steered message came back as an echo with no turn reading, so
+     *  the CLI is opening a turn of its own to answer it. The host opens one
+     *  here to receive it — the out-of-turn path keeps only `text`, which
+     *  would drop every tool call the answer makes. Unlike `remote_prompt` the
+     *  message is already on the timeline: it was recorded when it was sent. */
+    | "steer_turn"
     | "done"
     | "error";
   text?: string;

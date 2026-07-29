@@ -263,9 +263,9 @@
 
 // ── Status ───────────────────────────────────────────────────
 //
-// Six states, four tones. Colour alone cannot carry six meanings — the pill in
-// the meta row says which, in words — so colour only has to answer "does this
-// want me?". `done` is the resting state of most rows and stays grey on
+// Seven states, five tones. Colour alone cannot carry seven meanings — the pill
+// in the meta row says which, in words — so colour only has to answer "does
+// this want me?". `done` is the resting state of most rows and stays grey on
 // purpose: a list where every row is coloured is a list with no signal in it.
 
 // Compound with `.dot` so these outrank the hover rule above: a chat that is
@@ -286,6 +286,13 @@
   background: var(--accent);
   // The activity period, not the decorative one: this dot means a turn is in
   // flight right now.
+  @include motion.halo-breathe(var(--motion-ambient));
+}
+
+// Agents outliving their turn. Breathing like `working` — the work is live —
+// but not the accent, which is reserved for a turn the user can watch.
+.dot.toneAgents {
+  background: var(--info);
   @include motion.halo-breathe(var(--motion-ambient));
 }
 
@@ -317,6 +324,11 @@
   &.toneWorking {
     background: var(--accent-soft);
     color: var(--accent-glow);
+  }
+
+  &.toneAgents {
+    background: var(--info-soft);
+    color: var(--info);
   }
 
   // No background: "done" is the absence of a problem, and giving it a chip of
