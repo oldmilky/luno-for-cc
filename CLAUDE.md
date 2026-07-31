@@ -21,7 +21,7 @@ reappears, something ran `npm install` and the two will drift.
 | Types only          | `bun run lint:types`                                         |
 | Tests               | `bun run test` — expect `1122 passed, 6 skipped`             |
 | Build               | `bun run build` (esbuild → dist/, vite → webview/dist/)      |
-| Package             | `bun run package` → `luno-for-cc-<ver>.vsix`, ~627 kB        |
+| Package             | `bun run package` → `luno-for-cc-<ver>.vsix`, ~605 kB        |
 | Format              | `bun run format` · check with `format:check`                 |
 | Autofix everything  | `bun run fix`                                                |
 | Browser harness     | `bun run harness` — the webview on localhost, see `/browser` |

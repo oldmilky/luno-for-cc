@@ -7,7 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/install-build%20from%20source-8b64ff" alt="Install: build from source" />
-  <img src="https://img.shields.io/badge/VSIX-627%20kB-555" alt="VSIX size: 627 kB" />
+  <img src="https://img.shields.io/badge/VSIX-605%20kB-555" alt="VSIX size: 605 kB" />
 </p>
 
 <p align="center">
@@ -33,7 +33,7 @@ LUNO brings the full Claude Code agent into a native editor side panel: streamin
 - 🔌 **MCP connectors.** Browse and connect remote MCP servers — Linear, Notion, Atlassian, Sentry and more — over OAuth, straight from the panel.
 - 🕰 **Checkpoints + rewind.** Every assistant turn snapshots edited files so you can roll back without leaving the chat.
 - 📦 **Runs your own CLI.** No bundled copy: LUNO finds the `claude` binary on your
-  PATH (or in the standard install locations) and drives that. The VSIX is 627 kB,
+  PATH (or in the standard install locations) and drives that. The VSIX is 605 kB,
   and model aliases resolve against whatever your CLI knows — a self-updating
   install picks up new models with no LUNO release.
 - 🎨 **Seven palettes.** copper, purple, red, blue, green, pink, white — every
