@@ -1,0 +1,116 @@
+// ─────────────────────────────────────────────────────────────
+// The Fable-credits dialog. Sits where the permission card sits
+// and borrows its shape, but carries no risk tone: nothing is
+// about to run — this is a billing question, and colouring it
+// like a destructive call would be a lie about the stakes.
+// ─────────────────────────────────────────────────────────────
+
+.card {
+  overflow: hidden;
+  border: 1px solid var(--b2);
+  border-left: 3px solid var(--info);
+  border-radius: var(--round-sm);
+  background: var(--s1);
+}
+
+.head {
+  padding: 10px 12px 0;
+}
+
+.title {
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.body {
+  margin: 4px 0 0;
+  padding: 0 12px;
+  color: var(--t2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+// A button that reads as a link: the destination is the user's browser, which
+// only the host can reach, so it cannot be an anchor.
+.learnMore {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 10px;
+}
+
+%action {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--round);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+%ghost {
+  @extend %action;
+  background: transparent;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s2);
+    color: var(--t1);
+  }
+
+  &:focus {
+    outline: none;
+  }
+
+  &:focus-visible {
+    background: var(--s2);
+  }
+}
+
+.dismiss {
+  @extend %ghost;
+  margin-right: auto;
+  color: var(--t3);
+}
+
+.secondary {
+  @extend %ghost;
+  color: var(--t2);
+  font-weight: 500;
+}
+
+.primary {
+  @extend %action;
+  padding: 6px 14px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  transition: filter var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    filter: brightness(1.1);
+  }
+
+  &:focus {
+    outline: none;
+  }
+}

@@ -10,7 +10,7 @@
 // extension host. This component is a thin RPC client.
 // ─────────────────────────────────────────────────────────────
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
 import { AnimatePresence, motion } from "framer-motion";
 import { Icon, IconName } from "../../design/icons";
@@ -21,6 +21,7 @@ import {
   ConnectorView,
   CustomConnectorDraft
 } from "../../lib/rpc";
+import { groupConnectors, showsHeadings } from "./connector-groups";
 import s from "./ConnectorsModal.module.scss";
 
 export interface ConnectorsModalProps {
@@ -113,6 +114,9 @@ export function ConnectorsModal({ open, onClose }: ConnectorsModalProps) {
       );
     });
   }, [connectors, query, tab]);
+
+  const groups = useMemo(() => groupConnectors(filtered), [filtered]);
+  const headings = showsHeadings(groups);
 
   const counts = useMemo(() => {
     const connected = connectors.filter(
@@ -224,48 +228,62 @@ export function ConnectorsModal({ open, onClose }: ConnectorsModalProps) {
                   </span>
                 </div>
               ) : (
-                filtered.map((c) => (
-                  <ConnectorCard
-                    key={c.id}
-                    connector={c}
-                    busy={busyId === c.id}
-                    onConnect={() => {
-                      // Local API-token presets (e.g. Figma) prompt for the token
-                      // first, then connect via connectorConnectWithApiKey.
-                      if (c.apiKeyEnv) {
-                        setApiKeyPrompt({
-                          id: c.id,
-                          name: c.name,
-                          ...c.apiKeyEnv
-                        });
-                        return;
-                      }
-                      setBusyId(c.id);
-                      send({ type: "connectorConnect", id: c.id });
-                    }}
-                    onCancelConnect={() => {
-                      // Optimistic: drop the spinner now; the host echoes back
-                      // a "cancel" result that confirms the abort.
-                      send({ type: "connectorCancelConnect", id: c.id });
-                      setBusyId(null);
-                    }}
-                    onDisconnect={() => {
-                      setBusyId(c.id);
-                      send({ type: "connectorDisconnect", id: c.id });
-                    }}
-                    onRemove={() => {
-                      setBusyId(c.id);
-                      send({ type: "connectorRemoveCustom", id: c.id });
-                    }}
-                    onSetupViaClaudeCode={() => {
-                      send({ type: "connectorSetupViaClaudeCode", id: c.id });
-                      setToast({
-                        ok: true,
-                        text: "Opening Claude Code — finish in the /mcp menu."
-                      });
-                      window.setTimeout(() => setToast(null), 5000);
-                    }}
-                  />
+                groups.map((g) => (
+                  <Fragment key={g.label}>
+                    {headings && (
+                      <div className={s.groupHead}>
+                        <span className={s.groupBadge}>{g.label}</span>
+                        <span className={s.groupCount}>{g.items.length}</span>
+                        <div className={s.groupLine} />
+                      </div>
+                    )}
+                    {g.items.map((c) => (
+                      <ConnectorCard
+                        key={c.id}
+                        connector={c}
+                        busy={busyId === c.id}
+                        onConnect={() => {
+                          // Local API-token presets (e.g. Figma) prompt for the token
+                          // first, then connect via connectorConnectWithApiKey.
+                          if (c.apiKeyEnv) {
+                            setApiKeyPrompt({
+                              id: c.id,
+                              name: c.name,
+                              ...c.apiKeyEnv
+                            });
+                            return;
+                          }
+                          setBusyId(c.id);
+                          send({ type: "connectorConnect", id: c.id });
+                        }}
+                        onCancelConnect={() => {
+                          // Optimistic: drop the spinner now; the host echoes back
+                          // a "cancel" result that confirms the abort.
+                          send({ type: "connectorCancelConnect", id: c.id });
+                          setBusyId(null);
+                        }}
+                        onDisconnect={() => {
+                          setBusyId(c.id);
+                          send({ type: "connectorDisconnect", id: c.id });
+                        }}
+                        onRemove={() => {
+                          setBusyId(c.id);
+                          send({ type: "connectorRemoveCustom", id: c.id });
+                        }}
+                        onSetupViaClaudeCode={() => {
+                          send({
+                            type: "connectorSetupViaClaudeCode",
+                            id: c.id
+                          });
+                          setToast({
+                            ok: true,
+                            text: "Opening Claude Code — finish in the /mcp menu."
+                          });
+                          window.setTimeout(() => setToast(null), 5000);
+                        }}
+                      />
+                    ))}
+                  </Fragment>
                 ))
               )}
             </div>

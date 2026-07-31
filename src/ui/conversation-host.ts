@@ -23,9 +23,11 @@ import {
 } from "../core/types.js";
 import type { ChatProvider } from "../providers/base.js";
 import { createProvider } from "../providers/factory.js";
+import { disabledPermissionModes } from "../services/claude-settings.js";
 import type {
   ClaudeCliProvider,
-  EffortLevel
+  EffortLevel,
+  PendingSetting
 } from "../providers/claude-cli.js";
 import {
   CheckpointService,
@@ -342,6 +344,10 @@ export class ConversationHost {
    * sweep does not, so a late notification can still heal one — measured, an
    * agent closed yellow at 38.6s and reopened green at 107.6s.
    */
+  /** Controls whose value the running process has not been told, because
+   *  telling it means replacing the process and the conversation has agents in
+   *  it. Cleared by the provider the moment a fresh process is spawned. */
+  private pendingSettings: PendingSetting[] = [];
   private readonly reportedTasks = new Set<string>();
   /** Identity of every task seen this conversation: the fields that arrive once
    *  on `task_started` and never again. Kept past the end of the card so a late
@@ -764,6 +770,21 @@ export class ConversationHost {
         request: this.pendingRequest
       });
     }
+    // The live half of every card this conversation still has open. The surface
+    // just cleared what the previous occupant left there, and these outlive a
+    // turn now — without this, switching back to a chat running a workflow
+    // showed a card with a title and nothing moving in it.
+    for (const task of this.liveTasks.values()) {
+      void webview.postMessage({ type: "subagentProgress", task });
+    }
+    // Including `off`, and that is the whole point: the pill's state lives in
+    // `ChatScreen`, which the sidebar swap does not remount, so a conversation
+    // with no bridge inherits the previous occupant's pill — a live-looking
+    // link to somebody else's session. Saying "off" is what clears it.
+    void webview.postMessage({
+      type: "remoteControl",
+      status: this.remoteControl
+    });
     this.refreshSurface();
   }
 
@@ -959,7 +980,15 @@ export class ConversationHost {
     this.post({
       type: "auth",
       authed: await this.auth.isAuthed(),
-      ...this.settings
+      ...this.settings,
+      // Rides with the posture it contradicts: these are the controls showing a
+      // value the running process has not been given, because giving it would
+      // have meant replacing the process under live agents.
+      pendingSettings: this.pendingSettings,
+      // Read fresh rather than cached: the file is the user's own, they can
+      // edit it while the panel is open, and this is published often enough
+      // that a stale answer would outlive its reason.
+      disabledModes: disabledPermissionModes() as PermissionMode[]
     });
   }
 
@@ -1070,11 +1099,15 @@ export class ConversationHost {
    *  change, because a setting that needs a window reload to take effect is
    *  one the user reports as broken. */
   publishWebviewSettings(): void {
+    const cfg = vscode.workspace.getConfiguration("luno");
     this.post({
       type: "settings",
-      useCtrlEnterToSend: vscode.workspace
-        .getConfiguration("luno")
-        .get<boolean>("useCtrlEnterToSend", false)
+      useCtrlEnterToSend: cfg.get<boolean>("useCtrlEnterToSend", false),
+      // Hand-edited JSON reaches this unvalidated — the schema in package.json
+      // is a hint to the editor, not a guarantee about what arrives here.
+      startupSuggestions: asStringArray(
+        cfg.get<unknown>("startupSuggestions", [])
+      )
     });
   }
 
@@ -1202,16 +1235,56 @@ export class ConversationHost {
       if (behavior === "allow" && m.always === true) {
         await this.grantFromRequest(requestId);
       }
-      if (!this.activeProvider?.respondToPermission) {
+      // Between turns `activeProvider` is empty, and a prompt raised by a
+      // background agent is answered exactly then. The session provider is the
+      // same process either way — falling back to it is what makes the card
+      // answerable rather than decorative.
+      const provider = this.activeProvider ?? this.sessionProvider;
+      if (!provider?.respondToPermission) {
         logWarn(
-          "[luno] permissionResponse arrived but no active provider to answer it"
+          "[luno] permissionResponse arrived but no provider to answer it"
         );
       }
-      this.activeProvider?.respondToPermission?.(
+      // Forwarded, never reshaped: `updatedInput` is the CLI's schema, not
+      // ours, and a host that rebuilds it is a second place to get it wrong.
+      const updatedInput = obj(m, "updatedInput");
+      const reason = str(m, "reason");
+      provider?.respondToPermission?.(
         requestId,
         behavior as PermissionBehavior,
-        { restOfTurn: m.restOfTurn === true }
+        {
+          restOfTurn: m.restOfTurn === true,
+          ...(updatedInput && { updatedInput }),
+          ...(reason && { reason })
+        }
       );
+      // The answers went to the model as the tool's own input. Nothing on the
+      // timeline has them yet, and after the card closes there would be no
+      // trace of the question ever having been asked.
+      if (behavior === "allow" && updatedInput) {
+        const asked = this.askedPermissions.get(requestId);
+        const answers = updatedInput.answers;
+        if (
+          asked?.toolName === "AskUserQuestion" &&
+          answers &&
+          typeof answers === "object" &&
+          !Array.isArray(answers)
+        ) {
+          this.plan.recordAnswerFromTool(
+            asked.toolUseId ?? "",
+            answers as Record<string, string>
+          );
+        }
+      }
+    },
+    userDialogResponse: async (m) => {
+      const requestId = str(m, "requestId");
+      if (!requestId) return;
+      this.awaitingApproval = false;
+      this.refreshSurface();
+      // `result` absent is a cancel, and every kind defaults to one — so a
+      // panel that closes the card without choosing still frees the turn.
+      this.activeProvider?.respondToDialog?.(requestId, m.result);
     },
     rewindTo: async (m) => {
       const turnId = str(m, "turnId");
@@ -1243,7 +1316,12 @@ export class ConversationHost {
     // ── Settings ───────────────────────────────────────────────
     setModel: async (m) => {
       const model = str(m, "model");
-      if (model) await this.applySetting("model", model);
+      if (!model) return;
+      await this.applySetting("model", model);
+      // Same reason as the mode below: a turn arriving from the phone rebuilds
+      // no argv, so without this the CLI keeps answering under the model the
+      // picker stopped naming.
+      void this.sessionProvider?.setLiveModel(model);
     },
     setPermissionMode: async (m) => {
       const mode = str(m, "mode");
@@ -1251,6 +1329,14 @@ export class ConversationHost {
       // The confirmation lives host-side rather than in the webview so no path
       // into the mode can skip it — not the picker, not a command, not a future
       // caller that has not been written yet.
+      // A policy that forbids a mode has to be enforced where the mode is
+      // applied, not only where it is drawn. The picker already hides these,
+      // but a stale webview, a command, or a keybinding all arrive here too.
+      if (disabledPermissionModes().includes(mode)) {
+        logInfo(`[luno] permission mode ${mode} is disabled by settings.json`);
+        await this.auth.broadcast();
+        return;
+      }
       if (mode === "bypass" && !(await confirmBypassMode())) {
         // Re-publish so the picker snaps back off Bypass rather than showing a
         // mode that was never applied.
@@ -1258,6 +1344,11 @@ export class ConversationHost {
         return;
       }
       await this.applySetting("permissionMode", mode as PermissionMode);
+      // The picker is the only place the mode changes, and a turn started on
+      // the phone rebuilds no argv to carry it — it would keep running under
+      // the mode the process was spawned with, which for Bypass means no
+      // approval card anywhere while the composer reads Default.
+      void this.sessionProvider?.setLivePermissionMode(mode as PermissionMode);
     },
     setEffort: async (m) => {
       const effort = str(m, "effort");
@@ -1289,8 +1380,10 @@ export class ConversationHost {
       }
       // Say so before the round-trip: enabling reaches the Anthropic API and
       // can take a moment, and a control that does nothing visible for two
-      // seconds reads as broken.
-      this.publishRemoteControl({ state: "ready" });
+      // seconds reads as broken. `connecting`, not `ready` — the latter is a
+      // bridge standing up and waiting, and offers a link that at this point
+      // does not exist. The reply, up to 30s away, is what makes it `ready`.
+      this.publishRemoteControl({ state: "connecting" });
       try {
         const provider = await this.ensureSessionProvider();
         const status = await provider.enableRemoteControl(
@@ -2024,6 +2117,13 @@ export class ConversationHost {
       effort: this.settings.effort,
       thinking: this.settings.thinking,
       sessionMode: true,
+      // Replacing the process to pick up a new effort would kill every agent in
+      // it, and nobody flips a chip meaning that. Read fresh on every turn.
+      hasLiveWork: () => this.hasLiveWork,
+      onSettingsPending: (pending) => {
+        this.pendingSettings = pending;
+        void this.publishAuthState();
+      },
       onStillQueued: (text) => this.returnStillQueued(text),
       onOutOfTurn: (d) => {
         // The other device talking while the panel is not driving the turn.
@@ -2082,6 +2182,22 @@ export class ConversationHost {
         if (d.type === "done" && !this.remoteTurn) {
           this.flushOutOfTurnText();
           if (d.sessionEnded) this.sweepLiveTasks();
+          return;
+        }
+        // An approval prompt with no turn to attach to. `run_in_background` is
+        // the default for agents, so an agent hitting an Edit long after the
+        // turn that launched it ended is the ordinary case, not an edge — and
+        // the CLI blocks on that answer for the life of the process. Dropped,
+        // the card spun with nothing on screen to answer and the request id was
+        // later destroyed by an unrelated turn.
+        if (
+          !this.remoteTurn &&
+          (d.type === "permission_request" ||
+            d.type === "permission_resolved" ||
+            d.type === "user_dialog" ||
+            d.type === "user_dialog_resolved")
+        ) {
+          this.onTurnDelta(d, this.settings.model);
           return;
         }
         // Everything else belongs to that turn — or to no turn at all, in which
@@ -2219,6 +2335,10 @@ export class ConversationHost {
       permissionMode: permMode,
       allowedBashPatterns: bashAllowlist,
       disabledSkills,
+      // Not for this turn — that carries its own on the request. For the next
+      // spawn with no turn behind it, so the Remote Control toggle builds the
+      // argv an ordinary turn would and does not read as a settings change.
+      model: this.settings.model,
       taskType,
       conventions,
       diagnostics: collectDiagnostics(workspaceRoot),
@@ -2372,6 +2492,15 @@ export class ConversationHost {
    *   reports can be recorded against it.
    */
   private onTurnDelta(d: StreamDelta, requestedModel: string): void {
+    // The bridge describes the session, not the turn, and its state moves while
+    // a turn holds the sink — switching it on mid-turn is the ordinary case.
+    // The verbatim forward below cannot carry it: the webview's `Delta` union
+    // has no `remote_control` member, so the pill would go on advertising a
+    // session URL nobody is holding.
+    if (d.type === "remote_control" && d.remoteControl) {
+      this.publishRemoteControl(d.remoteControl);
+      return;
+    }
     // A pending tool-permission prompt: surface it as a dedicated typed
     // message (an inline approval card in the webview) rather than a raw
     // delta the timeline doesn't know how to render.
@@ -2381,6 +2510,20 @@ export class ConversationHost {
       this.awaitingApproval = true;
       this.refreshSurface();
       this.post({ type: "permissionRequest", request: d.permission });
+      return;
+    }
+    // A decision that is not about a tool. Blocks the turn exactly as an
+    // approval does, and reads the same off screen, so it raises the same flag.
+    if (d.type === "user_dialog" && d.dialog) {
+      this.awaitingApproval = true;
+      this.refreshSurface();
+      this.post({ type: "userDialog", dialog: d.dialog });
+      return;
+    }
+    if (d.type === "user_dialog_resolved" && d.requestId) {
+      this.awaitingApproval = false;
+      this.refreshSurface();
+      this.post({ type: "userDialogResolved", requestId: d.requestId });
       return;
     }
     // The same prompt went to the phone, someone answered it there, and the CLI
@@ -2668,6 +2811,10 @@ function stripUndefined<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(
     Object.entries(value).filter(([, v]) => v !== undefined)
   ) as Partial<T>;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
 }
 
 function fmtTokens(n: number): string {

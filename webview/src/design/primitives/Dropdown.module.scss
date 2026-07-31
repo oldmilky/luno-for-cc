@@ -4,7 +4,6 @@
 // Not just for the Dropdown primitive: ModelPicker and SkillsPicker
 // import this module too and layer their own module on top, which is
 // how the three stay visually identical without a global class.
-// Converted from theme.css in Ф2а.
 // ─────────────────────────────────────────────────────────────
 
 .picker {
@@ -50,8 +49,34 @@
   right: 0;
 }
 
+// The option list is one grid and every row is a `subgrid` of it, so the label
+// column is a single width for the whole menu and every description starts at
+// the same x. Per-item grids cannot do this — each would size to its own
+// content, which is what put `Ask`'s note and `Bypass`'s note in different
+// places.
+//
+// Safe at this extension's floor: `engines.vscode` is ^1.90, which ships
+// Chromium 122, and subgrid landed in 117.
+//
+// Only `Dropdown.tsx` wears this. The other pickers import `.menu` from here
+// and bring their own rows.
+.options {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  // `width`, not `min-width`: a minimum outranks a maximum, so the clamp below
+  // could never fire and a 300px-wide sidebar scrolled sideways. The floor that
+  // remains is `.menu`'s own 220px, which is what it was before this widened
+  // anything — narrow panels are no worse off than they were.
+  width: 300px;
+  // 48px covers the composer's inset plus a hair; the menu hangs off `left: 0`
+  // of a control that is already indented.
+  max-width: calc(100vw - 48px);
+}
+
 .item {
-  display: flex;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
   gap: 9px;
   width: 100%;
@@ -92,10 +117,11 @@
 
 .main {
   font-weight: 600;
+  // It is a column now; wrapping it would move the boundary it defines.
+  white-space: nowrap;
 }
 
 .note {
-  flex: 1;
   color: var(--t4);
   font-size: 11px;
   font-weight: 500;

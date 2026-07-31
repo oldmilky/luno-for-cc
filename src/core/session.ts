@@ -66,7 +66,20 @@ export class Session {
     });
   }
 
-  addToolResult(toolUseId: string, content: string, isError = false) {
+  /**
+   * `blockedReason` names the case where the failure is a decision: the CLI's
+   * auto-mode classifier refused the call. What the model was told is still
+   * what goes into `messages` — that is the conversation, and editing it would
+   * make the transcript disagree with the model's memory. Only what the person
+   * reads changes, and it reads the reason rather than the paragraph of advice
+   * the CLI addressed to the model.
+   */
+  addToolResult(
+    toolUseId: string,
+    content: string,
+    isError = false,
+    blockedReason?: string
+  ) {
     const block: ContentBlock = {
       type: "tool_result",
       tool_use_id: toolUseId,
@@ -76,9 +89,9 @@ export class Session {
     this.messages.push({ role: "user", content: [block] });
     this.emit({
       kind: "tool_result",
-      title: isError ? "Tool Error" : "Tool Result",
-      body: content,
-      meta: { id: toolUseId }
+      title: blockedReason ? "Blocked" : isError ? "Tool Error" : "Tool Result",
+      body: blockedReason ?? content,
+      meta: blockedReason ? { id: toolUseId, blockedReason } : { id: toolUseId }
     });
   }
 

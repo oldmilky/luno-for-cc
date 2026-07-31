@@ -398,7 +398,7 @@ export function PlanFullView({
                   // The stagger lives here rather than in QuestionCard: the
                   // parent is the only one that knows the row's position.
                   <motion.div key={q.eventId} {...enterAt(i)}>
-                    <QuestionCard question={q} answer={ans} locked={locked} />
+                    <QuestionCard question={q} answer={ans} />
                   </motion.div>
                 );
               })}

@@ -19,9 +19,9 @@ reappears, something ran `npm install` and the two will drift.
 | ------------------- | ------------------------------------------------------------ |
 | All gates           | `bun run lint` (tsc ×2 → eslint → stylelint)                 |
 | Types only          | `bun run lint:types`                                         |
-| Tests               | `bun run test` — expect `874 passed, 6 skipped`              |
+| Tests               | `bun run test` — expect `1122 passed, 6 skipped`             |
 | Build               | `bun run build` (esbuild → dist/, vite → webview/dist/)      |
-| Package             | `bun run package` → `luno-for-cc-<ver>.vsix`, ~610 kB        |
+| Package             | `bun run package` → `luno-for-cc-<ver>.vsix`, ~627 kB        |
 | Format              | `bun run format` · check with `format:check`                 |
 | Autofix everything  | `bun run fix`                                                |
 | Browser harness     | `bun run harness` — the webview on localhost, see `/browser` |
@@ -32,6 +32,14 @@ reappears, something ran `npm install` and the two will drift.
 `bun run test` is the number to beat, and it is the only place it is written
 down. The gate is "this many or better"; anything less is a regression to
 explain, not a floor to lower.
+
+It runs **two projects** through `vitest.workspace.ts` and prints one summary:
+the host half in `test/` under `node`, and a component half in `webview/test/`
+under `jsdom`. The second is rooted in `webview/` on purpose — React lives only
+in `webview/node_modules`, and a component rendered against a second copy of it
+fails on the first `useState`. Rendering uses `react-dom/client` and React 19's
+own `act` rather than a testing-library dependency; `webview/test/render.tsx` is
+the whole of it.
 
 ## Architecture — three layers
 
@@ -72,7 +80,7 @@ Fire these without being asked. Each row is a trip-wire, not a suggestion.
 Never report work as complete without all four:
 
 1. `bun run lint` clean — that is tsc over **both** projects, eslint, stylelint
-2. `bun run test` at `874 passed, 6 skipped` or better
+2. `bun run test` at `1122 passed, 6 skipped` or better
 3. Behaviour verified where it runs — the harness for UI, tests for host logic
 4. Every claim tied to evidence actually seen: a command's output, a measured
    value, a screenshot
@@ -122,6 +130,18 @@ Each of these was invisible to the compiler and cost a debugging round.
   `useReducedMotion()` check.
 - **A disabled button dispatches no mouse events, and they do not reach its
   ancestors** — hit-testing stops there. That is why Tooltip has a gate span.
+- **`window.open` and `<a target="_blank">` do not reach the browser** from a
+  webview. Every outbound link goes `send({ type: "openExternal", url })` and the
+  host calls `vscode.env.openExternal`. The failure is silent: the click lands,
+  nothing happens.
+- **Every field on the protocol is optional, so a half-plumbed one typechecks.**
+  A value crosses five hops — card → `ChatScreen` → `App` → host → provider — and
+  adding it to four of them compiles clean and drops the value on the floor. When
+  adding a field, grep the name and count the hops.
+- **A native radio or checkbox cannot be made to match the design system.**
+  `accent-color` tints the control but the platform still draws a _square_ focus
+  ring around a round radio. Hide the input (visually, never `display: none` —
+  it carries the semantics and the tab order) and draw a sibling.
 
 ## Where the rest lives
 
@@ -131,8 +151,9 @@ Each of these was invisible to the compiler and cost a debugging round.
 | Comment policy in full                  | `.claude/rules/comments.md`     |
 | Naming and code style                   | `.claude/rules/code-style.md`   |
 | What lives where, sizes, seams          | `.claude/project-map.md`        |
-| Phase log, decisions, what was tried    | `docs/PLAN.md` _(local only)_   |
+| Why a decision went that way            | `docs/PLAN.md` _(local only)_   |
 | Design rationale                        | `docs/DESIGN.md` _(local only)_ |
+| Audits — measured findings, with proof  | `.claude/audits/`               |
 
 `docs/PLAN.md` and `docs/DESIGN.md` are gitignored — working notes, not part of
 the published repo. Read them for context; do not assume a reader of the

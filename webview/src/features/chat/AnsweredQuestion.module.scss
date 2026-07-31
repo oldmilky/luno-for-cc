@@ -1,0 +1,64 @@
+// ─────────────────────────────────────────────────────────────
+// Answered question — a transcript record, not a card.
+//
+// Sits with the compaction and remote-approval rows in weight, but
+// keeps a left rule instead of their centred divider: this can carry
+// several lines, and a divider through the middle of a list reads as
+// a separator between them rather than around the whole thing.
+// ─────────────────────────────────────────────────────────────
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 14px 0;
+  padding-left: 9px;
+  border-left: 2px solid var(--b2);
+}
+
+.icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--t3);
+  line-height: 1;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.prompt {
+  color: var(--t3);
+
+  &::after {
+    content: "→";
+    margin-left: 8px;
+    opacity: 0.6;
+  }
+}
+
+// The one thing worth reading here: what the user decided.
+.answer {
+  min-width: 0;
+  color: var(--t1);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.unanswered {
+  color: var(--t4);
+  font-style: italic;
+}

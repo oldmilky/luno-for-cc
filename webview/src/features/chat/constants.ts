@@ -132,10 +132,19 @@ export const MODES: ReadonlyArray<ModeOption> = [
     icon: "book"
   },
   {
+    value: "acceptEdits",
+    label: "Edits",
+    short: "Edits",
+    note: "Applies edits · still asks before running anything",
+    icon: "edit"
+  },
+  {
     value: "auto",
     label: "Agent",
     short: "Agent",
-    note: "Autonomous · auto-runs safe reads & commands",
+    // What decides, not what it decides — the list of safe things was the old
+    // implementation, and the safety check reads the conversation now.
+    note: "Autonomous · a safety check judges each action",
     icon: "bolt"
   },
   {

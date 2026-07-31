@@ -15,16 +15,24 @@ import { onMessage } from "./rpc";
 
 export interface WebviewSettings {
   useCtrlEnterToSend: boolean;
+  /** `luno.startupSuggestions` verbatim; the empty state resolves it. */
+  startupSuggestions: ReadonlyArray<string>;
 }
 
-let current: WebviewSettings = { useCtrlEnterToSend: false };
+let current: WebviewSettings = {
+  useCtrlEnterToSend: false,
+  startupSuggestions: []
+};
 const listeners = new Set<() => void>();
 
 /** Start listening. Called once at boot, beside the other message wiring. */
 export function subscribeToSettings(): () => void {
   return onMessage((m) => {
     if (m.type !== "settings") return;
-    current = { useCtrlEnterToSend: m.useCtrlEnterToSend };
+    current = {
+      useCtrlEnterToSend: m.useCtrlEnterToSend,
+      startupSuggestions: m.startupSuggestions
+    };
     for (const notify of listeners) notify();
   });
 }

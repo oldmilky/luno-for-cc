@@ -11,20 +11,28 @@ import {
 } from "../core/tool-grants.js";
 import {
   ContentBlock,
+  DialogKind,
   Message,
   PermissionBehavior,
   PermissionMode,
   PermissionRequestPayload,
   PermissionSuggestion,
   RemoteControlStatus,
+  SUPPORTED_DIALOG_KINDS,
   isTerminalTaskStatus,
   StreamDelta,
   SubagentPhase,
   SubagentUpdate,
   TaskType,
+  UserDialogPayload,
   WorkflowProgressEntry
 } from "../core/types.js";
-import { getModePrompt, getTaskTypePrompt } from "../services/prompt-loader.js";
+import {
+  getCommonPrompt,
+  getModePrompt,
+  getTaskTypePrompt
+} from "../services/prompt-loader.js";
+import { askUserQuestionTimeoutMs } from "../services/claude-settings.js";
 import { ConventionsFile } from "../services/conventions.js";
 
 /**
@@ -98,11 +106,21 @@ const TASK_REPORT_GRACE_MS = 15 * 1000;
  *  PlanInterceptor (plan cards, question cards). When the CLI routes a
  *  permission prompt for one of these to us, auto-allow it so we don't also pop
  *  a generic file-permission card on top of the purpose-built surface. */
-const PERMISSION_AUTO_ALLOW = new Set([
-  "ExitPlanMode",
-  "TodoWrite",
-  "AskUserQuestion"
-]);
+const PERMISSION_AUTO_ALLOW = new Set(["ExitPlanMode", "TodoWrite"]);
+
+/** Tools whose permission request IS the question, not a gate in front of one.
+ *
+ *  `AskUserQuestion` computes nothing: the CLI echoes back whatever input it
+ *  was handed, so the user's choices reach the model only by being written into
+ *  the `updatedInput` of our "allow". Approving it unchanged is a well-formed,
+ *  semantically empty answer, and the CLI's own wording for that is the sentence
+ *  this list exists to stop producing — "The user did not answer the questions."
+ *
+ *  Checked ahead of every mode, including agent/bypass. The tool reports itself
+ *  read-only and touches neither disk nor network, so every auto-allow branch
+ *  below would otherwise answer it on the user's behalf. A question is not a
+ *  permission: no mode may supply input the person was asked for. */
+const INTERACTIVE_TOOLS = new Set(["AskUserQuestion"]);
 
 /** Reversible file-mutation tools. "Allow edits for this turn" auto-approves
  *  ONLY these — never Bash, deletes, or network — so the destructive/network
@@ -327,13 +345,14 @@ function isReadOnlyMcpTool(toolName: string): boolean {
 }
 
 /** The CLI only services interactive per-tool approval over the stream-json
- *  control channel; that's `default` and `auto`. `plan` stays read-only and
- *  keeps the simpler text-input invocation (the plan flow handles its own
- *  approval via ExitPlanMode). `bypass` needs no channel either — the CLI
- *  approves everything itself and never asks, so keeping stdin open for
+ *  control channel; that's `default`, `acceptEdits` and `auto` — acceptEdits
+ *  waves edits through and still asks about everything else. `plan` stays
+ *  read-only and keeps the simpler text-input invocation (the plan flow handles
+ *  its own approval via ExitPlanMode). `bypass` needs no channel either — the
+ *  CLI approves everything itself and never asks, so keeping stdin open for
  *  control responses that can never arrive would be dead weight. */
 function usesPermissionProtocol(mode: PermissionMode): boolean {
-  return mode === "default" || mode === "auto";
+  return mode === "default" || mode === "acceptEdits" || mode === "auto";
 }
 
 export interface ClaudeCliOpts {
@@ -349,6 +368,17 @@ export interface ClaudeCliOpts {
   /** Skill ids the user toggled OFF in the picker. Enforced via
    *  --disallowedTools "Skill(<id>)" plus a system-prompt append. */
   disabledSkills?: string[];
+  /**
+   * The model the next turn will ask for.
+   *
+   * Read by spawns that have **no turn behind them** — the Remote Control
+   * toggle is the only one — and nowhere else: a turn carries its own model on
+   * the `ProviderRequest`. It exists because argv built without a model makes a
+   * different `--effort` decision than argv built with one, and the two have to
+   * match or `respawnFingerprint` reads a bridge toggle as a settings change
+   * and replaces the process the phone is attached to.
+   */
+  model?: string;
   /** Heuristic task classification — drives task-type playbook injection
    *  in plan mode only. */
   taskType?: TaskType;
@@ -392,6 +422,18 @@ export interface ClaudeCliOpts {
    * so it pins `--effort xhigh` rather than replacing it.
    */
   ultracode?: boolean;
+  /**
+   * Whether this conversation has work that a process replacement would
+   * destroy — a turn in flight, or a background agent that has not reported.
+   *
+   * Read at the top of every turn, not captured: the answer changes while the
+   * user sits in the settings. Absent, a replacement happens as it always did.
+   */
+  hasLiveWork?: () => boolean;
+  /** Told which of the user's choices this process is not honouring yet, so the
+   *  panel can mark those controls rather than lie about them. Called with an
+   *  empty list whenever a fresh process makes the question moot. */
+  onSettingsPending?: (pending: PendingSetting[]) => void;
   /** Stall budget (ms) for latency-bounded tools (WebFetch/WebSearch). If one
    *  doesn't return a result within this window the turn is stopped cleanly.
    *  Defaults to WEB_TOOL_STALL_MS. */
@@ -484,10 +526,58 @@ interface CliSession {
    *  them back. It echoes ours alongside the phone's, and this is what tells
    *  them apart — see takeEcho(). */
   pendingEchoes: Set<string>;
+  /** The turn preamble this session has already been told, so an unchanged one
+   *  is not repeated on every message — see `writeUserMessage`. */
+  preamble?: string;
   /** The task-type playbook this process was spawned with. Held for the life of
    *  the session: it rides on `--append-system-prompt`, which cannot be changed
    *  on a running CLI, and reclassifying per turn replaced the process. */
   taskType?: TaskType;
+  /** The posture this process was actually spawned with, against which a later
+   *  turn's wishes are compared. Only for naming what is outstanding while a
+   *  replacement is deferred — see `pendingSettings`. */
+  spawnedWith: ClaudeCliOpts;
+}
+
+/** A composer control whose setting cannot reach a running CLI. */
+export type PendingSetting = "mode" | "effort" | "thinking" | "skills";
+
+/**
+ * Which of the user's choices this process is not honouring yet.
+ *
+ * Measured against 2.1.219: the CLI takes exactly five settings on a live
+ * session — `set_cwd`, `set_model`, `set_permission_mode`,
+ * `set_max_thinking_tokens`, `set_mcp_permission_mode_override`. Everything
+ * else rides on argv, and argv is fixed at spawn. The official extension makes
+ * the same trade and simply offers no way to change effort mid-channel; we
+ * defer instead, which is only honest if the panel says so.
+ *
+ * `mode` is listed even though `set_permission_mode` exists, because the mode
+ * also carries an `--append-system-prompt` block: the enforcement changes
+ * immediately, the posture prompt does not.
+ */
+export function pendingSettings(
+  spawned: ClaudeCliOpts,
+  wanted: ClaudeCliOpts
+): PendingSetting[] {
+  const pending: PendingSetting[] = [];
+  if (
+    (spawned.permissionMode ?? "default") !==
+    (wanted.permissionMode ?? "default")
+  ) {
+    pending.push("mode");
+  }
+  if (
+    spawned.effort !== wanted.effort ||
+    spawned.ultracode !== wanted.ultracode
+  ) {
+    pending.push("effort");
+  }
+  if (spawned.thinking !== wanted.thinking) pending.push("thinking");
+  const before = [...(spawned.disabledSkills ?? [])].sort().join(" ");
+  const after = [...(wanted.disabledSkills ?? [])].sort().join(" ");
+  if (before !== after) pending.push("skills");
+  return pending;
 }
 
 /** How long the next turn waits for an interrupted one to report its `result`
@@ -532,6 +622,9 @@ export class ClaudeCliProvider implements ChatProvider {
    *  proposed input + suggestions so respondToPermission() can echo the input
    *  back on "allow" and honor the CLI's "accept this session" suggestion. */
   private pendingPermissions = new Map<string, PermissionRequestPayload>();
+  /** In-flight `request_user_dialog`s, by control-request id. Its own map, so
+   *  a cancel that clears a permission cannot take a dialog with it. */
+  private pendingDialogs = new Map<string, UserDialogPayload>();
   /** Set while a turn is streaming: ends the stream immediately (so cancel
    *  doesn't have to wait for the child's exit event, which can lag when the
    *  turn is paused on a permission prompt or the CLI has MCP subprocesses). */
@@ -541,8 +634,52 @@ export class ClaudeCliProvider implements ChatProvider {
    *  WITHOUT switching the CLI to acceptEdits, which would also auto-run every
    *  Bash command (incl. `rm`) and silently disable the destructive gate. */
   private autoAllowEdits = false;
+  /**
+   * The permission mode the running CLI reported at `system/init` — the mode it
+   * actually took, which is not always the one we asked for.
+   *
+   * `auto` can be refused: the account's rollout, the model, or a
+   * `disableAutoMode` policy each turn it off, and measured against 2.1.219 the
+   * CLI then downgrades **in silence** — no error, no warning, and `init`
+   * carrying `permissionMode: "default"` instead. This field is the only place
+   * that difference is visible, and `nativeAutoLive()` is what reads it.
+   *
+   * Cleared on every spawn: a mode belongs to the process that announced it.
+   */
+  private cliPermissionMode: string | undefined;
 
   constructor(private opts: ClaudeCliOpts) {}
+
+  /**
+   * True when the CLI is running its own classifier for this conversation, so
+   * a `can_use_tool` arriving here is something it declined to judge rather
+   * than the first look anyone has had at the call.
+   *
+   * Unknown counts as live. Before `init` lands there is nothing to read, and
+   * the two ways of being wrong are not symmetric: guessing "the CLI decides"
+   * costs an approval card for something that would have passed, guessing the
+   * other way auto-approves a call the classifier escalated on purpose.
+   */
+  private nativeAutoLive(): boolean {
+    if ((this.opts.permissionMode ?? "default") !== "auto") return false;
+    return (
+      this.cliPermissionMode === undefined || this.cliPermissionMode === "auto"
+    );
+  }
+
+  /** Record what `system/init` says the mode is. Read off the raw line rather
+   *  than through the processor because only the permission path wants it. */
+  private noteEffectiveMode(ev: CliEvent): void {
+    if (ev.type !== "system" || ev.subtype !== "init") return;
+    if (typeof ev.permissionMode !== "string") return;
+    this.cliPermissionMode = ev.permissionMode;
+    const asked = mapPermissionMode(this.opts.permissionMode ?? "default");
+    if (ev.permissionMode !== asked) {
+      logInfo(
+        `[luno] the CLI took permission mode ${ev.permissionMode}, not ${asked} — falling back to Luno's own policy`
+      );
+    }
+  }
 
   cancel() {
     // End the async stream *now* — don't wait for the SIGTERM→exit round-trip.
@@ -554,6 +691,7 @@ export class ClaudeCliProvider implements ChatProvider {
     // already blocked on. Left unanswered it blocks forever with no card left
     // on screen to answer it.
     this.denyPendingPermissions("Cancelled by the user.");
+    this.cancelPendingDialogs();
     // In session mode the process is the session: killing it would end the
     // conversation and drop any Remote Control bridge, when all the user asked
     // for was to stop this turn. Interrupt over the control channel instead.
@@ -593,11 +731,23 @@ export class ClaudeCliProvider implements ChatProvider {
    * Answer a pending permission prompt. Writes the matching `control_response`
    * back to the CLI over stdin so the blocked tool call can proceed (allow) or
    * be rejected (deny). No-op if the turn already ended.
+   *
+   * `opts.updatedInput` replaces the input the CLI proposed. For most tools
+   * there is nothing to replace and it is omitted; for `AskUserQuestion` it is
+   * the entire point, since that tool's result is the input it was handed back.
+   *
+   * `opts.reason` is what the user typed instead of just refusing. It changes
+   * the denial's wording rather than being appended to it — see
+   * {@link denialMessage}.
    */
   respondToPermission(
     requestId: string,
     behavior: PermissionBehavior,
-    opts?: { restOfTurn?: boolean }
+    opts?: {
+      restOfTurn?: boolean;
+      updatedInput?: Record<string, unknown>;
+      reason?: string;
+    }
   ): void {
     const pending = this.pendingPermissions.get(requestId);
     // No matching pending prompt → this is a duplicate or stale answer (the
@@ -611,18 +761,27 @@ export class ClaudeCliProvider implements ChatProvider {
       return;
     }
     this.pendingPermissions.delete(requestId);
-    logInfo(
-      `[luno] permission ${behavior} for ${pending.toolName} (${requestId})`
-    );
+    let delivered: boolean;
     if (behavior === "allow") {
-      this.writeControl({
+      const edited = opts?.updatedInput;
+      // An edited call is a different call, and the approval the user just gave
+      // was for the one on the card. Re-classify before it goes anywhere: `ls`
+      // turned into `rm -rf /` inside an already-open card must not inherit the
+      // decision that was made about `ls`. The card comes back carrying the new
+      // reading, and a deliberate second Allow sends it — which is exactly the
+      // gate a destructive call is supposed to pass through.
+      if (edited && this.raiseEditedAgain(requestId, pending, edited)) return;
+      delivered = this.writeControl({
         type: "control_response",
         response: {
           subtype: "success",
           request_id: requestId,
-          // The CLI requires the (possibly edited) input echoed back; we pass
-          // the original proposal through unchanged.
-          response: { behavior: "allow", updatedInput: pending?.input ?? {} }
+          // The CLI requires the (possibly edited) input echoed back. A caller
+          // that edited it says so; everyone else gets the original proposal.
+          response: {
+            behavior: "allow",
+            updatedInput: edited ?? pending.input ?? {}
+          }
         }
       });
       // "Allow for the rest of this turn" — auto-approve further EDITS ourselves
@@ -634,57 +793,239 @@ export class ClaudeCliProvider implements ChatProvider {
         this.autoAllowEdits = true;
       }
     } else {
-      this.writeControl({
+      delivered = this.writeControl({
         type: "control_response",
         response: {
           subtype: "success",
           request_id: requestId,
           response: {
             behavior: "deny",
-            // Tell the model to stop rather than retry the same call — without
-            // this it often re-proposes the action and the user gets prompted
-            // again and again.
-            message:
-              "The user denied permission for this action and does not want it performed. Do not retry it or attempt an alternative way to achieve the same thing. Stop and briefly explain, or ask the user how they would like to proceed."
+            message: denialMessage(opts?.reason)
           }
         }
       });
     }
+    // Logged after the write, and saying which of the two happened. Written
+    // before, this line claimed every approval reached the CLI — including the
+    // ones answered into a process that had already exited, which is the case
+    // a background agent's card makes reachable.
+    logInfo(
+      delivered
+        ? `[luno] permission ${behavior} for ${pending.toolName} (${requestId})`
+        : `[luno] permission ${behavior} for ${pending.toolName} went nowhere — the CLI process is gone`
+    );
   }
 
-  private writeControl(obj: unknown): void {
+  /**
+   * An edited "allow" whose new input reads more dangerous than the one on the
+   * card. Puts the prompt back, carrying the new reading, and answers nothing.
+   *
+   * Returns true when it did that, meaning the caller must not send the allow.
+   *
+   * Why re-ask rather than refuse: the edit is the user's own, and refusing it
+   * would be the client second-guessing them. What must not happen is the
+   * *original* approval carrying a call it was never given for. One re-ask
+   * settles both — `pendingPermissions` now holds the edited input, so a
+   * deliberate second Allow sends it unchanged and this returns false.
+   *
+   * Only escalation re-asks. An edit that makes a call safer (`rm -rf x` into
+   * `ls x`) goes straight through: the user already had approval for the worse
+   * of the two.
+   */
+  private raiseEditedAgain(
+    requestId: string,
+    pending: PermissionRequestPayload,
+    edited: Record<string, unknown>
+  ): boolean {
+    const before = pending.destructive === true || pending.network === true;
+    if (before) return false;
+    const destructive = isDestructiveRequest(pending.toolName, edited);
+    const network = isNetworkRequest(pending.toolName, edited);
+    if (!destructive && !network) return false;
+
+    const next: PermissionRequestPayload = {
+      ...pending,
+      input: edited,
+      destructive,
+      network,
+      // The CLI wrote it about the call it proposed. Measured in a live run:
+      // an edited `rm -rf node_modules` came back still captioned "Create
+      // probe-dir directory" — a description of the command it is not.
+      description: undefined,
+      // Both are unofferable on a destructive or network call anyway; naming it
+      // here keeps the re-asked card from reading as the one just answered.
+      grantLabel: undefined,
+      suggestions: []
+    };
+    this.pendingPermissions.set(requestId, next);
+    logInfo(
+      `[luno] edited ${pending.toolName} re-classified as ${destructive ? "destructive" : "network"} — asking again`
+    );
+    const d: StreamDelta = { type: "permission_request", permission: next };
+    if (this.session?.sink) this.session.sink(d);
+    else this.opts.onOutOfTurn?.(d);
+    return true;
+  }
+
+  /** @returns false when the child is gone and the answer went nowhere. The
+   *  bare write this used to be reported an approval into a closed pipe as
+   *  success — the one thing a permission answer must never do. */
+  private writeControl(obj: unknown): boolean {
+    const stdin = this.child?.stdin;
+    if (!stdin || stdin.destroyed || stdin.writableEnded) return false;
     try {
-      this.child?.stdin?.write(JSON.stringify(obj) + "\n");
+      stdin.write(JSON.stringify(obj) + "\n");
+      return true;
     } catch {
-      /* stdin already closed — the child has exited; nothing to do. */
+      return false;
+    }
+  }
+
+  /**
+   * Answer a control request this client does not implement.
+   *
+   * An empty success is not a neutral acknowledgement — for several subtypes
+   * it is a malformed answer that claims we did something. Each one that has a
+   * defined "I cannot" is given that instead:
+   *
+   * - `elicitation` — an MCP server asking the user for input mid-call. The
+   *   SDK's own answer with no handler is `{action:"decline"}`; `{}` tells the
+   *   server we succeeded at a prompt nobody saw.
+   * `request_user_dialog` is handled properly by {@link raiseUserDialog} and
+   * never reaches here for a kind we declared. A kind we did not — the CLI
+   * should not send one, but the list is its bookkeeping, not ours — is
+   * answered with the cancel every dialog defaults to anyway.
+   *
+   * Everything else keeps the empty ack, which is right for the subtypes that
+   * only want to know we are alive.
+   */
+  private answerUnhandledRequest(requestId: string, subtype?: string): void {
+    const response =
+      subtype === "elicitation" ? { action: "decline" } : ({} as const);
+    this.writeControl({
+      type: "control_response",
+      response: { subtype: "success", request_id: requestId, response }
+    });
+  }
+
+  /**
+   * A dialog the CLI is blocked on: not a tool call, a decision.
+   *
+   * Held like a permission — the id has to survive until someone answers, and
+   * the CLI can withdraw it — but kept in its own map so a cancel that clears
+   * one cannot take the other with it.
+   */
+  private raiseUserDialog(
+    requestId: string,
+    req: NonNullable<CliEvent["request"]>,
+    push: (d: StreamDelta) => void
+  ): void {
+    const kind = req.dialog_kind;
+    // Only what we declared. Anything else is answered with its own default
+    // rather than shown: a card we cannot draw is worse than none, because it
+    // is the thing holding the turn.
+    if (
+      !kind ||
+      !(SUPPORTED_DIALOG_KINDS as readonly string[]).includes(kind)
+    ) {
+      logInfo(`[luno] dialog ${kind ?? "?"} not declared — cancelling`);
+      this.respondToDialog(requestId, undefined, { force: true });
+      return;
+    }
+    const dialog: UserDialogPayload = {
+      requestId,
+      kind: kind as DialogKind,
+      payload: req.payload ?? {},
+      toolUseId: req.tool_use_id
+    };
+    this.pendingDialogs.set(requestId, dialog);
+    logInfo(`[luno] dialog needed: ${kind} — awaiting user`);
+    push({ type: "user_dialog", dialog });
+  }
+
+  /**
+   * Answer a dialog. `result` absent means cancelled, which is what every kind
+   * falls back to and what a closed panel, a dead turn or a rewind must send.
+   *
+   * `force` answers an id we are no longer holding — used when declining a
+   * kind we never took, where there is nothing to forget.
+   */
+  respondToDialog(
+    requestId: string,
+    result?: unknown,
+    opts?: { force?: boolean }
+  ): void {
+    if (!this.pendingDialogs.delete(requestId) && !opts?.force) {
+      logInfo(`[luno] dialog response for unknown id ${requestId} — ignored`);
+      return;
+    }
+    logInfo(
+      `[luno] dialog ${result === undefined ? "cancelled" : String(result)} (${requestId})`
+    );
+    this.writeControl({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: requestId,
+        response:
+          result === undefined
+            ? { behavior: "cancelled" }
+            : { behavior: "completed", result }
+      }
+    });
+  }
+
+  /** Cancel every dialog still outstanding. A dialog nobody can answer any
+   *  more holds the CLI exactly as a permission would. */
+  private cancelPendingDialogs(): void {
+    for (const id of [...this.pendingDialogs.keys()]) {
+      this.respondToDialog(id);
     }
   }
 
   /** Route a CLI control request. `can_use_tool` becomes a permission prompt;
-   *  anything else is acknowledged so the CLI never blocks on us. */
+   *  anything else is answered by {@link answerUnhandledRequest}. */
   private handleControlRequest(
     ev: CliEvent,
     push: (d: StreamDelta) => void
   ): void {
     const requestId = ev.request_id;
     const req = ev.request;
+    if (requestId && req?.subtype === "request_user_dialog") {
+      this.raiseUserDialog(requestId, req, push);
+      return;
+    }
     if (!requestId || !req || req.subtype !== "can_use_tool") {
-      if (requestId) {
-        this.writeControl({
-          type: "control_response",
-          response: { subtype: "success", request_id: requestId, response: {} }
-        });
-      }
+      if (requestId) this.answerUnhandledRequest(requestId, req?.subtype);
       return;
     }
     const toolName = req.tool_name ?? "tool";
+    const interactive = req.requires_user_interaction === true;
+    // Agent mode has two implementations and exactly one of them is in force.
+    // With the CLI's classifier live our policy steps back to the rungs that
+    // carry a user's own decision; without it, our policy is Agent mode.
+    const cliClassified = this.nativeAutoLive();
+    if (cliClassified) {
+      logInfo(
+        `[luno] auto mode escalated ${toolName} (${req.decision_reason_type ?? "no reason given"})`
+      );
+    }
     const { action, destructive, network } = decidePermission(
       toolName,
       req.input,
       {
         autoAllowEdits: this.autoAllowEdits,
-        agentMode: (this.opts.permissionMode ?? "default") === "auto",
-        grants: this.opts.getToolGrants?.()
+        agentMode:
+          (this.opts.permissionMode ?? "default") === "auto" && !cliClassified,
+        cliClassified,
+        grants: this.opts.getToolGrants?.(),
+        interactive,
+        // The session's own mode, not the setting: Proceed changes the setting
+        // and respawns, so mid-turn the live process is the only truth here.
+        planMode:
+          (this.session?.permissionMode ??
+            this.opts.permissionMode ??
+            "default") === "plan"
       }
     );
     if (action === "allow") {
@@ -698,6 +1039,21 @@ export class ClaudeCliProvider implements ChatProvider {
       });
       return;
     }
+    if (action === "deny") {
+      logInfo(`[luno] ${toolName} refused — staying in plan mode`);
+      this.writeControl({
+        type: "control_response",
+        response: {
+          subtype: "success",
+          request_id: requestId,
+          // No `interrupt`, unlike the reference client. Interrupting takes
+          // every running background agent with it, and the message alone
+          // already tells the model to keep planning.
+          response: { behavior: "deny", message: STAYED_IN_PLAN_MODE }
+        }
+      });
+      return;
+    }
     const payload: PermissionRequestPayload = {
       requestId,
       toolName,
@@ -707,7 +1063,25 @@ export class ClaudeCliProvider implements ChatProvider {
       destructive,
       network,
       suggestions: (req.permission_suggestions ?? []) as PermissionSuggestion[],
-      grantLabel: offeredGrantLabel(toolName, req.input, destructive, network)
+      // The CLI can say a standing grant is off the table for this call. It
+      // knows things we do not — the rule that routed it here, whether the
+      // classifier could approve it — so an "Always" button offered against
+      // its wishes is one whose promise we cannot keep.
+      grantLabel:
+        req.suppress_always_allow_rule === true
+          ? undefined
+          : offeredGrantLabel(
+              toolName,
+              req.input,
+              destructive,
+              network,
+              interactive
+            ),
+      ...(req.agent_id ? { agentId: req.agent_id } : {}),
+      // Read per request rather than at spawn: the file is small, this path
+      // runs a handful of times a turn, and a setting changed mid-session
+      // should not need a window reload to take effect.
+      ...((INTERACTIVE_TOOLS.has(toolName) || interactive) && afkTimeout())
     };
     this.pendingPermissions.set(requestId, payload);
     logInfo(
@@ -743,6 +1117,8 @@ export class ClaudeCliProvider implements ChatProvider {
       stdio: ["pipe", "pipe", "pipe"]
     });
     this.child = child;
+    // A mode belongs to the process that announced it; this one has not spoken.
+    this.cliPermissionMode = undefined;
 
     // Deliver the user turn as a stream-json message. stdin is intentionally
     // left OPEN — it is closed by endTurn(), which is what ends the turn.
@@ -877,6 +1253,7 @@ export class ClaudeCliProvider implements ChatProvider {
     // next tick regardless of when the child actually exits.
     this.abortCurrent = () => {
       this.denyPendingPermissions("Cancelled by the user.");
+      this.cancelPendingDialogs();
       stallWatch?.clearAll();
       // Routed through endTurn so a pending background-agent grace timer is
       // cleared too — Stop must not leave one armed to fire a minute later.
@@ -959,6 +1336,7 @@ export class ClaudeCliProvider implements ChatProvider {
       } catch {
         return;
       }
+      this.noteEffectiveMode(ev);
       // Bidirectional control protocol (only live with --permission-prompt-tool
       // stdio). Handled here rather than in the pure event processor because
       // answering a request means writing back to the child's stdin.
@@ -1097,9 +1475,15 @@ export class ClaudeCliProvider implements ChatProvider {
     // Control means a new session URL and a phone that goes quiet. A running
     // session keeps the playbook it was spawned with; the next process picks up
     // whatever is current.
-    const taskType = this.session?.exited
-      ? this.opts.taskType
-      : (this.session?.taskType ?? this.opts.taskType);
+    // A live session keeps the playbook it was spawned with — *including none*.
+    // The `??` this replaces could not tell "spawned without one" from "not
+    // set", so a process the `/rc` toggle spawned before any turn had been
+    // classified got a task-type `--append-system-prompt` on its very next
+    // turn, differing argv, and a replacement. The cost is a conversation
+    // started that way running without a playbook until its process is next
+    // replaced, which is the trade the paragraph above already makes.
+    const live = this.session?.exited ? null : this.session;
+    const taskType = live ? live.taskType : this.opts.taskType;
     const args = buildArgs(userText, req.model, { ...this.opts, taskType });
     let session: CliSession;
     try {
@@ -1116,9 +1500,15 @@ export class ClaudeCliProvider implements ChatProvider {
     let resolver: (() => void) | null = null;
     let ended = false;
     let stallWatch: ToolStallWatchdog | null = null;
+    /** Prompts raised while this turn held the sink — the ones it may retire
+     *  when it ends. One raised out of turn belongs to nobody's turn. */
+    const raisedHere = new Set<string>();
     const push = (d: StreamDelta) => {
       stallWatch?.observe(d);
       if (d.type === "done") ended = true;
+      if (d.type === "permission_request" && d.permission) {
+        raisedHere.add(d.permission.requestId);
+      }
       queue.push(d);
       resolver?.();
       resolver = null;
@@ -1145,6 +1535,7 @@ export class ClaudeCliProvider implements ChatProvider {
 
     this.abortCurrent = () => {
       this.denyPendingPermissions("Cancelled by the user.");
+      this.cancelPendingDialogs();
       stallWatch?.clearAll();
       push({ type: "done" });
     };
@@ -1154,17 +1545,23 @@ export class ClaudeCliProvider implements ChatProvider {
     // end this turn before it has said anything.
     await waitUntilIdle(session);
 
-    session.sink = push;
-    session.busy = true;
-    const uuid = this.writeUserMessage(session, userText);
-    if (!uuid) {
-      session.sink = null;
-      this.abortCurrent = null;
-      yield {
-        type: "error",
-        error: "The Claude session is no longer accepting input."
-      };
-      return;
+    // Stop pressed while we waited. `abortCurrent` has already queued this
+    // turn's `done`, and writing now would send a prompt the user cancelled
+    // into a turn nothing is reading. Falling through rather than returning, so
+    // that queued `done` still reaches the caller.
+    if (!ended) {
+      session.sink = push;
+      session.busy = true;
+      const uuid = this.writeUserMessage(session, userText);
+      if (!uuid) {
+        session.sink = null;
+        this.abortCurrent = null;
+        yield {
+          type: "error",
+          error: "The Claude session is no longer accepting input."
+        };
+        return;
+      }
     }
 
     try {
@@ -1182,7 +1579,11 @@ export class ClaudeCliProvider implements ChatProvider {
     } finally {
       stallWatch?.clearAll();
       this.abortCurrent = null;
-      this.pendingPermissions.clear();
+      // Only this turn's prompts. A background agent outlives the turn that
+      // launched it, so the one it raises minutes later has no turn to end —
+      // clearing the whole map here destroyed its request id and left the CLI
+      // blocked on an answer nobody could give any more.
+      for (const id of raisedHere) this.pendingPermissions.delete(id);
       // Hand the reader back to the out-of-turn sink. Guarded because a turn
       // that overlapped a replacement session must not detach the new one.
       if (session.sink === push) session.sink = null;
@@ -1213,6 +1614,21 @@ export class ClaudeCliProvider implements ChatProvider {
         if (req) this.applyLiveOptions(live, req);
         return live;
       }
+      // A replacement kills every background agent in the process, and the
+      // user changing effort was not asking for that. Hold the old argv until
+      // the work drains: `buildArgs` runs again next turn, so nothing needs
+      // storing — the difference is simply re-found once it is safe to act on.
+      // Whatever the control channel *can* carry still goes now.
+      if (this.opts.hasLiveWork?.()) {
+        logInfo(
+          `[luno] session options changed but work is outstanding — deferring: ${argvDiff(live.args, args)}`
+        );
+        if (req) this.applyLiveOptions(live, req);
+        this.opts.onSettingsPending?.(
+          pendingSettings(live.spawnedWith, this.opts)
+        );
+        return live;
+      }
       // Names the flag rather than just the fact. A replacement is invisible
       // from the panel and expensive under Remote Control — it hands the phone
       // a session URL it is not holding — so when one happens the log has to
@@ -1229,6 +1645,8 @@ export class ClaudeCliProvider implements ChatProvider {
       env: this.childEnv(req?.maxTokens),
       stdio: ["pipe", "pipe", "pipe"]
     });
+    // A mode belongs to the process that announced it; this one has not spoken.
+    this.cliPermissionMode = undefined;
     const session: CliSession = {
       child,
       args,
@@ -1244,10 +1662,14 @@ export class ClaudeCliProvider implements ChatProvider {
       taskType,
       busy: false,
       idleWaiters: [],
-      pendingEchoes: new Set()
+      pendingEchoes: new Set(),
+      spawnedWith: this.opts
     };
     this.session = session;
     this.child = child;
+    // A fresh process is honouring everything, whatever it was failing to
+    // honour a moment ago.
+    this.opts.onSettingsPending?.([]);
 
     child.stderr?.on("data", (b: Buffer) => {
       session.stderr += b.toString("utf8");
@@ -1271,6 +1693,7 @@ export class ClaudeCliProvider implements ChatProvider {
       } catch {
         return;
       }
+      this.noteEffectiveMode(ev);
       if (ev.type === "control_request") {
         this.handleControlRequest(ev, route);
         return;
@@ -1292,6 +1715,12 @@ export class ClaudeCliProvider implements ChatProvider {
             requestId: ev.request_id,
             permission: withdrawn
           });
+        }
+        // Dialogs are withdrawn the same way, and more often: the CLI retires
+        // one the moment a new user message makes it moot. No response goes
+        // back — the id is already forgotten on its side.
+        if (ev.request_id && this.pendingDialogs.delete(ev.request_id)) {
+          route({ type: "user_dialog_resolved", requestId: ev.request_id });
         }
         return;
       }
@@ -1325,11 +1754,14 @@ export class ClaudeCliProvider implements ChatProvider {
         if (isCliControlMarker(prompt)) return;
         if (takeEcho(session.pendingEchoes, ev.uuid)) {
           // Ours. With a turn reading, the message was taken into that turn and
-          // there is nothing to announce. With none — a steered message that
-          // found no tool boundary before the turn ended — the CLI is opening a
-          // turn of its own to answer it, and that answer needs a turn here to
-          // arrive into.
-          if (!session.sink) {
+          // there is nothing to announce. Same when the session is busy without
+          // a sink — that is a turn another surface started, which is already
+          // carrying the message, and opening one here would close the queue
+          // receiving its answer mid-sentence. With neither — a steered message
+          // that found no tool boundary before the turn ended — the CLI is
+          // opening a turn of its own to answer it, and that answer needs a
+          // turn here to arrive into.
+          if (!session.sink && !session.busy) {
             session.busy = true;
             route({ type: "steer_turn", prompt });
           }
@@ -1354,6 +1786,11 @@ export class ClaudeCliProvider implements ChatProvider {
         // mid-turn, and this `result` would end it before it had said anything.
         if (ev.origin?.kind === "task-notification" && session.busy) return;
         session.busy = false;
+        // The same invariant `stream()` holds, applied where a turn actually
+        // ends in session mode. A turn the phone or a steered message started
+        // never enters `stream()`, so without this an "allow edits this turn"
+        // granted once becomes a standing grant for every later such turn.
+        this.autoAllowEdits = false;
         for (const wake of session.idleWaiters.splice(0)) wake();
         route({ type: "done" });
       }
@@ -1383,12 +1820,15 @@ export class ClaudeCliProvider implements ChatProvider {
       if (unexpected && said.length) {
         route({ type: "error", error: said.join("\n") });
       }
+      this.settleOnSessionGone(route);
       route({ type: "done", sessionEnded: true });
     });
     child.once("error", (err) => {
       session.exited = true;
       route({ type: "error", error: err.message });
     });
+
+    void this.initializeSession(session, route);
 
     // A replaced process comes up with no bridge — measured: `--resume` brings
     // the conversation back and leaves Remote Control off. Re-establish it, or
@@ -1400,6 +1840,56 @@ export class ClaudeCliProvider implements ChatProvider {
     }
 
     return session;
+  }
+
+  /**
+   * The control protocol's opening handshake.
+   *
+   * Sent for one thing: the reply carries `pending_permission_requests` — the
+   * prompts the CLI is still blocked on. A process that is replaced mid-turn
+   * (an effort change, the Remote Control toggle) leaves its cards behind in
+   * the old stdin, and this is the CLI's own way of handing them to whoever
+   * connects next. It matters more since a question became a permission
+   * prompt: an unanswered one now holds the turn.
+   *
+   * Declares **no** `supportedDialogKinds`, deliberately. Declaring a kind is
+   * what turns `request_user_dialog` on, and the CLI is explicit that doing so
+   * without a handler parks dialogs nothing can answer. Rendering those is a
+   * separate piece of work; until it exists, the honest declaration is none.
+   *
+   * Best-effort throughout. A CLI that answers this with an error, or not at
+   * all, is one we go on talking to exactly as before — nothing downstream
+   * waits on it.
+   */
+  private async initializeSession(
+    session: CliSession,
+    route: (d: StreamDelta) => void
+  ): Promise<void> {
+    let reply: Record<string, unknown>;
+    try {
+      reply = await this.sendControl(session, {
+        subtype: "initialize",
+        // The switch. A kind named here starts arriving, and one that arrives
+        // with nothing to draw it parks the turn — so this is the same list
+        // `raiseUserDialog` checks against, and it may only grow beside a card.
+        supportedDialogKinds: [...SUPPORTED_DIALOG_KINDS]
+      });
+    } catch (err) {
+      logInfo(`[luno] initialize not answered: ${(err as Error).message}`);
+      return;
+    }
+    const pending = reply.pending_permission_requests;
+    if (!Array.isArray(pending) || pending.length === 0) return;
+    logInfo(`[luno] CLI re-delivered ${pending.length} pending permission(s)`);
+    for (const item of pending) {
+      const ev = item as CliEvent;
+      // Straight back through the normal path: these are the same
+      // `control_request` envelopes, so they get the same classification, the
+      // same card, and the same bookkeeping as one arriving live.
+      if (ev?.request_id && ev.request?.subtype === "can_use_tool") {
+        this.handleControlRequest(ev, route);
+      }
+    }
   }
 
   /** Push the options the control protocol *can* change onto a live session. */
@@ -1450,10 +1940,7 @@ export class ClaudeCliProvider implements ChatProvider {
     this.remoteControlWanted = true;
     // Spawning with the bridge already wanted starts the request itself, so
     // this joins whatever is in flight rather than sending a second one.
-    const session = this.ensureSession(
-      buildArgs("", undefined, this.opts),
-      undefined
-    );
+    const session = this.liveSessionOrSpawn();
     try {
       return await this.establishRemoteControl(session);
     } catch (err) {
@@ -1461,6 +1948,38 @@ export class ClaudeCliProvider implements ChatProvider {
       this.remoteControlWanted = false;
       throw err;
     }
+  }
+
+  /**
+   * The live session, or a new one — but never a *replacement*.
+   *
+   * Remote Control's toggle has no turn behind it, so it has no model and no
+   * task type to rebuild argv from, and argv rebuilt without them does not
+   * match what the process is running. `ensureSession` reads that as "the
+   * options changed" and replaces the process.
+   *
+   * Measured 2026-07-29: switching the bridge on mid-conversation logged
+   * `replacing the CLI process: ---model -default` and SIGTERMed the CLI
+   * halfway through an assistant message. Replacement is the one thing this
+   * path must never do — it is also what hands the phone a session URL nobody
+   * is holding.
+   */
+  private liveSessionOrSpawn(): CliSession {
+    const live = this.session;
+    if (live && !live.exited) return live;
+    // Built and recorded as an ordinary turn would. Spawning with neither left
+    // two flags free to differ on the very next turn: `--effort`, whose
+    // presence is decided against the model's own ladder, and — in plan mode —
+    // the task-type `--append-system-prompt`, because a session recording
+    // `taskType: undefined` sends `streamInSession`'s `session.taskType ??
+    // opts.taskType` through to the freshly classified one instead of keeping
+    // its own. Either difference replaces the process, which is the one thing
+    // this path exists not to do.
+    return this.ensureSession(
+      buildArgs("", this.opts.model, this.opts),
+      undefined,
+      this.opts.taskType
+    );
   }
 
   /** Ask the CLI for a bridge, or join the request already asking. */
@@ -1477,6 +1996,10 @@ export class ClaudeCliProvider implements ChatProvider {
       ...(name !== undefined && { name })
     })
       .then((response) => {
+        // Switched off while the reply was travelling: `disableRemoteControl`
+        // drops its claim on this attempt, and publishing now would light the
+        // pill back up for a bridge the CLI has already been told to tear down.
+        if (this.remoteControlInFlight !== attempt) return this.remoteControl;
         this.remoteControl = {
           state: "ready",
           sessionUrl: asString(response.session_url),
@@ -1488,8 +2011,15 @@ export class ClaudeCliProvider implements ChatProvider {
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
-        this.remoteControl = { state: "error", error: message };
-        route?.({ type: "remote_control", remoteControl: this.remoteControl });
+        // Superseded the same way, and an error published for a bridge nobody
+        // wants any more is as wrong as a `ready` — the caller still hears it.
+        if (this.remoteControlInFlight === attempt) {
+          this.remoteControl = { state: "error", error: message };
+          route?.({
+            type: "remote_control",
+            remoteControl: this.remoteControl
+          });
+        }
         throw err instanceof Error ? err : new Error(message);
       })
       .finally(() => {
@@ -1508,6 +2038,10 @@ export class ClaudeCliProvider implements ChatProvider {
     const wanted = this.remoteControlWanted;
     this.remoteControlWanted = false;
     this.remoteControl = { state: "off" };
+    // An enable request may still be in flight. Releasing the claim on it is
+    // what makes its reply stand aside instead of publishing `ready` for the
+    // bridge being torn down on the next line.
+    this.remoteControlInFlight = null;
     const session = this.session;
     if (!wanted || !session || session.exited) return;
     try {
@@ -1545,6 +2079,107 @@ export class ClaudeCliProvider implements ChatProvider {
    */
   updateOptions(patch: Partial<ClaudeCliOpts>): void {
     this.opts = { ...this.opts, ...patch };
+  }
+
+  /**
+   * Push a permission-mode change onto the live process, at the moment it is
+   * picked rather than at the start of the next turn.
+   *
+   * Every other option reaches the CLI through argv, and changed argv replaces
+   * the process — which a panel turn arranges on its way through
+   * `ensureSession`. A turn started on the phone or by a steered message never
+   * builds argv at all: it goes straight to `Orchestrator.observe`. So without
+   * this the CLI keeps the mode its process was spawned with while the picker
+   * says otherwise, and the direction that matters is *leaving* Bypass — in
+   * `bypassPermissions` the CLI emits no `can_use_tool`, so a destructive call
+   * runs with no card on either surface.
+   *
+   * Entering Bypass is the transition the CLI refuses on a session not launched
+   * with `--dangerously-skip-permissions`. That refusal is left standing rather
+   * than answered with a respawn: a respawn takes every background agent and
+   * the Remote Control bridge with it, while the loosening the user asked for
+   * arrives by itself with their next message from the panel. Failing towards
+   * *more* prompts is the safe direction to fail in.
+   */
+  /**
+   * Push a model change onto the live process.
+   *
+   * The same seam as `setLivePermissionMode`, for the same reason: a turn
+   * started on the phone builds no argv, so the picker would go on naming a
+   * model the CLI is not running. On the panel path `respawnFingerprint`
+   * ignores `--model` — deliberately, so a model change costs no session URL —
+   * which routes it to `applyLiveOptions` instead; this is the path with no
+   * turn behind it at all.
+   *
+   * Held back when the two models disagree about the current effort level. That
+   * level reaches the CLI through argv and argv cannot be rebuilt under a live
+   * process, so pushing the model alone would leave it running under an
+   * `--effort` its own ladder does not list. Left alone, the next panel turn
+   * carries it: its fingerprint differs on `--effort` and replaces the process.
+   */
+  async setLiveModel(model: string): Promise<void> {
+    // Recorded whether or not the push below happens: a toggle spawning after
+    // this has to build argv with the model the next turn will ask for.
+    this.opts = { ...this.opts, model };
+    const session = this.session;
+    if (!session || session.exited || session.model === model) return;
+    if (effortFlag(session.model, this.opts) !== effortFlag(model, this.opts)) {
+      logInfo(
+        `[luno] ${model} takes a different effort level — leaving it to the next turn from the panel`
+      );
+      return;
+    }
+    try {
+      await this.sendControl(session, { subtype: "set_model", model });
+      session.model = model;
+    } catch (err) {
+      logInfo(`[luno] the CLI kept model ${session.model}: ${String(err)}`);
+    }
+  }
+
+  async setLivePermissionMode(mode: PermissionMode): Promise<void> {
+    this.opts = { ...this.opts, permissionMode: mode };
+    const session = this.session;
+    if (!session || session.exited || session.permissionMode === mode) return;
+    try {
+      await this.sendControl(session, {
+        subtype: "set_permission_mode",
+        mode: mapPermissionMode(mode)
+      });
+      session.permissionMode = mode;
+    } catch (err) {
+      logInfo(
+        `[luno] the CLI kept permission mode ${session.permissionMode}: ${String(err)}`
+      );
+    }
+  }
+
+  /**
+   * The process is gone: settle everything that was waiting on it.
+   *
+   * Two things outlive a dead pipe if nobody says otherwise. Every in-flight
+   * control request sits on its own 30s timeout with no idea the pipe it was
+   * written to has closed — and a replacement joining `remoteControlInFlight`
+   * would attach itself to that dead promise. And the bridge status still
+   * describes a session that no longer exists, so the pill goes on offering a
+   * URL nothing is listening on.
+   *
+   * `connecting` rather than `off` when the bridge is still wanted: a
+   * replacement re-establishes it (see `ensureSession`), so the honest reading
+   * is "no link right now", not "you turned this off".
+   */
+  private settleOnSessionGone(emit: (d: StreamDelta) => void): void {
+    for (const [, pending] of this.pendingControls) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("The Claude session ended before it answered."));
+    }
+    this.pendingControls.clear();
+    this.remoteControlInFlight = null;
+    if (this.remoteControl.state === "off") return;
+    this.remoteControl = this.remoteControlWanted
+      ? { state: "connecting" }
+      : { state: "off" };
+    emit({ type: "remote_control", remoteControl: this.remoteControl });
   }
 
   /** Send a control request and wait for the CLI's answer. */
@@ -1646,8 +2281,16 @@ export class ClaudeCliProvider implements ChatProvider {
     session: CliSession,
     userText: string
   ): string | null {
+    // The preamble travels as message text rather than in argv, which is
+    // frozen at spawn — so it is part of the user message every other surface
+    // on this session renders. Measured 2026-07-30 on claude.ai: what the panel
+    // hides behind its own timeline reads there as a wall of "What the user is
+    // looking at" above every single thing the user typed. Sent when it moves
+    // and not otherwise: unchanged, the model already has it in context, and
+    // repeating it buys tokens and noise on the other device and nothing else.
     const preamble = turnPreamble(this.opts);
-    const sent = preamble ? preamble + userText : userText;
+    const moved = Boolean(preamble) && preamble !== session.preamble;
+    const sent = moved ? preamble + userText : userText;
     // Our own id on our own message. The CLI keeps it and returns it on the
     // replay, which is how the echo is recognised without guessing from the
     // text. Registered before the write, not after: the replay can be back
@@ -1671,6 +2314,9 @@ export class ClaudeCliProvider implements ChatProvider {
       takeEcho(session.pendingEchoes, uuid);
       return null;
     }
+    // Recorded only once the CLI has it. A write that failed took the context
+    // with it, and the retry has to carry it again.
+    if (moved) session.preamble = preamble;
     return uuid;
   }
 
@@ -1715,14 +2361,26 @@ export class ClaudeCliProvider implements ChatProvider {
 
   private childEnv(maxTokens?: number): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = { ...process.env };
-    // Remote Control requires a claude.ai OAuth login and refuses to start
-    // under an API key — and the CLI prefers an env-supplied key over its own
-    // credentials, so injecting ours is exactly what would break it. When the
-    // bridge is wanted, stand aside and let the CLI use `/login`.
+    // Measured 2026-07-31, against 2.1.219: the bridge comes up **fine** with
+    // `ANTHROPIC_API_KEY` in the environment — `remote_control{enabled:true}`
+    // answered `success` with a session_url. So the reason this used to give,
+    // "Remote Control refuses to start under an API key", is simply false and
+    // has been removed rather than reworded.
+    //
+    // What stands: the CLI may prefer an env-supplied key over its own
+    // credentials, which would move the conversation off the user's
+    // subscription and onto an API bill. That half is untested — the probe ran
+    // with a deliberately invalid key on a machine that also had OAuth creds,
+    // so it cannot tell "ignored" from "used". Standing aside stays until it is
+    // settled; it costs nothing when the CLI has its own login.
     const wantsBridge = this.remoteControlWanted;
     if (wantsBridge && env.ANTHROPIC_API_KEY) delete env.ANTHROPIC_API_KEY;
-    if (this.opts.token && !wantsBridge)
-      env.ANTHROPIC_API_KEY = this.opts.token;
+    // Injected whatever the bridge is doing. On the fallback sign-in — a token
+    // pasted because `claude setup-token` was not usable — this variable *is*
+    // the user's only credential, and there is no `~/.claude` login behind it.
+    // Withholding it on `/rc` handed the CLI nothing to authenticate with, for
+    // the sake of a refusal that the 2026-07-31 probe showed does not happen.
+    if (this.opts.token) env.ANTHROPIC_API_KEY = this.opts.token;
     if (Number.isFinite(maxTokens) && (maxTokens ?? 0) > 0) {
       env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(Math.floor(maxTokens!));
     }
@@ -1735,14 +2393,34 @@ export class ClaudeCliProvider implements ChatProvider {
     return env;
   }
 
-  /** End the long-lived process. Safe to call when there is none. */
+  /**
+   * End the long-lived process. Safe to call when there is none.
+   *
+   * A turn still reading this process is told before the sink is dropped. The
+   * exit handler does route `done` when the child goes, but `route` delivers
+   * through `session.sink` — which this method has already cleared by then, so
+   * the delta lands out-of-turn, where nothing ends a turn. Measured
+   * 2026-07-29: a mid-turn replacement left the panel reading **Brewing** with
+   * no process behind it, and no way out but reloading the window.
+   */
   disposeSession(): void {
     const session = this.session;
     if (!session) return;
     this.session = null;
     if (this.child === session.child) this.child = null;
     session.exited = true;
+    const sink = session.sink;
     session.sink = null;
+    if (sink) {
+      sink({
+        type: "error",
+        error: "The Claude session ended before this turn finished."
+      });
+      sink({ type: "done" });
+    }
+    // Out of turn deliberately: the sink above has just been told this turn is
+    // over, and the bridge belongs to the session rather than to any turn.
+    this.settleOnSessionGone((d) => this.opts.onOutOfTurn?.(d));
     void terminateChild(session.child);
   }
 }
@@ -1799,6 +2477,15 @@ export function respawnFingerprint(args: ReadonlyArray<string>): string {
     // the old one. The server set still counts: it reaches argv separately, as
     // `--allowedTools mcp__<name>`.
     if (args[i] === "--mcp-config") {
+      i++;
+      continue;
+    }
+    // `set_model` exists and `applyLiveOptions` sends it, so the model has no
+    // business replacing a process. Left in, it did: `/rc` spawns through
+    // `buildArgs("", undefined, …)` with no `--model` at all, and the first
+    // ordinary turn adds one — the fingerprints diverged over nothing and the
+    // phone lost its bridge on the user's next message.
+    if (args[i] === "--model") {
       i++;
       continue;
     }
@@ -1877,6 +2564,34 @@ function terminateChild(child: ChildProcess): Promise<void> {
  *   prompt", but no configuration puts the prompt in argv any more — it is
  *   written to stdin by the caller.
  */
+/**
+ * The `--effort` level this model and posture would be launched with, or
+ * undefined when the flag is dropped.
+ *
+ * Ultracode outranks whatever level came with it: the setting is defined as
+ * xhigh + workflows, and a stored posture pairing it with `max` would ask for a
+ * combination the CLI does not offer. A pinned model that predates the level
+ * would reject the flag, and the failure would arrive as a CLI error with
+ * nothing pointing back at the picker — dropping it runs at the model's own
+ * default instead.
+ *
+ * Shared with `setLiveModel`, which may not push a model whose ladder disagrees
+ * with the running one: the level reaches the CLI through argv, and argv cannot
+ * be rebuilt under a live process.
+ */
+export function effortFlag(
+  model: string | undefined,
+  opts: ClaudeCliOpts
+): EffortLevel | undefined {
+  const effort = opts.ultracode ? "xhigh" : opts.effort;
+  const ladder = model ? EFFORT_LADDERS[model] : undefined;
+  const takesEffort = !ladder || ladder.includes(effort as EffortLevel);
+  if (!effort || !EFFORT_LEVELS.includes(effort) || !takesEffort) {
+    return undefined;
+  }
+  return effort;
+}
+
 export function buildArgs(
   _userText: string,
   model: string | undefined,
@@ -1920,20 +2635,8 @@ export function buildArgs(
   }
   if (model) args.push("--model", model);
 
-  // Reasoning effort — the CLI validates the level itself, but we guard
-  // against a stale/unknown config value reaching argv. Ultracode outranks
-  // whatever level came with it: the setting is defined as xhigh + workflows,
-  // and a stored posture pairing it with `max` would ask for a combination the
-  // CLI does not offer.
-  const effort = opts.ultracode ? "xhigh" : opts.effort;
-  // A pinned version that predates this level would reject the flag, and the
-  // failure would arrive as a CLI error with nothing pointing back at the
-  // picker. Dropping it runs the turn at the model's own default instead.
-  const ladder = model ? EFFORT_LADDERS[model] : undefined;
-  const takesEffort = !ladder || ladder.includes(effort as EffortLevel);
-  if (effort && EFFORT_LEVELS.includes(effort) && takesEffort) {
-    args.push("--effort", effort);
-  }
+  const effort = effortFlag(model, opts);
+  if (effort) args.push("--effort", effort);
 
   // `--settings` layers a JSON blob on top of the resolved settings sources
   // (user/project/local) for this run only, so anything we set here leaves
@@ -1951,12 +2654,20 @@ export function buildArgs(
   //     only when on: the key's absence is its off state, and writing `false`
   //     would override a settings file that deliberately turned it on.
   if (opts.ultracode) settings.ultracode = true;
-  // Only inject the `ask` routing in modes that actually service the approval
-  // channel (default/auto, where `--permission-prompt-tool stdio` is wired up).
+  // Only inject the `ask` routing in the modes that both service the approval
+  // channel and have no classifier of their own — `default` and `acceptEdits`.
+  // (git is not an edit tool, so acceptEdits gates it exactly as default does.)
+  //
   // Plan and bypass have no prompt tool, so an `ask` rule there would have
   // nothing to answer it: in plan it could block even read-only git, and in
   // bypass it would reintroduce the very prompt the mode exists to remove.
-  if (permissionProtocol) {
+  //
+  // `auto` is excluded for a different and sharper reason. A matched `ask` rule
+  // is one of the CLI's enumerated reasons to skip its classifier entirely and
+  // prompt instead, so this would put a card in front of *every* git call —
+  // measured against 2.1.219 with an `ask` rule on `Bash(echo:*)`, which turned
+  // `echo hello` into an approval request and, with the rule removed, did not.
+  if (mode === "default" || mode === "acceptEdits") {
     settings.permissions = {
       ask: ROUTE_TO_CLASSIFIER_BASH.map((p) => `Bash(${p})`)
     };
@@ -1969,13 +2680,16 @@ export function buildArgs(
   args.push("--permission-mode", cliMode);
 
   if (opts.permissionMode === "auto") {
-    // Auto mode = auto-accept the SAFE, reversible tools, then route
-    // everything else (destructive shell, deletes, unknown tools) through the
-    // approval card. We pre-allow them explicitly here rather than via the
-    // CLI's `acceptEdits` mode, because acceptEdits *also* auto-runs `rm` and
-    // other destructive Bash with no prompt. Edits stay reversible via the
-    // checkpoint system, so auto-applying them is safe. Bash is deliberately
-    // NOT pre-allowed except for the user's own allow-listed patterns.
+    // Pre-allow the safe, reversible tools. Under the CLI's own `auto` this is
+    // mostly redundant — its classifier has a fast path for anything
+    // `acceptEdits` would take — but it is not free of purpose: it is the whole
+    // of Agent mode on the day the CLI declines to run that classifier and
+    // downgrades us to `default`, and every call it covers is one the
+    // classifier is not paid a model call to judge.
+    //
+    // Bash is deliberately NOT pre-allowed except for the user's own
+    // allow-listed patterns. Edits stay reversible via the checkpoint system,
+    // which is what makes auto-applying them safe.
     const tools = [
       "Read",
       "Glob",
@@ -2005,8 +2719,12 @@ export function buildArgs(
       ...mcpToolPatterns(opts.mcpServerNames)
     ];
     args.push("--allowedTools", ...tools);
-  } else if (opts.permissionMode === "default" && opts.mcpServerNames?.length) {
-    // Default mode otherwise gates every tool call behind an interactive
+  } else if (
+    (opts.permissionMode === "default" ||
+      opts.permissionMode === "acceptEdits") &&
+    opts.mcpServerNames?.length
+  ) {
+    // These modes otherwise gate every tool call behind an interactive
     // prompt the `-p` flow can't service — the agent ends up verbalizing
     // "I need permission" instead of actually invoking the tool. Connecting
     // an MCP server via the Connectors page is an explicit consent grant
@@ -2032,13 +2750,20 @@ export function buildArgs(
     );
   }
 
-  // Per-mode prompt: bundled MD that tunes the model's stance for plan/default/auto.
+  // What holds in every mode: the environment, what this surface can do, and
+  // the rules the approval posture does not change.
+  const commonAppend = getCommonPrompt();
+  if (commonAppend) args.push("--append-system-prompt", commonAppend);
+
+  // Per-mode prompt: the posture this approval mode implies, and nothing else.
   const modeAppend = getModePrompt(mode);
   if (modeAppend) args.push("--append-system-prompt", modeAppend);
 
-  // Plan-mode only: the matching task-type playbook (backend / frontend / etc.).
-  // Skipped for default/auto to keep their token budgets lean.
-  if (mode === "plan" && opts.taskType) {
+  // Plan mode, and only when the project has written nothing of its own: the
+  // task-type playbook is a stand-in for conventions, not a supplement to them.
+  // A project with a CLAUDE.md has said what matters here far more precisely,
+  // and a generic checklist landing beside it competes rather than adds.
+  if (mode === "plan" && opts.taskType && !opts.conventions) {
     const taskAppend = getTaskTypePrompt(opts.taskType);
     if (taskAppend) args.push("--append-system-prompt", taskAppend);
   }
@@ -2087,6 +2812,10 @@ function mapPermissionMode(m: PermissionMode): string {
   switch (m) {
     case "plan":
       return "plan";
+    // Edits apply without a card; everything else still meets one. The CLI has
+    // had this mode all along and no LUNO build has ever been able to reach it.
+    case "acceptEdits":
+      return "acceptEdits";
     // The CLI approves every tool itself and never emits a `can_use_tool`
     // request, so our permission policy is not consulted at all — not for
     // edits, not for `rm`, not for the destructive/network gate. That is the
@@ -2094,16 +2823,18 @@ function mapPermissionMode(m: PermissionMode): string {
     // in `setPermissionMode`, not here.
     case "bypass":
       return "bypassPermissions";
-    // `auto` deliberately runs in the CLI's `default` mode rather than
-    // `acceptEdits`. acceptEdits silently auto-runs *every* tool — including
-    // destructive `Bash` like `rm` — without ever consulting our permission
-    // tool, so a delete could happen with no prompt. Instead we pre-allow the
-    // safe, reversible tools (Read/Edit/Write + allow-listed Bash) via
-    // --allowedTools so edits still apply automatically, and let everything
-    // else (deletes, arbitrary shell, unknown tools) route through the
-    // approval card.
+    // The CLI's own `auto`: a model classifier reads the conversation and the
+    // call and decides, escalating what it will not judge to the approval card
+    // over the same control channel. It is not `acceptEdits` — that auto-runs
+    // destructive `Bash` with no prompt — and it is no longer our own regex
+    // policy either, which stays as the fallback for when the CLI declines to
+    // run it.
+    //
+    // Asking for it is always safe: measured on 2.1.219, a CLI that cannot
+    // provide it downgrades in silence and reports the mode it actually took in
+    // `system/init`. That report is what `cliPermissionMode` reads.
     case "auto":
-      return "default";
+      return "auto";
     default:
       return "default";
   }
@@ -2120,24 +2851,81 @@ function mapPermissionMode(m: PermissionMode): string {
 const REMOTE_PIPE_TO_SHELL =
   /\b(curl|wget|fetch)\b[\s\S]*\|\s*(sudo\s+)?(sh|bash|zsh|dash|fish|ksh)\b/i;
 
-const DESTRUCTIVE_BASH: ReadonlyArray<RegExp> = [
-  /\brm\b/,
-  /\brmdir\b/,
-  /\bunlink\b/,
-  /\bshred\b/,
-  /\btrash\b/,
-  /\bgit\s+(rm|clean)\b/,
-  /\bgit\s+reset\s+--hard\b/,
-  /\bgit\s+checkout\s+--\s/,
-  /\bgit\s+push\b[^\n]*(--force|\s-f\b)/,
-  /\bfind\b[^\n]*-delete\b/,
-  /\bfind\b[^\n]*-exec\s+rm\b/,
-  /\b(dd|mkfs|fdisk)\b/,
-  /\bsudo\b/,
-  /\bchmod\s+-R\b/,
-  /\bchown\s+-R\b/,
+/**
+ * A command that is dangerous by being run, and the argument shape (if any)
+ * that makes it so.
+ *
+ * `head` is matched against the **command position** of a shell segment, never
+ * against the line as free text. As free text these names matched their own
+ * spelling anywhere it appeared: `\bformat\b[^\n]*\/[a-z]` — written for the
+ * Windows `format C: /q` — matched `--input-format` because `\b` sits happily
+ * after a hyphen, and then any later path with a slash finished it. A read-only
+ * `git log -S"…" -- src/…; echo "--- (input format) ---"` came back as a red
+ * "Run destructive command?" card. `\b(del|erase)\b` did the same to
+ * `rg "erase" src`.
+ */
+interface GatedCommand {
+  /** Against the segment's head, lowercased and stripped of directory and
+   *  `.exe`. */
+  head: RegExp;
+  /** Against the arguments after it, when the name alone is not enough:
+   *  `chmod` is destructive recursively, `format` against a drive. */
+  args?: RegExp;
+}
+
+const DESTRUCTIVE_COMMANDS: ReadonlyArray<GatedCommand> = [
+  { head: /^rm$/ },
+  { head: /^rmdir$/ },
+  { head: /^unlink$/ },
+  { head: /^shred$/ },
+  { head: /^trash$/ },
+  { head: /^find$/, args: /(^|\s)-delete\b|(^|\s)-exec\s+rm\b/ },
+  { head: /^dd$/ },
+  { head: /^mkfs(\..+)?$/ },
+  { head: /^fdisk$/ },
+  { head: /^sudo$/ },
+  { head: /^chmod$/, args: /(^|\s)-R\b/ },
+  { head: /^chown$/, args: /(^|\s)-R\b/ },
+  { head: /^kill$/, args: /(^|\s)-9\b/ },
+  // Windows. Everything above is POSIX, and this extension ships on Windows,
+  // where the CLI reaches for PowerShell unasked — measured in a live run: the
+  // model answered "delete README.md" with
+  // `Remove-Item -Path … -Confirm:$false`, which matched nothing here. So the
+  // card carried no warning, a standing grant was offered for the whole shell,
+  // and in agent mode it would have run with no prompt at all.
+  { head: /^remove-item$/ },
+  { head: /^remove-itemproperty$/ },
+  { head: /^clear-(content|item|disk)$/ },
+  { head: /^stop-process$/, args: /-force\b/i },
+  { head: /^(del|erase)$/ },
+  { head: /^rd$/, args: /\/s\b/i },
+  // What it was always reaching for: a drive to wipe, or the filesystem to
+  // write. Never the word on its own.
+  { head: /^format$/, args: /(^|\s)[a-z]:(\s|\\|$)|\/fs:/i },
+  { head: /^reg$/, args: /^delete\b/i },
+  { head: /^diskpart$/ }
+];
+
+/** git subcommands that destroy. `true` for the ones that need no argument to
+ *  do it; a pattern where the subcommand is only destructive with one. */
+const DESTRUCTIVE_GIT: ReadonlyMap<string, true | RegExp> = new Map<
+  string,
+  true | RegExp
+>([
+  ["rm", true],
+  ["clean", true],
+  ["reset", /--hard\b/],
+  ["checkout", /\s--\s/],
+  ["push", /--force\b|\s-f(\s|$)/]
+]);
+
+/**
+ * Destructive shapes with no command position to anchor to: a fork bomb is a
+ * function definition, a device overwrite is a redirect target, and piping a
+ * download into a shell spans two segments by construction.
+ */
+const DESTRUCTIVE_SHAPES: ReadonlyArray<RegExp> = [
   /:\s*\(\s*\)\s*\{/, // fork bomb :(){ ... }
-  /\bkill\s+-9\b/,
   />\s*\/dev\/(sd|nvme|disk|null\/)/,
   REMOTE_PIPE_TO_SHELL
 ];
@@ -2145,25 +2933,160 @@ const DESTRUCTIVE_BASH: ReadonlyArray<RegExp> = [
 /** Commands that reach the network or outside the workspace. Always prompt and
  *  never auto-allowed (even if the user allow-listed them), but not flagged as
  *  irreversibly destructive. */
-const NETWORK_BASH: ReadonlyArray<RegExp> = [
-  /\bcurl\b/,
-  /\bwget\b/,
-  /\bssh\b/,
-  /\bscp\b/,
-  /\bsftp\b/,
-  /\brsync\b/,
-  /\b(nc|ncat|netcat)\b/,
-  /\btelnet\b/,
-  /\bftp\b/,
-  /\bgit\s+(push|pull|fetch|clone|remote)\b/
+const NETWORK_COMMANDS: ReadonlyArray<GatedCommand> = [
+  { head: /^curl$/ },
+  { head: /^wget$/ },
+  { head: /^ssh$/ },
+  { head: /^scp$/ },
+  { head: /^sftp$/ },
+  { head: /^rsync$/ },
+  { head: /^(nc|ncat|netcat)$/ },
+  { head: /^telnet$/ },
+  { head: /^ftp$/ }
 ];
 
+const NETWORK_GIT: ReadonlySet<string> = new Set([
+  "push",
+  "pull",
+  "fetch",
+  "clone",
+  "remote"
+]);
+
+/** Where one command ends and the next begins. A single `&` backgrounds and
+ *  therefore separates; `&&` is matched first so it is not read as two. */
+const SEGMENT_SEPARATORS = /\|\||&&|[;|&\n]/;
+
+/**
+ * Command substitution runs its contents as a command wherever it sits, so
+ * `$(rm -rf x)` is an `rm` however the line around it reads. Turning the
+ * opening delimiter into a separator makes those contents a segment of their
+ * own, which is cheaper and tighter than a second, looser pass over the line.
+ *
+ * The closing paren is deliberately left alone: `find . \( -name x \) -delete`
+ * is one command, and splitting it there would put `find` and `-delete` in
+ * different segments and lose it.
+ */
+const SUBSTITUTION_OPENERS = /\$\(|<\(|`/g;
+
+/** A leading `VAR=value`, which modifies the command that follows rather than
+ *  being one. */
+const ENV_ASSIGNMENT = /^[A-Za-z_]\w*=/;
+
+/** Commands whose argument is itself a command. `xargs rm -rf` is an `rm`, and
+ *  reading only the head would call it an `xargs`. */
+const COMMAND_WRAPPERS: ReadonlySet<string> = new Set([
+  "env",
+  "nohup",
+  "time",
+  "xargs",
+  "command",
+  "nice",
+  "ionice",
+  "timeout",
+  "stdbuf",
+  "setsid",
+  "watch"
+]);
+
+/**
+ * The command a segment actually runs: the head, lowercased and stripped of
+ * directory and `.exe`, plus everything after it.
+ *
+ * Steps through leading assignments and wrappers, so the head returned is the
+ * one whose name decides. Returns `null` for a segment that runs nothing.
+ */
+function commandOf(segment: string): { head: string; args: string } | null {
+  const tokens = segment.trim().split(/\s+/).filter(Boolean);
+  let i = 0;
+  while (i < tokens.length && ENV_ASSIGNMENT.test(tokens[i])) i++;
+  if (i >= tokens.length) return null;
+  const head = tokens[i]
+    .replace(/^.*[\\/]/, "")
+    .replace(/\.exe$/i, "")
+    .toLowerCase();
+  const args = tokens.slice(i + 1).join(" ");
+  // Terminates: `args` is strictly shorter than the segment it came from.
+  if (COMMAND_WRAPPERS.has(head) && args) return commandOf(args);
+  return { head, args };
+}
+
+/** Shells that take a whole command line as an argument. `bash -c "rm -rf x"`
+ *  runs an `rm`, and reading only the head calls it a `bash` — the one false
+ *  negative that anchoring to the command position would otherwise introduce,
+ *  since the old whole-line scan caught it by accident. */
+const SHELL_RUNNERS: ReadonlySet<string> = new Set([
+  "bash",
+  "sh",
+  "zsh",
+  "dash",
+  "fish",
+  "ksh",
+  "powershell",
+  "pwsh",
+  "cmd"
+]);
+
+/** The command line a shell was handed, or `null` when it was handed none.
+ *  Quotes are dropped rather than parsed: this reads a command, it does not
+ *  run one, and `bash -c "echo 'rm'"` should come back as an `echo`. */
+function innerCommandLine(args: string): string | null {
+  const handed = args.match(/(?:^|\s)(?:-c(?:ommand)?|--command|\/c)\s+(.+)$/i);
+  return handed ? handed[1].replace(/["']/g, " ") : null;
+}
+
+/** Every command the line runs, in the order it runs them, including the ones
+ *  it hands to another shell. */
+function shellCommands(
+  command: string,
+  depth = 0
+): Array<{ head: string; args: string; segment: string }> {
+  // Shells nest a handful of levels at most in anything a model writes, and a
+  // bound here is cheaper than trusting every input to terminate.
+  if (depth > 4) return [];
+  return command
+    .replace(SUBSTITUTION_OPENERS, ";")
+    .split(SEGMENT_SEPARATORS)
+    .flatMap((segment) => {
+      const cmd = commandOf(segment);
+      if (!cmd) return [];
+      const here = { ...cmd, segment };
+      if (!SHELL_RUNNERS.has(cmd.head)) return [here];
+      const inner = innerCommandLine(cmd.args);
+      return inner ? [here, ...shellCommands(inner, depth + 1)] : [here];
+    });
+}
+
+function matches(
+  rules: ReadonlyArray<GatedCommand>,
+  cmd: { head: string; args: string }
+): boolean {
+  return rules.some(
+    (rule) =>
+      rule.head.test(cmd.head) && (!rule.args || rule.args.test(cmd.args))
+  );
+}
+
 export function isDestructiveBash(command: string): boolean {
-  return DESTRUCTIVE_BASH.some((re) => re.test(command));
+  if (DESTRUCTIVE_SHAPES.some((re) => re.test(command))) return true;
+  return shellCommands(command).some((cmd) => {
+    if (cmd.head === "git") {
+      const sub = gitSubcommand(cmd.segment);
+      const rule = sub === null ? undefined : DESTRUCTIVE_GIT.get(sub);
+      return rule === true || (rule !== undefined && rule.test(cmd.segment));
+    }
+    return matches(DESTRUCTIVE_COMMANDS, cmd);
+  });
 }
 
 export function isNetworkBash(command: string): boolean {
-  return NETWORK_BASH.some((re) => re.test(command));
+  return shellCommands(command).some((cmd) => {
+    if (cmd.head === "git") {
+      const sub = gitSubcommand(cmd.segment);
+      return sub !== null && NETWORK_GIT.has(sub);
+    }
+    return matches(NETWORK_COMMANDS, cmd);
+  });
 }
 
 /** True when a tool call would irreversibly destroy data (delete files, wipe
@@ -2208,18 +3131,80 @@ export function isNetworkRequest(
  * button off the screen, and that one would refuse the grant even if a message
  * arrived claiming otherwise.
  */
+/**
+ * What a denial tells the model, in two forms.
+ *
+ * With nothing typed the message has to stop the retry loop: without the "do
+ * not retry" clause the model re-proposes the same call and the user is asked
+ * again and again. With a reason, that clause has to GO — it contradicts the
+ * instruction the user just gave. Telling a model both "do not attempt an
+ * alternative" and "use fs.rm instead" leaves it choosing which half to obey.
+ *
+ * The reference client makes the same split, and its two strings differ in the
+ * same place: the "STOP and wait" tail is replaced by the reason rather than
+ * joined to it.
+ */
+export function denialMessage(reason?: string): string {
+  const said = reason?.trim();
+  if (!said) {
+    return "The user denied permission for this action and does not want it performed. Do not retry it or attempt an alternative way to achieve the same thing. Stop and briefly explain, or ask the user how they would like to proceed.";
+  }
+  return `The user denied permission for this action as proposed. They said what they want instead: ${said}\n\nFollow that rather than retrying the call they refused.`;
+}
+
+/** The auto-continue deadline as a payload fragment, or nothing when the user
+ *  has not set one — which is the CLI's own default. */
+function afkTimeout(): { afkTimeoutMs: number } | undefined {
+  const ms = askUserQuestionTimeoutMs();
+  return ms === null ? undefined : { afkTimeoutMs: ms };
+}
+
 function offeredGrantLabel(
   toolName: string,
   input: Record<string, unknown> | undefined,
   destructive: boolean,
-  network: boolean
+  network: boolean,
+  interactive: boolean
 ): string | undefined {
   if (destructive || network) return undefined;
+  // A standing grant cannot answer a question: `decidePermission` checks the
+  // interactive gate above the grant list, so offering "Always" here would
+  // render a button that silently does nothing the next time round. Both
+  // triggers, for the same reason the gate itself has both.
+  if (INTERACTIVE_TOOLS.has(toolName) || interactive) return undefined;
   const grant = grantFor(toolName, input);
   return grant ? grantLabel(grant) : undefined;
 }
 
-export type PermissionAction = "allow" | "prompt";
+export type PermissionAction = "allow" | "prompt" | "deny";
+
+/** What the CLI's own client says when the user keeps planning. Its tool
+ *  renders the refused call as "Stayed in plan mode" off the back of it. */
+export const STAYED_IN_PLAN_MODE =
+  "User chose to stay in plan mode and continue planning";
+
+/**
+ * The sentence the CLI opens with when its auto-mode classifier refuses a call.
+ * The reason follows it.
+ *
+ * A classifier denial never reaches the control channel — read out of 2.1.219,
+ * that path returns `{behavior:"deny"}` straight to the model — so it arrives
+ * as an ordinary failed `tool_result` and this prefix is the only thing that
+ * tells the mode refusing from the tool breaking.
+ */
+export const AUTO_MODE_DENIAL_PREFIX =
+  "Permission for this action was denied by the Claude Code auto mode classifier. Reason: ";
+
+/** The reason auto mode gave for refusing, or `null` when this failure is an
+ *  ordinary one. */
+export function autoModeDenialReason(resultContent: string): string | null {
+  if (!resultContent.startsWith(AUTO_MODE_DENIAL_PREFIX)) return null;
+  const rest = resultContent.slice(AUTO_MODE_DENIAL_PREFIX.length);
+  // The CLI appends its own advice to the model after the reason — what to do
+  // instead, and that a Bash rule would allow this next time. None of that is
+  // the reason, and all of it is addressed to the model rather than the reader.
+  return rest.split(". If you have other tasks")[0].trim();
+}
 
 export interface PermissionDecision {
   action: PermissionAction;
@@ -2235,18 +3220,30 @@ export interface PermissionDecision {
  * in every mode, and nothing below can reach past it. What the modes change is
  * only how much of the harmless remainder still interrupts.
  *
- * **Agent (`auto`)** — everything that is neither destructive nor network runs
- * without asking. Reading a file and editing one are the work; a tool that
+ * Ahead of even that sits `INTERACTIVE_TOOLS`, which is not a safety gate at
+ * all: those calls carry no answer until the user supplies one, so allowing
+ * them silently does not run something unwanted, it discards the question.
+ *
+ * **Agent (`auto`), with the CLI's classifier live (`cliClassified`)** — the
+ * decision has already been made by something that read the whole conversation,
+ * and a request reaching us is one it declined to make. So the ladder below is
+ * cut down to the rungs that carry a decision the *user* made — a standing
+ * grant, "allow edits this turn" — plus the tools that have their own UI.
+ * Our read-only heuristics do not run: they exist to quiet a CLI that asks
+ * about everything, and this one does not.
+ *
+ * **Agent (`auto`), fallback** — the CLI refused to run its classifier, so ours
+ * is the only one there is: everything that is neither destructive nor network
+ * runs without asking. Reading a file and editing one are the work; a tool that
  * stops to ask permission for them is not an agent, it is a prompt with extra
- * steps. This is a deliberate loosening, made by the user for their own tool,
- * and it is exactly what the mode's own description in package.json has always
- * claimed it did.
+ * steps.
  *
  * **Ask (`default`)** — the conservative list, unchanged:
  *  - A standing grant the user made from an approval card auto-allows. It is
  *    checked here, below the gate, so "always allow `Bash(bun run …)`" can
  *    never become "always allow `rm`".
- *  - Plan/answer helper tools auto-allow (they have their own UI).
+ *  - Plan helper tools auto-allow (they have their own UI). `AskUserQuestion`
+ *    used to be one of them and is not: see `INTERACTIVE_TOOLS`.
  *  - Read-only inspection tools (Read/Glob/Grep/LS/NotebookRead and read-only
  *    MCP queries) always auto-allow — they only observe, never mutate.
  *  - Shell commands that only read (`ls`, `cat`, `rg`, read-only `git`, …)
@@ -2265,10 +3262,41 @@ export function decidePermission(
      *  gates already declined, which is what makes it structurally impossible
      *  for a grant to auto-run `rm` or `curl` however it was worded. */
     grants?: ReadonlyArray<ToolGrant>;
+    /** The CLI's `requires_user_interaction` on this request. Its own marker
+     *  for a call that carries a question rather than an action. */
+    interactive?: boolean;
+    /** True when the CLI ran its own classifier before asking — i.e. the
+     *  session is really in the CLI's `auto` mode. Mutually exclusive with
+     *  `agentMode`: either the CLI judged the call or we do, never both. */
+    cliClassified?: boolean;
+    /** The mode the CLI session is actually running with. */
+    planMode?: boolean;
   }
 ): PermissionDecision {
   const destructive = isDestructiveRequest(toolName, input);
   const network = isNetworkRequest(toolName, input);
+  // Leaving plan mode is the user's call, and in LUNO they make it on the plan
+  // card — which proceeds by respawning the CLI in Agent mode, not by
+  // answering this tool. Auto-allowing it let the *current* session out of
+  // plan mode the moment the model asked, before anyone had read the plan.
+  // Nothing could be written even then (every edit still meets the gate
+  // below), but plan mode's promise was being kept by a second fence rather
+  // than by the mode. Refusing is what the tool is built for: the CLI renders
+  // the refusal as "Stayed in plan mode" and keeps planning.
+  if (toolName === "ExitPlanMode" && ctx.planMode) {
+    return { action: "deny", destructive, network };
+  }
+  // Above every mode: the answer is the payload, and only the user has it.
+  //
+  // Two triggers on purpose, and the CLI does the same: `AskUserQuestion`
+  // returns `ask` from its own `checkPermissions` AND is forced to `ask` a
+  // second time by the resolver reading `requiresUserInteraction()`. The name
+  // list is the floor — it holds if a CLI build ever omits the flag — and the
+  // flag is what makes this generalise to the next tool of the same shape
+  // without anybody editing a list here.
+  if (INTERACTIVE_TOOLS.has(toolName) || ctx.interactive) {
+    return { action: "prompt", destructive, network };
+  }
   if (!destructive && !network) {
     if (ctx.agentMode) return { action: "allow", destructive, network };
     if (ctx.grants?.length && coveredByGrants(ctx.grants, toolName, input)) {
@@ -2278,7 +3306,10 @@ export function decidePermission(
       return { action: "allow", destructive, network };
     // Read-only inspection (file reads, globs, greps, read-only MCP queries)
     // never mutates state — always auto-allow so exploration never prompts.
-    if (READ_ONLY_TOOLS.has(toolName) || isReadOnlyMcpTool(toolName)) {
+    if (
+      !ctx.cliClassified &&
+      (READ_ONLY_TOOLS.has(toolName) || isReadOnlyMcpTool(toolName))
+    ) {
       return { action: "allow", destructive, network };
     }
     // Read-only git (status/log/diff/…) routed to us via the git `ask` rule:
@@ -2292,6 +3323,7 @@ export function decidePermission(
     // at a file the agent could have read silently through a tool. Read-only
     // git is a special case of this and stays silent for the same reason.
     if (
+      !ctx.cliClassified &&
       isBashLike(toolName) &&
       typeof input?.command === "string" &&
       isReadOnlyShellCommand(input.command)
@@ -2382,6 +3414,9 @@ export interface CliEvent {
   parent_tool_use_id?: string | null;
   /** Resolved model id on the `system`/`init` event (alias → concrete id). */
   model?: string;
+  /** The permission mode the CLI actually took, on `system`/`init`. Not always
+   *  the one argv asked for: a refused `auto` downgrades here in silence. */
+  permissionMode?: string;
   /** Every slash command the CLI knows, reported on `system`/`init`. */
   /** On a `result` — what opened the turn it ends. `task-notification` marks
    *  the turn the CLI opens by itself to report a finished background task,
@@ -2391,6 +3426,10 @@ export interface CliEvent {
   /** The same list, republished on `system`/`commands_changed` when it changes
    *  mid-session. Named differently on the wire from `slash_commands`. */
   commands?: string[];
+  /** Set on a replayed `user` event the CLI injected itself rather than took
+   *  from a person — command output played back into the conversation. Not a
+   *  prompt, and opening a turn for one is a turn nobody asked for. */
+  isSynthetic?: boolean;
   /** Set on a `user` event the CLI is playing back rather than receiving:
    *  either the prompt we just wrote to stdin, or one typed on a connected
    *  phone. Only present with `--replay-user-messages`. */
@@ -2520,6 +3559,24 @@ export interface CliEvent {
     description?: string;
     input?: Record<string, unknown>;
     permission_suggestions?: Array<Record<string, unknown>>;
+    /** The CLI's own marker for "this call is a dialog, not a gate" — true for
+     *  any tool whose `requiresUserInteraction()` says so. It carries the
+     *  whole class `AskUserQuestion` belongs to, so reading it means the next
+     *  tool of that shape needs no change here. */
+    requires_user_interaction?: boolean;
+    /** The CLI telling us not to offer a standing grant for this call. */
+    suppress_always_allow_rule?: boolean;
+    /** Why the CLI wants a human. Measured on 2.1.219: `"rule"` when a
+     *  `permissions.ask` entry matched, `"other"` for the plain "this command
+     *  requires approval" of `default` mode. Logged rather than rendered —
+     *  under the CLI's `auto` every card is an escalation, and this is the only
+     *  field that says which kind. */
+    decision_reason_type?: string;
+    /** Set when the call comes from a subagent rather than the main turn. */
+    agent_id?: string;
+    /** `request_user_dialog` only — which dialog, and what it needs to say. */
+    dialog_kind?: string;
+    payload?: Record<string, unknown>;
   };
   /** The CLI's answer to a control request we sent. */
   response?: {
@@ -2558,6 +3615,13 @@ export function replayedPrompt(ev: CliEvent): string | null {
   // bookkeeping was taken for a prompt someone typed. Measured: real prompts
   // carry the flag in both recordings under `test/fixtures/`.
   if (ev.isReplay !== true) return null;
+  // The CLI stamps its own injected messages `isSynthetic` and its consumers
+  // gate on it — a `<local-command-stdout>` frame, say, from a slash command
+  // refused over the bridge. Read from the CLI's schema rather than measured
+  // here, so it is written as a guard and nothing depends on it firing: the
+  // only alternative defence is the one hard-coded English string in
+  // `CLI_CONTROL_MARKERS`, which stops matching the day the wording changes.
+  if (ev.isSynthetic === true) return null;
   const content = ev.message?.content;
   if (typeof content === "string") return content || null;
   if (!Array.isArray(content)) return null;
@@ -2625,7 +3689,12 @@ export function bridgeStatus(
   ev: CliEvent,
   current: RemoteControlStatus
 ): RemoteControlStatus | null {
-  const state = ev.state;
+  // `failed` is the word the CLI actually sends: the string pool beside
+  // `[bridge:sdk] State change:` in 2.1.219 interns `failed · connected ·
+  // ready`, and `disconnected` appears nowhere in it — that one is the official
+  // extension's own vocabulary for "off". Both are read, because dropping
+  // `failed` is dropping the only terminal state a live bridge can reach.
+  const state = ev.state === "failed" ? "error" : ev.state;
   const known =
     state === "ready" ||
     state === "connected" ||
@@ -2871,11 +3940,14 @@ export function makeProcessor(
                     })
                     .join("\n")
                 : JSON.stringify(block.content);
+          const refused = block.is_error ? autoModeDenialReason(content) : null;
+          if (refused) logInfo(`[luno] auto mode denied a call: ${refused}`);
           out.push({
             type: "tool_result",
             toolUseId: block.tool_use_id,
             resultContent: content,
-            resultIsError: !!block.is_error
+            resultIsError: !!block.is_error,
+            ...(refused ? { autoModeDenial: refused } : {})
           });
         }
       }

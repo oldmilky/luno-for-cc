@@ -24,6 +24,7 @@ export type InboundType =
   | "cancel"
   | "newSession"
   | "permissionResponse"
+  | "userDialogResponse"
   | "rewindTo"
   | "editAt"
   // auth + setup

@@ -31,6 +31,14 @@ const FACES: Record<
   Exclude<RemoteControlStatus["state"], "off">,
   { tone: ChipTone; label: string; hint: string }
 > = {
+  // No link yet, and the copy must not imply one: the session URL arrives with
+  // the reply, up to 30s later. `interactive` is already false here because
+  // `sessionUrl` is undefined — this is the half the user reads.
+  connecting: {
+    tone: "info",
+    label: "remote",
+    hint: "Starting the bridge. The link appears as soon as Anthropic answers."
+  },
   ready: {
     tone: "info",
     label: "remote",
@@ -56,6 +64,19 @@ const FACES: Record<
   }
 };
 
+/**
+ * Said wherever the bridge is up or coming up, and nowhere else.
+ *
+ * Nothing else in the product says it, and the official client does not say it
+ * at all — so this is a promise LUNO made to itself. Where it goes matters: the
+ * pill is what a person reads before handing the link to a phone, which is the
+ * moment the sentence is about.
+ */
+const RELAYED =
+  "While it is on, this conversation is relayed through Anthropic's servers so the other device can read and answer it.";
+
+const LIVE_STATES = new Set(["connecting", "ready", "connected"]);
+
 export function RemoteControlPill({ status }: RemoteControlPillProps) {
   const face = status.state === "off" ? null : FACES[status.state];
 
@@ -67,7 +88,13 @@ export function RemoteControlPill({ status }: RemoteControlPillProps) {
             label={
               status.state === "error" && status.error
                 ? status.error
-                : `${face.hint} Type /rc again to turn it off.`
+                : [
+                    face.hint,
+                    LIVE_STATES.has(status.state) ? RELAYED : "",
+                    "Type /rc again to turn it off."
+                  ]
+                    .filter(Boolean)
+                    .join(" ")
             }
           >
             <Chip

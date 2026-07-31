@@ -178,3 +178,32 @@ export function workflowAgentOutcome(
 ): SubagentOutcome {
   return subagentOutcome(entry.state);
 }
+
+export interface LiveAgents {
+  /** How many dispatched agents have not reported a terminal status. */
+  count: number;
+  /** The longest one's elapsed time, or 0 where none has reported any. */
+  longestMs: number;
+}
+
+/**
+ * What is still running, for the surfaces that have to warn before ending it.
+ *
+ * Stop, rewind and edit each destroy background work as a side effect of doing
+ * something else — measured, an `interrupt` stops a running agent 10ms after
+ * the request, and rewind takes the whole process with it. A warning is only
+ * worth reading if it says how much: "4 agents, 38 minutes" is a decision, "you
+ * have background work" is a shrug.
+ */
+export function liveAgents(
+  progress: Record<string, SubagentTaskView>
+): LiveAgents {
+  let count = 0;
+  let longestMs = 0;
+  for (const task of Object.values(progress)) {
+    if (subagentOutcome(task.status) !== "running") continue;
+    count += 1;
+    longestMs = Math.max(longestMs, task.durationMs ?? 0);
+  }
+  return { count, longestMs };
+}

@@ -1,7 +1,6 @@
 // ─────────────────────────────────────────────────────────────
 // Empty state — the hero shown while a session has no messages:
 // brand orb, headline, and the grouped suggestion cards.
-// Converted from Tailwind + theme.css in Ф2а.
 // ─────────────────────────────────────────────────────────────
 
 .root {
@@ -161,9 +160,16 @@
   letter-spacing: -0.1px;
 }
 
+// Two lines is the cap, not the target. `shorten()` cuts the sentence; only
+// the box knows the panel's width, and a skill description measured at 320px
+// ran to four lines and a 109px card beside a 57px one.
 .suggestionSub {
-  display: block;
+  display: -webkit-box;
+  overflow: hidden;
   margin-top: 2px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   color: var(--t3);
   font-size: 11.5px;
   line-height: 1.4;

@@ -53,6 +53,18 @@
   font-size: 11px;
 }
 
+// Reads as a label, not as risk: which turn is asking is context, and the
+// stripe already carries whether the call itself is dangerous.
+.agentTag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--round-sm);
+  background: var(--s2);
+  color: var(--t3);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
 .danger .toolTag {
   color: var(--err);
 }
@@ -81,9 +93,18 @@
   background: color-mix(in srgb, var(--s0) 50%, transparent);
 }
 
+// The `$` sits outside the field so it cannot be edited or selected into the
+// command, and the field indents past it.
+.commandWrap {
+  position: relative;
+}
+
 .command {
   @extend %recessed;
+  display: block;
   margin: 0;
+  padding-left: 24px;
+  width: 100%;
   max-height: 160px;
   overflow-y: auto;
   color: var(--t1);
@@ -91,14 +112,52 @@
   font-size: 12px;
   line-height: 1.55;
   white-space: pre-wrap;
+  resize: none;
   // break-all, not break-word: long one-token paths in a shell line must
   // wrap rather than push the card wider than the chat column.
   word-break: break-all;
+
+  &:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
 }
 
 .prompt {
+  position: absolute;
+  top: 8px;
+  left: 10px;
   color: var(--t4);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
   user-select: none;
+}
+
+// ── What to do instead ───────────────────────────────────────
+
+.reasonRow {
+  padding: 0 12px 4px;
+}
+
+.reason {
+  padding: 5px 8px;
+  width: 100%;
+  border: 1px solid var(--b1);
+  border-radius: var(--round);
+  background: color-mix(in srgb, var(--s0) 50%, transparent);
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 12px;
+
+  &::placeholder {
+    color: var(--t4);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: var(--b3);
+  }
 }
 
 .inputs {
@@ -140,6 +199,16 @@
   justify-content: flex-end;
   gap: 4px;
   padding: 0 10px 10px;
+}
+
+// Sits left of the buttons and only appears in the last seconds. --warn, not
+// the accent: it says a decision is about to be taken without the user, which
+// is the one thing on this card they might want to stop.
+.countdown {
+  margin-right: auto;
+  color: var(--warn);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 %action {
@@ -210,6 +279,14 @@
 
   &:focus {
     outline: none;
+  }
+
+  // Submit on a question card, before every question is answered. Dimmed
+  // rather than hidden: the button is what tells the user there is something
+  // to finish, and a control that appears late is a control they miss.
+  &:disabled {
+    cursor: not-allowed;
+    filter: opacity(0.45);
   }
 }
 

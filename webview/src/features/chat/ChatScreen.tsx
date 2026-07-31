@@ -17,7 +17,9 @@ import {
   ChatStatus,
   PermissionRequestView,
   RemoteControlStatus,
-  SubagentTaskView
+  PendingSetting,
+  SubagentTaskView,
+  UserDialogView
 } from "../../lib/rpc";
 import { ConnectorsModal } from "../mcp";
 import { PermissionsModal } from "./PermissionsModal";
@@ -36,6 +38,7 @@ import { ContextStrip } from "./ContextStrip";
 import { EmptyState } from "./EmptyState";
 import { ErrorBanner } from "./ErrorBanner";
 import { RewindModal } from "./RewindModal";
+import { FableOverageDialog } from "./FableOverageDialog";
 import { EditConfirmModal } from "./EditConfirmModal";
 import { PermissionRequest } from "./PermissionRequest";
 import { HistoryDrawer } from "./HistoryDrawer";
@@ -46,10 +49,12 @@ import { ConventionsBanner } from "./ConventionsBanner";
 import { SkillSuggestion } from "./SkillSuggestion";
 import { ToolGroupCard, ToolGroupItem } from "./ToolGroupCard";
 import { SubagentCard } from "./SubagentCard";
+import { AnsweredQuestion } from "./AnsweredQuestion";
+import { foldQuestions, type AskedQuestionView } from "./question-log";
 import {
   TASK_TOOL_NAMES,
   foldSubagents,
-  subagentOutcome,
+  liveAgents,
   type FoldedSubagents
 } from "./subagent-state";
 import { TurnHeader } from "./TurnHeader";
@@ -87,6 +92,10 @@ export interface ChatScreenProps {
   editorContext: EditorContext | null;
   models: ReadonlyArray<ModelInfo>;
   skills: ReadonlyArray<SkillInfo>;
+  /** Controls the running CLI has not been given — marked on their chips. */
+  pendingSettings?: ReadonlyArray<PendingSetting>;
+  /** Modes the user's settings forbid — kept out of the picker entirely. */
+  disabledModes?: ReadonlyArray<PermissionMode>;
   composerFocusKey: number;
   pendingInsert: CodeInsert | null;
   /** What the host calls this conversation, and how it reads its stored
@@ -118,8 +127,18 @@ export interface ChatScreenProps {
   pendingPermission: PermissionRequestView | null;
   onPermissionRespond: (
     behavior: "allow" | "deny",
-    opts?: { restOfTurn?: boolean; always?: boolean }
+    opts?: {
+      restOfTurn?: boolean;
+      always?: boolean;
+      updatedInput?: Record<string, unknown>;
+      reason?: string;
+    }
   ) => void;
+  /** A decision the CLI needs that is not about a tool. Rendered in the same
+   *  slot as an approval — both block the turn, and only one can be at the
+   *  head of either queue at a time. */
+  pendingDialog: UserDialogView | null;
+  onDialogRespond: (result?: "consent" | "switch_default") => void;
 }
 
 export function ChatScreen({
@@ -138,6 +157,8 @@ export function ChatScreen({
   editorContext,
   models,
   skills,
+  pendingSettings,
+  disabledModes,
   composerFocusKey,
   pendingInsert,
   sessionTitle,
@@ -158,7 +179,9 @@ export function ChatScreen({
   onCancel,
   onDismissError,
   pendingPermission,
-  onPermissionRespond
+  onPermissionRespond,
+  pendingDialog,
+  onDialogRespond
 }: ChatScreenProps) {
   const logRef = useRef<HTMLDivElement>(null);
   const userScrolled = useRef(false);
@@ -204,6 +227,9 @@ export function ChatScreen({
   // a key tied to this number gives a clean fade-out / fade-in on reset rather
   // than the messages just popping away.
   const [sessionEpoch, setSessionEpoch] = useState(0);
+  // A card the user clicked on the empty state. It never leaves this screen —
+  // both the hero that raises it and the composer that consumes it are here.
+  const [pendingPrefill, setPendingPrefill] = useState<string | null>(null);
   const prevEventCount = useRef(events.length);
   useEffect(() => {
     if (prevEventCount.current > 0 && events.length === 0) {
@@ -279,18 +305,14 @@ export function ChatScreen({
   // lives in a process that outlives its turn. The verb line above is the
   // model's, so it goes at `turnEnd` — this is what keeps the header from
   // calling a conversation done while a workflow runs in it.
-  const agentsRunning = useMemo(
-    () =>
-      Object.values(taskProgress).some(
-        (t) => subagentOutcome(t.status) === "running"
-      ),
-    [taskProgress]
-  );
+  const running = useMemo(() => liveAgents(taskProgress), [taskProgress]);
+  const agentsRunning = running.count > 0;
   const planContext = useMemo<RenderCtx>(
     () => ({
       views: grouped.views,
       ordered: grouped.ordered,
       subagents: grouped.subagents,
+      questions: grouped.questions,
       taskProgress
     }),
     [grouped, taskProgress]
@@ -384,7 +406,7 @@ export function ChatScreen({
                 exit={{ opacity: 0, y: -TRAVEL.md }}
                 className={s.center}
               >
-                <EmptyState />
+                <EmptyState onPick={setPendingPrefill} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -482,6 +504,7 @@ export function ChatScreen({
           <RewindModal
             key="rewind-modal"
             messagesAfter={pendingRewind.messagesAfter}
+            agents={running}
             onCancel={() => setPendingRewind(null)}
             onConfirm={() => {
               send({ type: "rewindTo", turnId: pendingRewind.turnId });
@@ -494,6 +517,7 @@ export function ChatScreen({
           <EditConfirmModal
             key="edit-modal"
             messagesAfter={pendingEdit.messagesAfter}
+            agents={running}
             onCancel={() => setPendingEdit(null)}
             onDontRevert={() => {
               send({
@@ -546,6 +570,7 @@ export function ChatScreen({
             models={models}
             skills={skills}
             permissionMode={permissionMode}
+            disabledModes={disabledModes}
             onLoadSession={(id) => send({ type: "loadSession", id })}
             onOpenKeyboardHints={() => setHintsOpen(true)}
             onOpenHistory={() => setHistoryOpen(true)}
@@ -568,6 +593,16 @@ export function ChatScreen({
               key={pendingPermission.requestId}
               request={pendingPermission}
               onRespond={onPermissionRespond}
+            />
+          )}
+          {/* Below the approval on purpose: a tool waiting to run is the more
+              urgent of the two, and both blocking at once is rare enough that
+              stacking beats choosing. */}
+          {pendingDialog?.kind === "fable_overage_consent_prompt" && (
+            <FableOverageDialog
+              key={pendingDialog.requestId}
+              dialog={pendingDialog}
+              onRespond={onDialogRespond}
             />
           )}
         </AnimatePresence>
@@ -619,11 +654,15 @@ export function ChatScreen({
           ultracode={ultracode}
           models={models}
           skills={skills}
+          pendingSettings={pendingSettings}
+          disabledModes={disabledModes}
           focusKey={composerFocusKey}
           pendingInsert={pendingInsert}
           onInserted={onInserted}
           pendingRestore={pendingRestore}
           onRestored={onRestored}
+          pendingPrefill={pendingPrefill}
+          onPrefilled={() => setPendingPrefill(null)}
         />
       </div>
     </>
@@ -669,7 +708,8 @@ type TurnBlock =
   | { kind: "compact"; text: string }
   | { kind: "remoteApproval"; tool: string }
   | { kind: "error"; text: string }
-  | { kind: "subagent"; taskId: string };
+  | { kind: "subagent"; taskId: string }
+  | { kind: "question"; questionId: string };
 
 /**
  * Tool names whose tool_use blocks are rendered via PlanCard rather than
@@ -725,6 +765,7 @@ interface GroupingResult {
   views: Map<string, PlanRevisionView>;
   ordered: PlanRevisionView[];
   subagents: FoldedSubagents;
+  questions: Map<string, AskedQuestionView>;
 }
 
 /** Everything the block renderers need that is not the block itself. */
@@ -733,6 +774,7 @@ interface RenderCtx {
   ordered: PlanRevisionView[];
   subagents: FoldedSubagents;
   taskProgress: Record<string, SubagentTaskView>;
+  questions: Map<string, AskedQuestionView>;
 }
 
 function groupEvents(events: TimelineEvent[]): GroupingResult {
@@ -740,6 +782,7 @@ function groupEvents(events: TimelineEvent[]): GroupingResult {
   const views = new Map<string, PlanRevisionView>();
   for (const v of ordered) views.set(v.meta.revisionId, v);
   const subagents = foldSubagents(events);
+  const questions = foldQuestions(events);
 
   const groups: Group[] = [];
   const suppressedToolUseIds = new Set<string>();
@@ -919,12 +962,18 @@ function groupEvents(events: TimelineEvent[]): GroupingResult {
     }
 
     if (e.kind === "tool_result") {
-      const tid = (e.meta as { id?: string } | undefined)?.id;
+      const meta = e.meta as
+        { id?: string; blockedReason?: string } | undefined;
+      const tid = meta?.id;
       if (tid && suppressedToolUseIds.has(tid)) continue;
       const target = tid ? toolItemsById.get(tid) : undefined;
       if (target) {
         target.result = e.body ?? "";
         target.isError = e.title === "Tool Error";
+        // Read off `meta`, not off the title: this one has to survive a
+        // reworded heading, and it changes what the card means rather than
+        // how it is captioned.
+        target.blockedReason = meta?.blockedReason;
       }
       continue;
     }
@@ -973,12 +1022,31 @@ function groupEvents(events: TimelineEvent[]): GroupingResult {
         turn.blocks.push({ kind: "plan", revisionId: meta.revisionId });
       }
     }
-    // plan_question / plan_comment / plan_answer events do not produce
-    // their own blocks — they are folded into the PlanRevisionView.
+
+    // The question the model asked, and what was answered. The card that
+    // collected the answer is a permission prompt and is gone the moment it
+    // is answered, so without this the transcript has no account of a
+    // decision the rest of the turn was built on. Placed for every question,
+    // plan mode or not — the PlanRevisionView only ever held the ones that
+    // happened to land under a revision.
+    if (e.kind === "plan_question") {
+      const meta = e.meta as { questionId?: string } | undefined;
+      if (meta?.questionId) {
+        // Ends the thinking preamble the way a tool call does. The question's
+        // own tool_call is intercepted and never reaches here, so without this
+        // a turn that only asked has no tool at all: every line the model
+        // wrote — before the question and after — is hoisted into the response
+        // as one block, and the question renders above text that preceded it.
+        if (firstToolTsInTurn === undefined) firstToolTsInTurn = e.ts;
+        turn.blocks.push({ kind: "question", questionId: meta.questionId });
+      }
+    }
+    // plan_comment / plan_answer produce no block of their own: the answer is
+    // rendered by the question block it belongs to.
   }
   finalizeTurn();
 
-  return { groups, views, ordered, subagents };
+  return { groups, views, ordered, subagents, questions };
 }
 
 function renderGroup(
@@ -1121,6 +1189,11 @@ function renderTurnBlock(
         <span>{b.text}</span>
       </div>
     );
+  }
+  if (b.kind === "question") {
+    const view = ctx.questions.get(b.questionId);
+    if (!view) return null;
+    return <AnsweredQuestion key={`q-${b.questionId}`} view={view} />;
   }
   if (b.kind === "subagent") {
     const stored = ctx.subagents.byTaskId.get(b.taskId);

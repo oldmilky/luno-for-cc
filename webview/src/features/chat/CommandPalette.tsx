@@ -29,6 +29,9 @@ export interface CommandPaletteProps {
   models: ReadonlyArray<ModelInfo>;
   skills: ReadonlyArray<SkillInfo>;
   permissionMode: PermissionMode;
+  /** Modes the user's settings forbid. The palette is a second way in, and
+   *  hiding one only in the picker would leave the other open. */
+  disabledModes?: ReadonlyArray<PermissionMode>;
   onLoadSession: (id: string) => void;
   onOpenKeyboardHints: () => void;
   onOpenHistory: () => void;
@@ -51,6 +54,7 @@ export function CommandPalette({
   models,
   skills,
   permissionMode,
+  disabledModes = [],
   onLoadSession,
   onOpenKeyboardHints,
   onOpenHistory
@@ -138,7 +142,7 @@ export function CommandPalette({
     });
 
     // Permission modes
-    for (const m of MODES) {
+    for (const m of MODES.filter((x) => !disabledModes.includes(x.value))) {
       items.push({
         id: `mode-${m.value}`,
         group: "Mode",

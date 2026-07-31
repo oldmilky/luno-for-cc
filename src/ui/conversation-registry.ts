@@ -515,7 +515,10 @@ export class ConversationRegistry {
   private wireWebviewSettings(): void {
     this.disposables.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (!e.affectsConfiguration("luno.useCtrlEnterToSend")) return;
+        const touched =
+          e.affectsConfiguration("luno.useCtrlEnterToSend") ||
+          e.affectsConfiguration("luno.startupSuggestions");
+        if (!touched) return;
         for (const host of this.hosts) host.publishWebviewSettings();
       })
     );

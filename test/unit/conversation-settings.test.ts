@@ -48,6 +48,14 @@ vi.mock("../../src/providers/factory.js", () => ({
       updateOptions(patch: Record<string, unknown>) {
         live = { ...live, ...patch };
       },
+      // Pushed at pick time rather than at the next turn, so the mock has to
+      // move `live` too — otherwise a turn would look as if it never heard.
+      async setLivePermissionMode(mode: string) {
+        live = { ...live, permissionMode: mode };
+      },
+      // The model is a `buildArgs` parameter rather than a spawn option, so the
+      // real one moves the session and not `this.opts`. Nothing to mirror.
+      async setLiveModel() {},
       disposeSession() {},
       async *stream() {
         spawned.push(live);
@@ -419,7 +427,7 @@ describe("per-conversation settings", () => {
     await registry.activeConversation()?.cycleMode();
     await settle();
 
-    expect(lastAuth(second.webview.sent).permissionMode).toBe("plan");
+    expect(lastAuth(second.webview.sent).permissionMode).toBe("acceptEdits");
     expect(lastAuth(first.webview.sent).permissionMode).toBe("default");
   });
 });
@@ -768,5 +776,77 @@ describe("conversation status", () => {
     // list shows then comes off its timeline, and being open is carried
     // separately. Claiming one here is what made the two compete.
     expect(host.live).toEqual({});
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// A mode the user's own Claude Code settings forbid.
+//
+// The picker hides these, but hiding is not enforcement: a stale webview, a
+// command, or a keybinding all reach the same handler. The one that matters is
+// `bypass` — the mode whose whole effect is that no approval card appears.
+// ─────────────────────────────────────────────────────────────
+describe("permission modes the settings forbid", () => {
+  let cfgDir: string;
+  let previous: string | undefined;
+
+  beforeEach(() => {
+    cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), "luno-modes-"));
+    previous = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = cfgDir;
+  });
+
+  afterEach(() => {
+    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previous;
+    fs.rmSync(cfgDir, { recursive: true, force: true });
+  });
+
+  const forbidBypass = () =>
+    fs.writeFileSync(
+      path.join(cfgDir, "settings.json"),
+      JSON.stringify({ permissions: { disableBypassPermissionsMode: "disable" } })
+    );
+
+  it("refuses to apply one, and republishes so the picker snaps back", async () => {
+    forbidBypass();
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const t = fakeTarget();
+    const h = registry.create();
+    h.attach(t.target as never);
+    t.webview.route(() => h as never);
+
+    t.webview.deliver({ type: "setPermissionMode", mode: "bypass" });
+    await settle();
+
+    expect(lastAuth(t.webview.sent).permissionMode).toBe("default");
+    expect(lastAuth(t.webview.sent).disabledModes).toEqual(["bypass"]);
+  });
+
+  it("still applies a mode the settings say nothing about", async () => {
+    forbidBypass();
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const t = fakeTarget();
+    const h = registry.create();
+    h.attach(t.target as never);
+    t.webview.route(() => h as never);
+
+    t.webview.deliver({ type: "setPermissionMode", mode: "plan" });
+    await settle();
+
+    expect(lastAuth(t.webview.sent).permissionMode).toBe("plan");
+  });
+
+  it("forbids nothing when no policy is set", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const t = fakeTarget();
+    const h = registry.create();
+    h.attach(t.target as never);
+    t.webview.route(() => h as never);
+
+    t.webview.deliver({ type: "setEffort", effort: "max" });
+    await settle();
+
+    expect(lastAuth(t.webview.sent).disabledModes).toEqual([]);
   });
 });

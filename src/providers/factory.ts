@@ -13,7 +13,11 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as vscode from "vscode";
-import { ClaudeCliProvider, EffortLevel } from "./claude-cli.js";
+import {
+  ClaudeCliProvider,
+  EffortLevel,
+  PendingSetting
+} from "./claude-cli.js";
 import { PermissionMode, StreamDelta, TaskType } from "../core/types.js";
 import type { ToolGrant } from "../core/tool-grants.js";
 import { ConventionsFile } from "../services/conventions.js";
@@ -56,6 +60,11 @@ export interface ProviderContext {
   /** Keep one CLI process alive across turns. Required by Remote Control,
    *  whose bridge ends when the process does. */
   sessionMode?: boolean;
+  /** Whether replacing the CLI process right now would destroy running work —
+   *  see `ClaudeCliOpts.hasLiveWork`. */
+  hasLiveWork?: () => boolean;
+  /** Which composer controls the running process is not honouring yet. */
+  onSettingsPending?: (pending: PendingSetting[]) => void;
   /** Text the CLI was still holding when a turn was stopped, handed back to
    *  the composer so nothing typed is lost. */
   onStillQueued?: (text: string) => void;
@@ -281,6 +290,8 @@ export function resolveClaudeBinary(): string {
 export function createProvider(ctx: ProviderContext): ClaudeCliProvider {
   return new ClaudeCliProvider({
     sessionMode: ctx.sessionMode,
+    hasLiveWork: ctx.hasLiveWork,
+    onSettingsPending: ctx.onSettingsPending,
     onStillQueued: ctx.onStillQueued,
     onOutOfTurn: ctx.onOutOfTurn,
     binary: resolveClaudeBinary(),

@@ -2,16 +2,23 @@ import { useEffect, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import { Icon } from "../../design/icons";
 import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
+import { formatDuration } from "./tool-buckets";
+import type { LiveAgents } from "./subagent-state";
 import s from "./RewindModal.module.scss";
 
 interface RewindModalProps {
   messagesAfter: number;
+  /** What rewinding will also destroy. Rewinding interrupts the turn *and*
+   *  releases the CLI process, so a background agent does not merely stop —
+   *  the run it belonged to is gone. */
+  agents: LiveAgents;
   onCancel: () => void;
   onConfirm: () => void;
 }
 
 export function RewindModal({
   messagesAfter,
+  agents,
   onCancel,
   onConfirm
 }: RewindModalProps) {
@@ -87,6 +94,23 @@ export function RewindModal({
                 </>
               }
             />
+            {agents.count > 0 && (
+              <DetailRow
+                icon="layers"
+                tone="warn"
+                text={
+                  <>
+                    <strong className={s.strong}>
+                      {agents.count} agent{agents.count !== 1 ? "s" : ""}
+                    </strong>{" "}
+                    still working will be stopped
+                    {agents.longestMs > 0 && (
+                      <> — the longest at {formatDuration(agents.longestMs)}</>
+                    )}
+                  </>
+                }
+              />
+            )}
           </div>
         </div>
 

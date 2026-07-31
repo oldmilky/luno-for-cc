@@ -17,13 +17,16 @@ import { Tooltip } from "../../design/primitives";
 import { send, SkillInfo } from "../../lib/rpc";
 import { SkillsMarketplace } from "./SkillsMarketplace";
 import d from "../../design/primitives/Dropdown.module.scss";
+import { PendingDot } from "./PendingDot";
 import s from "./SkillsPicker.module.scss";
 
 export interface SkillsPickerProps {
   skills: ReadonlyArray<SkillInfo>;
+  /** The disabled-skill list is chosen but not in force — see PendingDot. */
+  pending?: boolean;
 }
 
-export function SkillsPicker({ skills }: SkillsPickerProps) {
+export function SkillsPicker({ skills, pending = false }: SkillsPickerProps) {
   const [open, setOpen] = useState(false);
   const [marketOpen, setMarketOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -108,6 +111,7 @@ export function SkillsPicker({ skills }: SkillsPickerProps) {
             <span className={s.count}>
               {totalEnabled}/{totalCount}
             </span>
+            {pending && <PendingDot />}
             <Icon name="chevronD" size={9} />
           </button>
         </Tooltip>

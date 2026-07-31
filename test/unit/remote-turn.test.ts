@@ -33,6 +33,22 @@ describe("replayedPrompt", () => {
     expect(replayedPrompt(ev)).toBe("Reply with exactly: pong");
   });
 
+  it("ignores a replay the CLI injected rather than took from a person", () => {
+    // `isSynthetic` marks command output the CLI plays back into the
+    // conversation — a `<local-command-stdout>` frame, say, from a slash
+    // command refused over the bridge. Read as a prompt it opens a turn nobody
+    // asked for. The only other defence is one hard-coded English string in
+    // `CLI_CONTROL_MARKERS`, which stops matching the day the wording changes.
+    const ev = {
+      type: "user",
+      isReplay: true,
+      isSynthetic: true,
+      parent_tool_use_id: null,
+      message: { content: "<local-command-stdout></local-command-stdout>" }
+    } as CliEvent;
+    expect(replayedPrompt(ev)).toBeNull();
+  });
+
   it("reads the block form too", () => {
     const ev = {
       type: "user",

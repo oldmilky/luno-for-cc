@@ -35,18 +35,22 @@ export type ContentBlock =
 /**
  * How tool calls get approved.
  *
- * These are LUNO's modes, not the CLI's — `auto` in particular has no CLI
- * equivalent, being `default` plus an explicit allow-list. See
- * `mapPermissionMode` in `providers/claude-cli.ts` for the translation.
+ * One per mode the CLI has and the official client offers, under LUNO's own
+ * names: Ask, Edits, Plan, Agent, Bypass. The behaviour matches theirs; the
+ * vocabulary does not, deliberately. See `mapPermissionMode` in
+ * `providers/claude-cli.ts` for the translation, which is now a formality for
+ * every mode but `default`.
  *
  * `bypass` is the one that turns the gate off entirely: the CLI approves
  * everything itself and never asks, so no approval card appears for anything —
  * including `rm`, `curl … | bash` and force-push. Enabling it requires an
  * explicit confirmation, and it is deliberately absent from the Shift+Tab
  * cycle: a mode that disables every safety check should not be two keystrokes
- * away by accident.
+ * away by accident. The reference client does cycle through it; this is the one
+ * place LUNO knowingly diverges.
  */
-export type PermissionMode = "default" | "plan" | "auto" | "bypass";
+export type PermissionMode =
+  "default" | "acceptEdits" | "plan" | "auto" | "bypass";
 
 export type TaskType =
   | "backend"
@@ -301,6 +305,11 @@ export interface StreamDelta {
     | "model"
     | "permission_request"
     | "permission_resolved"
+    /** The CLI needs a decision that is not about a tool — see
+     *  {@link UserDialogPayload}. Withdrawn through `user_dialog_resolved`,
+     *  which the CLI sends the moment a new user message makes it moot. */
+    | "user_dialog"
+    | "user_dialog_resolved"
     | "compact"
     | "task"
     | "remote_control"
@@ -320,6 +329,11 @@ export interface StreamDelta {
   toolUseId?: string;
   resultContent?: string;
   resultIsError?: boolean;
+  /** Carried on `type: "tool_result"` — the reason the CLI's auto-mode
+   *  classifier refused the call, when it was the mode that stopped it rather
+   *  than the tool that failed. The two are indistinguishable on the wire
+   *  otherwise: a denial arrives as an ordinary failed result. */
+  autoModeDenial?: string;
   usage?: TokenUsage;
   /** Carried on `type: "compact"` — the CLI folded earlier messages away. */
   compaction?: CompactionInfo;
@@ -351,8 +365,12 @@ export interface StreamDelta {
   /** Carried on `type: "permission_resolved"` — the request with this id was
    *  answered somewhere else (a connected phone or browser) and the CLI has
    *  withdrawn it. The card for it must go away; answering it now would write
-   *  against an id the CLI has already forgotten. */
+   *  against an id the CLI has already forgotten. Carried on
+   *  `user_dialog_resolved` for the same reason. */
   requestId?: string;
+  /** Carried on `type: "user_dialog"` — the CLI asking the person something
+   *  that is not a tool call. */
+  dialog?: UserDialogPayload;
   /** Carried on `type: "remote_control"` — the state of the bridge to
    *  claude.ai/code and the Claude mobile app. */
   remoteControl?: RemoteControlStatus;
@@ -369,7 +387,12 @@ export interface StreamDelta {
  * asked". The URLs arrive with the reply to the request that turned it on and
  * are the same ones the CLI would print in a terminal. */
 export interface RemoteControlStatus {
-  state: "off" | "ready" | "connected" | "disconnected" | "error";
+  /** `connecting` is ours, not the CLI's: enabling reaches the Anthropic API
+   *  and takes a moment, and the panel says so at once rather than sitting
+   *  mute. It must not be `ready` — that one claims a bridge is up and waiting,
+   *  with a link the reply has not delivered yet. */
+  state:
+    "off" | "connecting" | "ready" | "connected" | "disconnected" | "error";
   /** The session on claude.ai/code — what a QR code encodes. */
   sessionUrl?: string;
   connectUrl?: string;
@@ -389,6 +412,35 @@ export interface PermissionSuggestion {
 
 /** A pending tool-permission prompt surfaced to the user. Mirrors the
  *  `can_use_tool` control request the Claude CLI emits over stream-json. */
+/**
+ * The dialog kinds LUNO is prepared to draw, and therefore the only ones it
+ * declares on `initialize`.
+ *
+ * Declaring is a switch, not a shop window: the CLI sends a kind only to a
+ * client that named it, and a named kind nothing renders parks the turn. So
+ * this list may only ever grow alongside a card that answers it.
+ */
+export const SUPPORTED_DIALOG_KINDS = ["fable_overage_consent_prompt"] as const;
+
+export type DialogKind = (typeof SUPPORTED_DIALOG_KINDS)[number];
+
+/**
+ * A `request_user_dialog` the CLI is blocked on. Not a permission: nothing is
+ * about to run, the CLI simply cannot continue until the person decides.
+ *
+ * The answer is one of two shapes on the wire —
+ * `{behavior:"completed", result}` or `{behavior:"cancelled"}` — and a result
+ * the kind's own schema rejects is read as a cancel.
+ */
+export interface UserDialogPayload {
+  /** CLI control-request id — echoed back in our control_response. */
+  requestId: string;
+  kind: DialogKind;
+  /** Shape depends on the kind; the card that draws it owns the reading. */
+  payload: Record<string, unknown>;
+  toolUseId?: string;
+}
+
 export interface PermissionRequestPayload {
   /** CLI control-request id — echoed back in our control_response. */
   requestId: string;
@@ -412,6 +464,17 @@ export interface PermissionRequestPayload {
   network?: boolean;
   /** Approval shortcuts the CLI offers (e.g. "accept edits this session"). */
   suggestions: PermissionSuggestion[];
+  /**
+   * `AskUserQuestion` only, and only when the user set a "Question
+   * auto-continue timeout" in their Claude settings. Milliseconds after which
+   * the card answers itself with whatever is selected and lets the turn
+   * continue. Absent means no deadline, which is the CLI's own default.
+   */
+  afkTimeoutMs?: number;
+  /** Set when a subagent raised this prompt rather than the main turn. The
+   *  card says so: otherwise a background agent asking to write a file is
+   *  indistinguishable from the conversation the user is watching. */
+  agentId?: string;
   /**
    * What an "always allow" on this card would grant, already worded — e.g.
    * `Bash(bun run …)`. Absent when no standing grant is on offer: a

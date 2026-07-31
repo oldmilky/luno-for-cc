@@ -4,6 +4,7 @@ import {
   groupWorkflowProgress,
   workflowAgentOutcome,
   subagentOutcome,
+  liveAgents,
   TASK_TOOL_NAMES
 } from "../../webview/src/features/chat/subagent-state";
 import type { TimelineEvent } from "../../webview/src/lib/rpc";
@@ -302,5 +303,55 @@ describe("subagentOutcome", () => {
   // be the worse lie of the two.
   it("does not invent a failure out of a status it does not know", () => {
     expect(subagentOutcome("some_future_state")).toBe("done");
+  });
+});
+
+// What Stop, rewind and edit ask about before destroying it. The number is the
+// whole point: a warning that says "you have background work" is a shrug, one
+// that says "4 agents, the longest at 38m" is a decision.
+describe("live agents", () => {
+  const task = (status: string | undefined, durationMs?: number) => ({
+    taskId: `t${status}${durationMs ?? ""}`,
+    status,
+    durationMs
+  });
+
+  it("counts only the ones that have not reported a terminal status", () => {
+    const progress = {
+      a: task("running", 1_000),
+      b: task(undefined, 2_000),
+      c: task("completed", 9_000),
+      d: task("failed", 9_000),
+      e: task("interrupted", 9_000)
+    } as never;
+
+    expect(liveAgents(progress)).toEqual({ count: 2, longestMs: 2_000 });
+  });
+
+  it("reports the longest elapsed, not the sum or the last", () => {
+    const progress = {
+      a: task("running", 4_000),
+      b: task("running", 61_000),
+      c: task("running", 900)
+    } as never;
+
+    expect(liveAgents(progress).longestMs).toBe(61_000);
+  });
+
+  // A task that has not reported usage yet still counts — it is running, and
+  // the elapsed time is the part we do not know.
+  it("counts an agent that has reported no duration", () => {
+    expect(liveAgents({ a: task("running") } as never)).toEqual({
+      count: 1,
+      longestMs: 0
+    });
+  });
+
+  it("is empty when nothing is running", () => {
+    expect(liveAgents({} as never)).toEqual({ count: 0, longestMs: 0 });
+    expect(liveAgents({ a: task("completed", 5) } as never)).toEqual({
+      count: 0,
+      longestMs: 0
+    });
   });
 });

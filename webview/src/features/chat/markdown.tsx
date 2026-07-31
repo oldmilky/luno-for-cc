@@ -16,6 +16,8 @@ import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import hljs from "highlight.js/lib/common";
 import { Icon } from "../../design/icons";
+import { send } from "../../lib/rpc";
+import { resolveMarkdownHref } from "./markdown-links";
 
 // Hoisted so react-markdown sees one stable plugin list and keeps its
 // processor instead of rebuilding it per render.
@@ -133,9 +135,9 @@ const COMPONENTS: Components = {
   ul: (p) => <ul {...tagged(p, "md-ul")} />,
   ol: (p) => <ol {...tagged(p, "md-ol")} />,
   a: ({ children, href, ...p }) => (
-    <a href={href} target="_blank" rel="noreferrer" {...rest(p)}>
+    <MarkdownLink href={href} {...rest(p)}>
       {children}
-    </a>
+    </MarkdownLink>
   ),
   // react-markdown renders fenced blocks as <pre><code>. We strip the
   // <pre> wrapper (CodeBlock provides its own) and build the highlighted
@@ -191,6 +193,53 @@ function tagged<T extends { node?: unknown; className?: string }>(
     ...r,
     className: className ? `${themeClass} ${className}` : themeClass
   };
+}
+
+/**
+ * A link the host has to follow on our behalf.
+ *
+ * `target="_blank"` is inert inside a webview — the click lands, the browser
+ * never opens, and nothing says so. A path into the workspace is worth more
+ * than an outbound URL here: it opens the file at the line, in the
+ * conversation's own worktree.
+ */
+function MarkdownLink({
+  href,
+  children,
+  ...p
+}: {
+  href?: string;
+  children: ReactNode;
+} & React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+  const target = resolveMarkdownHref(href);
+  if (target.kind === "inert") {
+    return (
+      <a href={href} {...p}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <a
+      href={href}
+      {...p}
+      onClick={(e) => {
+        e.preventDefault();
+        if (target.kind === "external") {
+          send({ type: "openExternal", url: target.url });
+          return;
+        }
+        send({
+          type: "openFile",
+          path: target.path,
+          startLine: target.startLine,
+          endLine: target.endLine
+        });
+      }}
+    >
+      {children}
+    </a>
+  );
 }
 
 // Strip react-markdown's internal `node` prop before spreading onto DOM

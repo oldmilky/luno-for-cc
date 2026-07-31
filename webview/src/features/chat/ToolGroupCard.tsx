@@ -20,6 +20,8 @@ export interface ToolGroupItem {
   input: string;
   result?: string;
   isError?: boolean;
+  /** Set when auto mode refused the call — the reason, not the failure. */
+  blockedReason?: string;
 }
 
 interface ToolGroupCardProps {
@@ -32,7 +34,17 @@ export function ToolGroupCard({ bucket, items }: ToolGroupCardProps) {
   const meta = bucketMeta(bucket);
   const anyPending = items.some((i) => i.result === undefined && !i.isError);
   const anyError = items.some((i) => i.isError);
-  const status = anyPending ? "pending" : anyError ? "error" : "ok";
+  // A refusal is not an error and no longer sets `isError`, so without its own
+  // reading the collapsed row — the default view — showed a green tick over a
+  // call that never ran.
+  const anyBlocked = items.some((i) => i.blockedReason);
+  const status = anyPending
+    ? "pending"
+    : anyError
+      ? "error"
+      : anyBlocked
+        ? "blocked"
+        : "ok";
 
   // Single-tool groups show the target inline in the header so users don't
   // need to expand to see what one happened. Multi-tool groups show the
@@ -48,7 +60,8 @@ export function ToolGroupCard({ bucket, items }: ToolGroupCardProps) {
       className={[
         s.group,
         status === "pending" ? s.groupPending : "",
-        status === "error" ? s.groupError : ""
+        status === "error" ? s.groupError : "",
+        status === "blocked" ? s.groupBlocked : ""
       ]
         .filter(Boolean)
         .join(" ")}
@@ -72,6 +85,11 @@ export function ToolGroupCard({ bucket, items }: ToolGroupCardProps) {
           {status === "error" && (
             <span className={s.groupErr}>
               <Icon name="x" size={11} />
+            </span>
+          )}
+          {status === "blocked" && (
+            <span className={s.groupBlocked}>
+              <Icon name="shield" size={11} />
             </span>
           )}
         </span>
@@ -100,6 +118,7 @@ export function ToolGroupCard({ bucket, items }: ToolGroupCardProps) {
                 input={it.input}
                 result={it.result}
                 isError={it.isError}
+                blockedReason={it.blockedReason}
                 pending={it.result === undefined && !it.isError}
               />
             ))}

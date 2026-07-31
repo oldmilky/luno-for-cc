@@ -24,6 +24,25 @@ describe("findMode", () => {
   it("returns the matching mode option", () => {
     expect(findMode("plan").label).toBe("Plan");
     expect(findMode("auto").label).toBe("Agent");
+    expect(findMode("acceptEdits").label).toBe("Edits");
+  });
+
+  it("offers one entry per mode the CLI has", () => {
+    // Five, in the reference client's order. Missing one means a mode nothing
+    // in the panel can reach — which acceptEdits was until now.
+    expect(MODES.map((m) => m.value)).toEqual([
+      "default",
+      "acceptEdits",
+      "auto",
+      "plan",
+      "bypass"
+    ]);
+  });
+
+  it("marks only bypass as dangerous", () => {
+    expect(MODES.filter((m) => m.danger).map((m) => m.value)).toEqual([
+      "bypass"
+    ]);
   });
   it("defaults to the first mode (default/Ask) for unknown / undefined", () => {
     expect(findMode(undefined).value).toBe("default");

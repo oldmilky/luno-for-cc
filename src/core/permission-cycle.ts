@@ -17,6 +17,7 @@ import type { PermissionMode } from "./types.js";
  */
 export const CYCLE_ORDER: readonly PermissionMode[] = [
   "default",
+  "acceptEdits",
   "plan",
   "auto"
 ];

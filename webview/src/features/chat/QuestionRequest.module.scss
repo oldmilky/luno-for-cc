@@ -1,0 +1,265 @@
+// ─────────────────────────────────────────────────────────────
+// Question request — the body of the permission card when the CLI
+// is asking rather than gating. No risk tone here: nothing runs on
+// the other side of this card, so it borrows the card's accent and
+// adds no colour of its own.
+// ─────────────────────────────────────────────────────────────
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+// ── Tabs (only when the call carried more than one question) ──
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tab {
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--round-sm);
+  background: transparent;
+  color: var(--t3);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s2);
+    color: var(--t2);
+  }
+}
+
+.tabActive {
+  border-color: var(--b2);
+  background: var(--s2);
+  color: var(--t1);
+}
+
+// A dot rather than a colour swap: the tab still has to read as active or
+// not, and two colour axes on one 11px chip is one too many.
+.tabAnswered::after {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: var(--ok);
+  vertical-align: middle;
+}
+
+.question {
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+// ── Options ──────────────────────────────────────────────────
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+
+  // The pane stops earning its width long before the chat column gets narrow.
+  @media (width <= 620px) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.option {
+  // Anchors the visually-hidden control, which must stay in the layout to keep
+  // its place in the tab order.
+  position: relative;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 7px 9px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round);
+  background: color-mix(in srgb, var(--s0) 50%, transparent);
+  cursor: pointer;
+  transition:
+    border-color var(--motion-hover) var(--ease-out),
+    background-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--b2);
+  }
+
+  // Not the accent: on this card an accent border means *chosen*, and a
+  // focused-but-unpicked row wearing the same colour reads as already picked.
+  // The halo on the control is what says "focus".
+  &:focus-within {
+    border-color: var(--b3);
+  }
+}
+
+.optionOn {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+// Present for semantics, keyboard and screen readers; never seen. Not
+// `display: none` — that would take it out of the tab order and off the
+// accessibility tree with it.
+.control {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+// What the user actually sees. Square for a multi-select, round for a single
+// one — the shape is the only thing telling them whether picking a second
+// option replaces the first.
+.box {
+  position: relative;
+  flex-shrink: 0;
+  margin-top: 1px;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid var(--b3);
+  border-radius: 4px;
+  transition:
+    border-color var(--motion-hover) var(--ease-out),
+    background-color var(--motion-hover) var(--ease-out);
+}
+
+.boxRound {
+  border-radius: 50%;
+}
+
+.option:hover .box {
+  border-color: var(--t4);
+}
+
+.control:checked + .box {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+// The mark. A dot for the radio, a tick for the checkbox — drawn rather than
+// glyphed so it scales with the box and needs no icon import.
+.control:checked + .boxRound::after {
+  position: absolute;
+  inset: 3.5px;
+  border-radius: 50%;
+  background: var(--on-accent);
+  content: "";
+}
+
+.control:checked + .box:not(.boxRound)::after {
+  position: absolute;
+  top: 1px;
+  left: 4.5px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--on-accent);
+  border-width: 0 1.75px 1.75px 0;
+  transform: rotate(45deg);
+  content: "";
+}
+
+// Keyboard focus only, and on the box rather than as the platform's square
+// outline around a control that is round.
+.control:focus-visible + .box {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.optionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.optionLabel {
+  color: var(--t1);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+// --t2, not the --t3 this app uses for secondary text everywhere else. Measured
+// against --s1: t3 is 4.36:1 on copper, under AA, and this is the line the user
+// reads to decide — on a card that blocks the turn until they do. t2 is 10.47:1
+// and still reads as secondary against the 15.74:1 label above it.
+.optionDesc {
+  color: var(--t2);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+// Reads as part of the option rather than as a form control dropped into it:
+// no box of its own, just a rule under the text and the caret sitting on the
+// same baseline as the label above. The row around it is already a container —
+// a second border inside it was one frame too many.
+.otherInput {
+  margin-top: 5px;
+  padding: 2px 0 3px;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--b2);
+  border-radius: 0;
+  background: transparent;
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  transition: border-color var(--motion-hover) var(--ease-out);
+
+  &::placeholder {
+    color: var(--t4);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    border-bottom-color: var(--b1);
+    // Not `opacity`: the label above is a sibling, and dimming the whole row
+    // would read as the option itself being unavailable.
+    filter: opacity(0.55);
+  }
+
+  &:focus {
+    outline: none;
+    border-bottom-color: var(--accent);
+  }
+}
+
+// ── Preview pane ─────────────────────────────────────────────
+
+.preview {
+  overflow: auto;
+  padding: 8px 10px;
+  max-height: 240px;
+  min-width: 0;
+  border: 1px solid var(--b1);
+  border-radius: var(--round);
+  background: color-mix(in srgb, var(--s0) 50%, transparent);
+  font-size: 11.5px;
+}
+
+.previewEmpty {
+  color: var(--t4);
+  font-size: 11.5px;
+}

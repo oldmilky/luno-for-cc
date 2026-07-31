@@ -179,7 +179,8 @@ export class Orchestrator {
             this.session.addToolResult(
               delta.toolUseId,
               delta.resultContent ?? "",
-              !!delta.resultIsError
+              !!delta.resultIsError,
+              delta.autoModeDenial
             );
           }
           break;

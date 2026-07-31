@@ -16,17 +16,27 @@ const vscode = acquireVsCodeApi();
 
 // Mirrors PermissionMode in src/core/types.ts. "bypass" turns the approval gate
 // off entirely and is deliberately absent from the Shift+Tab cycle.
-export type PermissionMode = "default" | "auto" | "plan" | "bypass";
+export type PermissionMode =
+  "default" | "acceptEdits" | "auto" | "plan" | "bypass";
 
 /** Reasoning effort levels — mirror the CLI's `--effort` choices. */
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+
+/** A composer control whose setting only reaches the CLI through argv, and so
+ *  cannot take effect until the process is replaced. Mirrors the host's
+ *  `PendingSetting` — the protocol is the only thing between them. */
+export type PendingSetting = "mode" | "effort" | "thinking" | "skills";
 
 /** Whether this conversation can be driven from another device.
  *
  * Mirrors `RemoteControlStatus` in `src/core/types.ts`; the webview cannot
  * import from the host half, so the shape is restated rather than shared. */
 export interface RemoteControlStatus {
-  state: "off" | "ready" | "connected" | "disconnected" | "error";
+  /** `connecting` is the host's own, published the moment the toggle is hit —
+   *  the round-trip to the Anthropic API is slow enough to read as broken. It
+   *  carries no `sessionUrl`, which is exactly why it is not `ready`. */
+  state:
+    "off" | "connecting" | "ready" | "connected" | "disconnected" | "error";
   /** The session on claude.ai/code. Changes if the CLI process is replaced,
    *  so the banner must show this rather than a remembered link. */
   sessionUrl?: string;
@@ -306,6 +316,20 @@ export interface PermissionSuggestion {
   destination?: string;
 }
 
+/**
+ * A `request_user_dialog` the CLI is blocked on. Mirrors `UserDialogPayload`
+ * in `src/core/types.ts`; the webview cannot import the host half.
+ *
+ * `payload` is shaped by the kind, and the card that draws that kind owns the
+ * reading — nothing generic here may assume a field.
+ */
+export interface UserDialogView {
+  requestId: string;
+  kind: "fable_overage_consent_prompt";
+  payload: Record<string, unknown>;
+  toolUseId?: string;
+}
+
 export interface PermissionRequestView {
   /** CLI control-request id — passed back verbatim in the response. */
   requestId: string;
@@ -328,6 +352,12 @@ export interface PermissionRequestView {
    *  Absent means no standing grant is on offer and the button is not shown:
    *  a destructive or network call, or a composed shell command. */
   grantLabel?: string;
+  /** `AskUserQuestion` only. Milliseconds after which the card answers itself
+   *  with whatever is selected, from the user's own Claude setting. Absent
+   *  means it waits — which is the CLI's default and most cards' behaviour. */
+  afkTimeoutMs?: number;
+  /** Set when a subagent raised this prompt rather than the main turn. */
+  agentId?: string;
   /** Approval shortcuts the CLI offers (drives the "allow this turn" button). */
   suggestions: PermissionSuggestion[];
 }
@@ -474,7 +504,21 @@ export type Outbound =
        *  what "this shape" means from the request it is answering — the panel
        *  says which approval, not what to grant. */
       always?: boolean;
+      /** Allow, but run the tool with this input instead of the one it
+       *  proposed. Omitted means unchanged, which is every card but one:
+       *  `AskUserQuestion` returns the input it is handed, so the answers the
+       *  user picked reach the model here or not at all. Shaped by the CLI's
+       *  schema — the host forwards it without reading it. */
+      updatedInput?: Record<string, unknown>;
+      /** Deny only: what the user said to do instead. Optional — empty keeps
+       *  the standing refusal wording, which is what stops the model
+       *  re-proposing the same call. */
+      reason?: string;
     }
+  /** Answers a `userDialog`. `result` omitted is a cancel — every dialog kind
+   *  defaults to one, so closing the card without choosing frees the turn
+   *  rather than leaving the CLI waiting on it. */
+  | { type: "userDialogResponse"; requestId: string; result?: unknown }
   | { type: "newSession" }
   | { type: "setModel"; model: string }
   | { type: "setPermissionMode"; mode: PermissionMode }
@@ -608,6 +652,25 @@ export type Inbound =
       /** xhigh + standing workflow orchestration. Travels with the posture
        *  rather than inside `effort`, which mirrors the CLI's five levels. */
       ultracode?: boolean;
+      /**
+       * Controls whose value the running CLI has not been given.
+       *
+       * Only argv carries effort, the posture prompt and the disabled-skill
+       * list, and argv is fixed at spawn — so applying them means replacing the
+       * process, which kills every background agent in it. While a conversation
+       * has agents running the change is held, and these are the controls that
+       * are therefore showing something that is not yet in force.
+       */
+      pendingSettings?: PendingSetting[];
+      /**
+       * Modes the user's Claude Code settings forbid, which the picker must not
+       * offer. Today that is `bypass` under
+       * `permissions.disableBypassPermissionsMode`.
+       *
+       * Absent and empty mean the same thing, and both mean "no policy" — a
+       * host too old to send it must not be read as forbidding everything.
+       */
+      disabledModes?: PermissionMode[];
     }
   // `sessionId` on all three: the webview persists it, and it is the only thing
   // VS Code hands back when it restores a conversation's editor tab after a
@@ -636,6 +699,12 @@ export type Inbound =
    *  the same session — and the CLI has withdrawn it. The card goes away; what
    *  happened is on the timeline. */
   | { type: "permissionResolved"; requestId: string }
+  /** The CLI needs a decision that is not about a tool. Blocks the turn the
+   *  same way an approval does. */
+  | { type: "userDialog"; dialog: UserDialogView }
+  /** Withdrawn — the CLI retires a dialog the moment a new user message makes
+   *  it moot, and answering it afterwards writes against a forgotten id. */
+  | { type: "userDialogResolved"; requestId: string }
   | { type: "error"; message: string }
   | { type: "editorContext"; context: EditorContext | null }
   | { type: "rewind"; events: TimelineEvent[] }
@@ -674,7 +743,13 @@ export type Inbound =
   | { type: "toolGrants"; grants: ToolGrantView[] }
   /** Settings the webview itself acts on, as opposed to the many the host
    *  reads on its behalf. Sent on attach and whenever the user edits one. */
-  | { type: "settings"; useCtrlEnterToSend: boolean }
+  | {
+      type: "settings";
+      useCtrlEnterToSend: boolean;
+      /** `luno.startupSuggestions` verbatim — resolved into cards by
+       *  `features/chat/startup-suggestions.ts`. */
+      startupSuggestions: string[];
+    }
   /** Text handed over from outside — a `vscode://` link. It lands in the
    *  composer and stops there; nothing external gets to start a turn. */
   | { type: "prefillComposer"; text: string }

@@ -602,6 +602,36 @@ describe("subagents that outlive their turn", () => {
     expect(host.live.status).toBeUndefined();
   });
 
+  // A surface is not a conversation: the sidebar hands its webview to whichever
+  // chat the user picked, and the live half of a card belongs to the chat that
+  // owns the agent. Measured 2026-07-29: switching away from a chat running a
+  // workflow left the *other* chat's header reading `agents`, and switching
+  // back showed a card with a title and nothing moving in it.
+  it("hands a new surface its own conversation's live agents", async () => {
+    script.push(started, progress);
+    const { host, webview } = open();
+    webview.deliver({ type: "prompt", text: "launch it" });
+    await settle();
+
+    const second = makeWebview();
+    host.show({ webview: second, reveal: () => {} } as never);
+    await settle();
+
+    const live = second.sent.filter((m) => m.type === "subagentProgress");
+    expect(
+      live.map((m) => (m as { task?: { taskId?: string } }).task?.taskId)
+    ).toEqual([TASK]);
+  });
+
+  it("hands it nothing when that conversation has no agents running", async () => {
+    const { host } = open();
+    const surface = makeWebview();
+    host.show({ webview: surface, reveal: () => {} } as never);
+    await settle();
+
+    expect(surface.sent.some((m) => m.type === "subagentProgress")).toBe(false);
+  });
+
   it("closes the card when the agent reports after the turn", async () => {
     script.push(started, progress);
     const { webview } = open();

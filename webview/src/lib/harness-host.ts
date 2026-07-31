@@ -87,6 +87,41 @@ export function harnessReplies(
       ]
     },
     requestSkills: { type: "skills", skills: [] },
+    // All three sources, because the empty state treats them differently: the
+    // first two become its Project and Personal groups and the `cli` entry
+    // must not appear at all — with plugins installed that list runs to
+    // hundreds of names and carries no description for any of them.
+    requestSlashCommands: {
+      type: "slashCommands",
+      commands: [
+        {
+          name: "check",
+          source: "project",
+          description:
+            "Fast read-only review of the uncommitted working tree. Use when the user says /check, or mid-feature before committing."
+        },
+        {
+          name: "browser",
+          source: "project",
+          description:
+            "Verify or measure the webview in a real browser. Use when the user says /browser, or whenever a UI claim needs evidence."
+        },
+        {
+          name: "ship",
+          source: "project",
+          description:
+            "Full delivery pipeline for non-trivial work — plan, implement, gates, browser evidence, independent review, report."
+        },
+        {
+          name: "start",
+          source: "user",
+          description:
+            "Load project context at the start of a session and report a compact brief."
+        },
+        { name: "brainstorming", source: "user" },
+        { name: "marketing-skills:ads", source: "cli" }
+      ]
+    },
     // A fixed set, not a search: ranking is the host's job and is pinned by
     // `test/unit/mention-match.test.ts`. What the harness is for here is that
     // the two kinds render as two kinds. `id` is overwritten with the
@@ -121,7 +156,92 @@ export function harnessReplies(
       ]
     },
     requestHistory: { type: "historyList", sessions: [] },
-    requestConnectors: { type: "connectorsList", connectors: [] },
+    // One of each state the modal groups on, because the split is the whole
+    // question: connected, errored, custom-and-down, imported from Claude
+    // Code, and three the user has never touched.
+    requestConnectors: {
+      type: "connectorsList",
+      connectors: [
+        {
+          id: "figma",
+          name: "Figma",
+          vendor: "Figma",
+          description: "Read designs and write code back into a file.",
+          transport: "streamable-http",
+          categories: ["design"],
+          icon: "edit",
+          builtIn: true,
+          status: "connected",
+          connectedAt: now - 3 * HOUR,
+          toolCount: 27
+        },
+        {
+          id: "linear",
+          name: "Linear",
+          vendor: "Linear",
+          description: "Issues, projects and cycles.",
+          transport: "streamable-http",
+          categories: ["project"],
+          icon: "layers",
+          builtIn: true,
+          status: "disconnected",
+          toolCount: 0
+        },
+        {
+          id: "sentry",
+          name: "Sentry",
+          vendor: "Sentry",
+          description: "Errors and traces from your deployed services.",
+          transport: "streamable-http",
+          categories: ["observability"],
+          icon: "danger",
+          builtIn: true,
+          status: "error",
+          lastError: "401 from the token endpoint",
+          toolCount: 0
+        },
+        {
+          id: "notion",
+          name: "Notion",
+          vendor: "Notion",
+          description: "Pages and databases from your workspace.",
+          transport: "streamable-http",
+          categories: ["docs"],
+          icon: "book",
+          builtIn: true,
+          status: "disconnected",
+          toolCount: 0
+        },
+        {
+          id: "slug-a1b2c3",
+          name: "my-api",
+          vendor: "Custom",
+          description: "An internal server added by URL.",
+          url: "https://mcp.internal.example/sse",
+          transport: "sse",
+          categories: [],
+          icon: "plug",
+          builtIn: false,
+          status: "disconnected",
+          toolCount: 0
+        },
+        {
+          id: "managed:user:gitlab",
+          name: "gitlab",
+          vendor: "Claude Code",
+          description: "Imported from your Claude Code config.",
+          transport: "stdio",
+          command: "npx -y @gitlab/mcp",
+          categories: [],
+          icon: "branch",
+          builtIn: true,
+          status: "connected",
+          managed: true,
+          scope: "user",
+          toolCount: 92
+        }
+      ]
+    },
     // Carries `utilization`, because that is what a logged-in account looks
     // like: the panel speaks in the server's percentages. Drop the field to
     // see the other half — token counts and no fraction, which is what an API

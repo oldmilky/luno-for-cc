@@ -4,8 +4,15 @@ src/**
 webview/src/**
 webview/node_modules/**
 test/**
+# The component half of the suite. `test/**` above is anchored at the root and
+# does not reach it — measured: both its .tsx files shipped in 0.36.0 before
+# this line existed.
+webview/test/**
 docs/**
 **/*.ts
+# .tsx as well as .ts. `webview/src/**` already covers the components, so this
+# is for everything else — and it is what the two leaked files needed.
+**/*.tsx
 **/*.map
 esbuild.config.mjs
 tsconfig.json
@@ -67,3 +74,6 @@ TESTING.md
 # gitignored either, and vsce reads this file rather than .gitignore — it
 # swept 14 files and 107 kB of probe output into 0.31.0 before this line.
 .tmp-cli-probe/
+
+# Live probes and throwaway scripts — never shipped.
+scratch/**

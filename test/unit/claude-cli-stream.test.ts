@@ -555,6 +555,40 @@ describe("ClaudeCliProvider — a session process outlives its turns", () => {
     await finished;
   }
 
+  // Effort has no live command — the CLI takes exactly five, and this is not
+  // one of them — so applying it means replacing the process. With agents
+  // inside that process, the change waits instead: measured, an `interrupt`
+  // ends a background agent 10ms after the request, and a replacement is worse
+  // than an interrupt because it also takes the session with it.
+  it("holds a settings change while agents are running, and says which", async () => {
+    let live = true;
+    const pending: string[][] = [];
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true,
+      effort: "high",
+      hasLiveWork: () => live,
+      onSettingsPending: (p) => pending.push(p)
+    });
+    await turn(provider);
+
+    provider.updateOptions({ effort: "max" });
+    await turn(provider);
+
+    // Same process, and the panel was told the chip is ahead of the session.
+    expect(children).toHaveLength(1);
+    expect(pending.at(-1)).toEqual(["effort"]);
+
+    // Once the work drains the very next turn picks the change up — nothing
+    // was stored for it, `buildArgs` simply finds the difference again.
+    live = false;
+    await turn(provider);
+    expect(children).toHaveLength(2);
+    expect(pending.at(-1)).toEqual([]);
+  });
+
   it("keeps the same process when only the MCP config path changed", async () => {
     const provider = new ClaudeCliProvider({
       binary: "claude",
@@ -584,6 +618,55 @@ describe("ClaudeCliProvider — a session process outlives its turns", () => {
     await turn(provider);
 
     expect(children).toHaveLength(1);
+  });
+
+  // Measured 2026-07-29 in the running extension: the bridge was switched on
+  // mid-turn, the log said `replacing the CLI process: ---model -default`, and
+  // the CLI was SIGTERMed halfway through an assistant message. The toggle has
+  // no turn behind it, so it has no model to rebuild argv from — and argv
+  // rebuilt without one does not match what the process is running.
+  it("does not replace it when the bridge is switched on mid-conversation", async () => {
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true
+    });
+    await turn(provider);
+    expect(children).toHaveLength(1);
+
+    // Not awaited: the CLI's answer to the control request never comes here,
+    // and the spawn decision is made before that request is even sent.
+    void provider.enableRemoteControl().catch(() => {});
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(children).toHaveLength(1);
+    expect(children[0].killed).toBe(false);
+  });
+
+  it("tells a turn still reading when the process is taken away", async () => {
+    // The exit handler routes `done`, but `route` delivers through
+    // `session.sink`, which `disposeSession` clears on its way out — so the
+    // turn was left waiting on a generator nothing would ever push to again.
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true
+    });
+    const collected: StreamDelta[] = [];
+    const finished = (async () => {
+      for await (const d of provider.stream(req())) collected.push(d);
+    })();
+    await new Promise((r) => setTimeout(r, 5));
+
+    provider.disposeSession();
+    await finished;
+
+    expect(collected.at(-1)).toMatchObject({ type: "done" });
+    expect(collected.find((d) => d.type === "error")?.error).toMatch(
+      /session ended before this turn finished/i
+    );
   });
 
   it("still replaces it for something a live session cannot be told", async () => {
@@ -804,11 +887,20 @@ describe("ClaudeCliProvider — steering a running turn", () => {
     });
     // An interrupt would have taken every background agent with it (measured:
     // `status: "stopped"` 10ms later), which is why no send path may use one.
+    //
+    // Asserted on the subtype rather than on "no control_request at all": a
+    // session legitimately sends others of its own accord — `initialize` at
+    // spawn, `remote_control` on the toggle — and none of them are the send
+    // path. The rule being kept here is about interrupting, not about the
+    // channel being quiet.
     expect(
-      (child.written as { type?: string }[]).some(
-        (m) => m.type === "control_request"
+      (
+        child.written as { type?: string; request?: { subtype?: string } }[]
+      ).filter(
+        (m) =>
+          m.type === "control_request" && m.request?.subtype === "interrupt"
       )
-    ).toBe(false);
+    ).toHaveLength(0);
   });
 
   it("keeps it in the running turn: one turn, one result, no announcement", async () => {
@@ -849,8 +941,717 @@ describe("ClaudeCliProvider — steering a running turn", () => {
     ]);
   });
 
+  it("stays quiet when the turn it landed in belongs to another surface", async () => {
+    // `session.sink` is null for the whole of a phone-driven turn — only
+    // `streamInSession` ever installs one — so the sink alone cannot tell "no
+    // turn" from "somebody else's turn". Announcing it here opens a second turn
+    // that closes the queue receiving the phone's answer mid-sentence, sealing
+    // the half written so far as a finished reply with no interrupted marker.
+    const provider = sessionProvider();
+    const { finished } = await drive(provider);
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+
+    // A prompt typed on the phone: replayed under a uuid that is not ours.
+    child.emitLine({
+      type: "user",
+      uuid: "phone-1",
+      isReplay: true,
+      message: { role: "user", content: "what changed today?" }
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    provider.steer("and check the tests");
+    child.emitLine(echo(written()[1] as never));
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(outOfTurn).toEqual([
+      { type: "remote_prompt", prompt: "what changed today?" }
+    ]);
+  });
+
   it("refuses when there is no session, so the caller opens an ordinary turn", () => {
     expect(sessionProvider().steer("nothing to write to")).toBe(false);
+  });
+});
+
+describe("ClaudeCliProvider — a grant that must not outlive its turn", () => {
+  let child: any;
+  let outOfTurn: StreamDelta[];
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    child = makeFakeChild();
+    outOfTurn = [];
+    (spawn as unknown as ReturnType<typeof vi.fn>).mockReturnValue(child);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const sessionProvider = () =>
+    new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true,
+      onOutOfTurn: (d) => outOfTurn.push(d)
+    });
+
+  const canUseTool = (id: string) => ({
+    type: "control_request",
+    request_id: id,
+    request: {
+      subtype: "can_use_tool",
+      tool_name: "Write",
+      input: { file_path: `/tmp/${id}.ts`, content: "x" }
+    }
+  });
+
+  /** Every permission the host answered by itself, as `id:behavior`. */
+  const answers = () =>
+    (
+      child.written as {
+        type?: string;
+        response?: {
+          request_id?: string;
+          response?: { behavior?: string };
+        };
+      }[]
+    )
+      .filter((m) => m.type === "control_response" && m.response?.response)
+      .map(
+        (m) => `${m.response!.request_id}:${m.response!.response!.behavior}`
+      );
+
+  it("stops auto-allowing edits once the turn that granted it ends", async () => {
+    // "Allow this turn" is cleared at the top of `stream()`, and a turn the
+    // phone or a steered message opened never enters it. Cleared at the
+    // `result` instead, which is where a turn ends in session mode, both
+    // surfaces are covered.
+    const provider = sessionProvider();
+    const { finished } = await drive(provider);
+
+    child.emitLine(canUseTool("perm-1"));
+    await new Promise((r) => setTimeout(r, 20));
+    provider.respondToPermission("perm-1", "allow", { restOfTurn: true });
+
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+
+    // The next turn is not this one, whoever opened it.
+    child.emitLine(canUseTool("perm-2"));
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(answers()).toEqual(["perm-1:allow"]);
+    expect(
+      outOfTurn.filter((d) => d.type === "permission_request")
+    ).toHaveLength(1);
+  });
+
+  it("keeps a prompt raised out of turn answerable past an unrelated turn", async () => {
+    // A background agent's prompt has no turn to end. The turn-end sweep used
+    // to clear the whole map, destroying its request id — from that moment the
+    // card could not be answered at all and the CLI stayed blocked for the
+    // life of the process.
+    const provider = sessionProvider();
+    const first = await drive(provider);
+    child.emitLine({ type: "result", subtype: "success" });
+    await first.finished;
+
+    // The agent asks with nothing reading.
+    child.emitLine(canUseTool("agent-1"));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(
+      outOfTurn.filter((d) => d.type === "permission_request")
+    ).toHaveLength(1);
+
+    // A whole unrelated turn comes and goes in the meantime.
+    const second = await drive(provider);
+    child.emitLine({ type: "result", subtype: "success" });
+    await second.finished;
+
+    provider.respondToPermission("agent-1", "deny");
+    expect(answers()).toEqual(["agent-1:deny"]);
+  });
+
+  it("still retires the prompts that did belong to the turn", async () => {
+    // The other half: an id raised inside a turn and never answered must not
+    // outlive it, or a stale card could be answered against a request the CLI
+    // has forgotten.
+    const provider = sessionProvider();
+    const { finished } = await drive(provider);
+    child.emitLine(canUseTool("perm-1"));
+    await new Promise((r) => setTimeout(r, 20));
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+
+    provider.respondToPermission("perm-1", "deny");
+    expect(answers()).toEqual([]);
+  });
+
+  it("still honours the grant for the rest of the turn that gave it", async () => {
+    // The guard against fixing the leak by clearing the flag too early.
+    const provider = sessionProvider();
+    const { finished } = await drive(provider);
+
+    child.emitLine(canUseTool("perm-1"));
+    await new Promise((r) => setTimeout(r, 20));
+    provider.respondToPermission("perm-1", "allow", { restOfTurn: true });
+
+    child.emitLine(canUseTool("perm-2"));
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(answers()).toEqual(["perm-1:allow", "perm-2:allow"]);
+
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+  });
+});
+
+describe("ClaudeCliProvider — the bridge toggle spawning a process", () => {
+  let child: any;
+  let children: any[];
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    children = [];
+    (spawn as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      child = makeFakeChild();
+      children.push(child);
+      return child;
+    });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const turn = async (provider: ClaudeCliProvider, model: string) => {
+    const collected: StreamDelta[] = [];
+    const finished = (async () => {
+      for await (const d of provider.stream({
+        model,
+        maxTokens: 1,
+        messages: [{ role: "user", content: "go" }],
+        tools: []
+      })) {
+        collected.push(d);
+      }
+    })();
+    await new Promise((r) => setTimeout(r, 10));
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+  };
+
+  it("does not replace the process on the first turn after /rc, in plan mode", async () => {
+    // The `/rc` spawn used to record `taskType: undefined`, and
+    // `streamInSession`'s `session.taskType ?? opts.taskType` then reached past
+    // it to the freshly classified one — so the very next turn built argv with
+    // a task-type `--append-system-prompt` the live process did not have, and
+    // replaced it. Under Remote Control that hands the phone a session URL
+    // nobody is holding.
+    // The order that bites: `/rc` on a fresh chat, so nothing has been
+    // classified yet, and the first turn is what sets a task type.
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "plan",
+      sessionMode: true,
+      model: "claude-sonnet-4-6"
+    });
+
+    void provider.enableRemoteControl();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(children).toHaveLength(1);
+
+    // What `runPromptTurn` does before every turn.
+    provider.updateOptions({ taskType: "backend" });
+    await turn(provider, "claude-sonnet-4-6");
+
+    expect(children).toHaveLength(1);
+  });
+
+  it("still picks the current playbook up on the next process", async () => {
+    // The other half: keeping a live session's "none" must not mean a task type
+    // never reaches the CLI again. A replacement builds argv from `opts`.
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "plan",
+      sessionMode: true,
+      model: "claude-sonnet-4-6"
+    });
+    // Nothing answers the control request here, and `disposeSession` below
+    // rejects everything still pending — which is the real path, and the one
+    // `conversation-host` handles. Swallow it so it does not surface as an
+    // unhandled rejection and fail the run.
+    void provider.enableRemoteControl().catch(() => {});
+    await new Promise((r) => setTimeout(r, 20));
+    provider.updateOptions({ taskType: "backend" });
+    await turn(provider, "claude-sonnet-4-6");
+
+    provider.disposeSession();
+    await turn(provider, "claude-sonnet-4-6");
+
+    const argv = (spawn as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[1][1] as string[];
+    // Assert the playbook itself, not how many appends ride with it — the
+    // count also moves when an unrelated append is added or dropped.
+    expect(argv.some((a) => a.startsWith("# Backend work"))).toBe(true);
+  });
+
+  it("does not replace it over an effort level the pinned model refuses", async () => {
+    // `--effort` is decided against the model's own ladder. Spawned with no
+    // model there is no ladder, so the flag always went on — and the first turn
+    // named a model whose ladder drops it, which is a differing flag and a
+    // replacement.
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true,
+      effort: "xhigh",
+      model: "claude-sonnet-4-6"
+    });
+
+    void provider.enableRemoteControl();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(children).toHaveLength(1);
+
+    await turn(provider, "claude-sonnet-4-6");
+
+    expect(children).toHaveLength(1);
+  });
+});
+
+describe("ClaudeCliProvider — the process going away", () => {
+  let child: any;
+  let outOfTurn: StreamDelta[];
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    child = makeFakeChild();
+    outOfTurn = [];
+    (spawn as unknown as ReturnType<typeof vi.fn>).mockReturnValue(child);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const sessionProvider = () =>
+    new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true,
+      onOutOfTurn: (d) => outOfTurn.push(d)
+    });
+
+  const die = () => {
+    child.exitCode = 1;
+    child.emit("exit");
+  };
+
+  it("settles an in-flight control request instead of leaving it to time out", async () => {
+    // `sendControl` sits on a 30s timer with no idea the pipe it was written to
+    // has closed. Left alone, a replacement joining `remoteControlInFlight`
+    // attaches itself to a promise bound to a dead process and sends nothing.
+    const provider = sessionProvider();
+    await drive(provider);
+    const enabling = provider.enableRemoteControl();
+    await new Promise((r) => setTimeout(r, 20));
+
+    die();
+
+    await expect(enabling).rejects.toThrow(/ended before it answered/);
+  });
+
+  it("stops the pill describing a session that no longer exists", async () => {
+    // The bridge is still wanted, so a replacement will bring one back — which
+    // is `connecting`, not `off` and certainly not a live-looking URL.
+    const provider = sessionProvider();
+    const { finished } = await drive(provider);
+    const enabling = provider.enableRemoteControl();
+    await new Promise((r) => setTimeout(r, 20));
+    const req = (
+      child.written as {
+        type?: string;
+        request_id?: string;
+        request?: { subtype?: string };
+      }[]
+    ).find((m) => m.request?.subtype === "remote_control");
+    child.emitLine({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: req!.request_id,
+        response: { session_url: "https://claude.ai/code/gone" }
+      }
+    });
+    await enabling;
+    expect(provider.remoteControlStatus().sessionUrl).toBe(
+      "https://claude.ai/code/gone"
+    );
+
+    // The turn ends first, so the panel is between turns — which is where a
+    // process dying unwatched actually leaves it, and it puts the delta on the
+    // out-of-turn seam rather than into a turn's sink.
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+    die();
+
+    expect(provider.remoteControlStatus()).toEqual({ state: "connecting" });
+    expect(outOfTurn.filter((d) => d.type === "remote_control").at(-1)).toEqual(
+      {
+        type: "remote_control",
+        remoteControl: { state: "connecting" }
+      }
+    );
+  });
+
+  it("does not send a prompt the user cancelled while it waited for the CLI", async () => {
+    // A turn submitted while the session is busy parks in `waitUntilIdle`.
+    // Stop pressed there queues this turn's `done` — and the drain used to
+    // write the prompt anyway the moment the previous turn reported.
+    const provider = sessionProvider();
+    const first = await drive(provider);
+
+    const second: StreamDelta[] = [];
+    const running = (async () => {
+      for await (const d of provider.stream({
+        model: "claude-sonnet-4-6",
+        maxTokens: 1,
+        messages: [{ role: "user", content: "the cancelled one" }],
+        tools: []
+      })) {
+        second.push(d);
+      }
+    })();
+    await new Promise((r) => setTimeout(r, 20));
+
+    provider.cancel();
+    child.emitLine({ type: "result", subtype: "success" });
+    await first.finished;
+    await running;
+
+    const sent = (
+      child.written as { type?: string; message?: { content?: string } }[]
+    ).filter((m) => m.type === "user");
+    expect(sent.map((m) => m.message?.content)).not.toContain(
+      "the cancelled one"
+    );
+  });
+});
+
+describe("ClaudeCliProvider — the editor context on the wire", () => {
+  let child: any;
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    child = makeFakeChild();
+    (spawn as unknown as ReturnType<typeof vi.fn>).mockReturnValue(child);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const CONTEXT_A = "# What the user is looking at\n\nActive file: a.ts";
+  const CONTEXT_B = "# What the user is looking at\n\nActive file: b.ts";
+
+  const contextProvider = (editorContext?: string) =>
+    new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true,
+      ...(editorContext && { editorContext })
+    });
+
+  /** What each `user` record actually carried to the CLI, in order. */
+  const contents = () =>
+    (
+      child.written as {
+        type?: string;
+        message?: { content?: string };
+      }[]
+    )
+      .filter((m) => m.type === "user")
+      .map((m) => m.message?.content ?? "");
+
+  it("carries it on the first message of a session", async () => {
+    const provider = contextProvider(CONTEXT_A);
+    const { finished } = await drive(provider);
+
+    expect(contents()[0]).toBe(CONTEXT_A + "\n\nfetch the docs");
+
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+  });
+
+  it("does not repeat it while the user is looking at the same thing", async () => {
+    // It rides on the message text, so every surface sharing this session
+    // renders it as part of what the user typed. Repeated, the transcript on
+    // claude.ai is a wall of context blocks — measured 2026-07-30.
+    const provider = contextProvider(CONTEXT_A);
+    const { finished } = await drive(provider);
+    provider.steer("and check the tests");
+
+    expect(contents()[1]).toBe("and check the tests");
+
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+  });
+
+  it("carries it again the moment it moves", async () => {
+    const provider = contextProvider(CONTEXT_A);
+    const { finished } = await drive(provider);
+    provider.updateOptions({ editorContext: CONTEXT_B });
+    provider.steer("what about this one");
+
+    expect(contents()[1]).toBe(CONTEXT_B + "\n\nwhat about this one");
+
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+  });
+
+  it("does not count a write the CLI never took", async () => {
+    // The context went nowhere, so the next message has to carry it. Recording
+    // it on a failed write would lose it for the life of the session.
+    const provider = contextProvider(CONTEXT_A);
+    const { finished } = await drive(provider);
+    // The first message carried CONTEXT_A; move it, then refuse the write.
+    provider.updateOptions({ editorContext: CONTEXT_B });
+    const live = child.stdin;
+    const dead = new Writable({
+      write: (_c: unknown, _e: unknown, cb: () => void) => cb()
+    });
+    dead.destroy();
+    child.stdin = dead;
+    expect(provider.steer("into a closed pipe")).toBe(false);
+
+    child.stdin = live;
+    provider.steer("second try");
+    expect(contents()[1]).toBe(CONTEXT_B + "\n\nsecond try");
+
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+  });
+});
+
+describe("ClaudeCliProvider — a permission mode picked between turns", () => {
+  let child: any;
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    child = makeFakeChild();
+    (spawn as unknown as ReturnType<typeof vi.fn>).mockReturnValue(child);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const modeRequests = () =>
+    (
+      child.written as {
+        type?: string;
+        request_id?: string;
+        request?: { subtype?: string; mode?: string };
+      }[]
+    ).filter(
+      (m) =>
+        m.type === "control_request" &&
+        m.request?.subtype === "set_permission_mode"
+    );
+
+  const modelRequests = () =>
+    (
+      child.written as {
+        type?: string;
+        request_id?: string;
+        request?: { subtype?: string; model?: string };
+      }[]
+    ).filter(
+      (m) => m.type === "control_request" && m.request?.subtype === "set_model"
+    );
+
+  const bypassProvider = () =>
+    new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "bypass",
+      sessionMode: true
+    });
+
+  it("tells the live process, with no turn behind the change", async () => {
+    // The whole point: a turn started on the phone never rebuilds argv, so the
+    // only way out of the mode the process was spawned with is to say so.
+    const provider = bypassProvider();
+    const { finished } = await drive(provider);
+
+    const pushing = provider.setLivePermissionMode("default");
+    await new Promise((r) => setTimeout(r, 20));
+    const sent = modeRequests()[0];
+    expect(sent?.request?.mode).toBe("default");
+
+    child.emitLine({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: sent!.request_id,
+        response: {}
+      }
+    });
+    await pushing;
+
+    // Recorded against the session, so picking the same mode again says
+    // nothing — the CLI is already in it.
+    await provider.setLivePermissionMode("default");
+    expect(modeRequests()).toHaveLength(1);
+
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+  });
+
+  it("sends a model change the same way", async () => {
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true,
+      effort: "high"
+    });
+    const { finished } = await drive(provider);
+
+    // `drive` opens the turn under claude-sonnet-4-6; both ladders carry
+    // "high", so the effort flag is unchanged and the model can travel alone.
+    const pushing = provider.setLiveModel("claude-opus-4-8");
+    await new Promise((r) => setTimeout(r, 20));
+    const sent = modelRequests()[0];
+    expect(sent?.request?.model).toBe("claude-opus-4-8");
+
+    child.emitLine({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: sent!.request_id,
+        response: {}
+      }
+    });
+    await pushing;
+
+    await provider.setLiveModel("claude-opus-4-8");
+    expect(modelRequests()).toHaveLength(1);
+
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+  });
+
+  it("holds back a model whose effort ladder disagrees with the running one", async () => {
+    // `--effort` reaches the CLI in argv and argv cannot be rebuilt under a
+    // live process. claude-sonnet-4-6 has no `xhigh`, so the running argv
+    // carries no `--effort` at all; pushing opus alone would leave it at the
+    // model's default while the picker claims xhigh. The next panel turn
+    // replaces the process and carries both.
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true,
+      effort: "xhigh"
+    });
+    const { finished } = await drive(provider);
+
+    await provider.setLiveModel("claude-opus-4-8");
+    expect(modelRequests()).toEqual([]);
+
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+  });
+
+  it("leaves a refusal standing rather than replacing the process", async () => {
+    // The CLI refuses Bypass on a session not launched for it. Respawning to
+    // force it would take every background agent and the bridge with it, for a
+    // change that only loosens and that the next panel turn delivers anyway.
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true
+    });
+    const { finished } = await drive(provider);
+    const spawnsBefore = (spawn as unknown as ReturnType<typeof vi.fn>).mock
+      .calls.length;
+
+    const pushing = provider.setLivePermissionMode("bypass");
+    await new Promise((r) => setTimeout(r, 20));
+    child.emitLine({
+      type: "control_response",
+      response: {
+        subtype: "error",
+        request_id: modeRequests()[0]!.request_id,
+        error:
+          "Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions"
+      }
+    });
+    await pushing;
+
+    expect(
+      (spawn as unknown as ReturnType<typeof vi.fn>).mock.calls.length
+    ).toBe(spawnsBefore);
+    expect(child.killed).toBe(false);
+
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+  });
+});
+
+describe("ClaudeCliProvider — switching the bridge off mid-request", () => {
+  let child: any;
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    child = makeFakeChild();
+    (spawn as unknown as ReturnType<typeof vi.fn>).mockReturnValue(child);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  /** The control requests the host sent, in order. */
+  const controls = () =>
+    (
+      child.written as {
+        type?: string;
+        request_id?: string;
+        request?: { subtype?: string; enabled?: boolean };
+      }[]
+    ).filter((m) => m.type === "control_request");
+
+  const answer = (requestId: string, payload: Record<string, unknown>) =>
+    child.emitLine({
+      type: "control_response",
+      response: { subtype: "success", request_id: requestId, response: payload }
+    });
+
+  it("does not light the pill back up for a bridge already told to go", async () => {
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true
+    });
+    const { collected, finished } = await drive(provider);
+
+    const enabling = provider.enableRemoteControl();
+    await new Promise((r) => setTimeout(r, 20));
+    const enable = controls().find(
+      (m) => m.request?.subtype === "remote_control"
+    );
+    expect(enable?.request_id).toBeDefined();
+
+    // Switched off before the CLI got round to answering.
+    const disabling = provider.disableRemoteControl();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(provider.remoteControlStatus()).toEqual({ state: "off" });
+
+    // The reply lands anyway, carrying a URL for a bridge being torn down.
+    answer(enable!.request_id!, {
+      session_url: "https://claude.ai/code/session_stale",
+      connect_url: "https://claude.ai/connect/stale"
+    });
+    await enabling;
+
+    expect(provider.remoteControlStatus()).toEqual({ state: "off" });
+
+    const off = controls().find((m) => m.request?.enabled === false);
+    answer(off!.request_id!, {});
+    await disabling;
+
+    child.emitLine({ type: "result", subtype: "success" });
+    await finished;
+    expect(collected.some((d) => d.type === "error")).toBe(false);
   });
 });
 

@@ -46,3 +46,6 @@ TESTING.md
 
 # Scratch from probe agents reading the CLI binary.
 .tmp-cli-probe/
+
+# Live probes and throwaway scripts — re-runnable, never shipped.
+scratch/

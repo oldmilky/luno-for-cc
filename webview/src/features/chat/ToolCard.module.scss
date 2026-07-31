@@ -1,7 +1,6 @@
 // ─────────────────────────────────────────────────────────────
 // Tool card — one tool call: a one-line header (verb · target ·
 // meta · status) that expands into input/result sections.
-// Converted from theme.css in Ф2а.
 //
 // Hard-coded rgba borders on the exit pills and the stderr tint are
 // now mixed from --ok/--err, and the bash-command surface reads
@@ -146,6 +145,19 @@
 
 .statusError {
   color: var(--err);
+}
+
+// Amber, not red. The tool did not fail — a decision was made about it, and a
+// red card sends the reader hunting for a bug that was never there.
+.statusBlocked {
+  color: var(--warn);
+}
+
+.blocked {
+  margin: 0;
+  color: var(--t2);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .chev {

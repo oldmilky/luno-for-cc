@@ -264,6 +264,52 @@
   transition: opacity var(--motion-hover) var(--ease-out);
 }
 
+// ── Group heading ────────────────────────────────────────────
+//
+// A grid row of its own: the cards are direct children of an `auto-fill` grid,
+// so a wrapping <section> per group would give each one its own column track
+// and break the responsive flow.
+
+.groupHead {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px 2px;
+
+  // Every group but the first gets air above it; the first sits under the
+  // toolbar, which supplies its own.
+  &:not(:first-child) {
+    margin-top: 10px;
+  }
+}
+
+.groupBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--accent-mid);
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.groupCount {
+  color: var(--t4);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.groupLine {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, var(--b2), transparent);
+}
+
 .empty {
   grid-column: 1 / -1;
   display: flex;

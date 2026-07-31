@@ -1,60 +1,18 @@
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { send } from "../../lib/rpc";
-import { Icon, IconName } from "../../design/icons";
+import { onMessage, send, type SlashCommand } from "../../lib/rpc";
+import { useWebviewSettings } from "../../lib/settings";
+import { Icon } from "../../design/icons";
 import { Kbd, Orb } from "../../design/primitives";
 import { ENTER, SPRING_POP, enterAt } from "../../design/motion";
+import { resolveStartupCards, type StartupCard } from "./startup-suggestions";
 import s from "./EmptyState.module.scss";
 
-interface SuggestionItem {
-  icon: IconName;
-  title: string;
-  sub: string;
-  prompt: string;
-}
+export function EmptyState({ onPick }: { onPick: (text: string) => void }) {
+  const commands = useSlashCommands();
+  const { startupSuggestions } = useWebviewSettings();
+  const groups = resolveStartupCards(startupSuggestions, commands);
 
-interface SuggestionGroup {
-  label: string;
-  items: SuggestionItem[];
-}
-
-const GROUPS: ReadonlyArray<SuggestionGroup> = [
-  {
-    label: "Understand",
-    items: [
-      {
-        icon: "book",
-        title: "Explain this codebase",
-        sub: "Walk through architecture and key symbols",
-        prompt: "Explain this codebase"
-      },
-      {
-        icon: "search",
-        title: "Find and fix a bug",
-        sub: "Search for the issue, then patch it",
-        prompt: "Find and fix a bug"
-      }
-    ]
-  },
-  {
-    label: "Build",
-    items: [
-      {
-        icon: "edit",
-        title: "Refactor for clarity",
-        sub: "Extract helpers, preserve behavior",
-        prompt: "Refactor for clarity"
-      },
-      {
-        icon: "bolt",
-        title: "Write tests for the selected file",
-        sub: "Match existing test patterns",
-        prompt: "Write tests for the selected file"
-      }
-    ]
-  }
-];
-
-export function EmptyState() {
   // One flat reveal ladder, walked top to bottom, so the stagger reads as a
   // single sweep down the screen instead of restarting inside every group.
   // Rung 0 is the orb, 1 the headline, 2 the subhead; groups take it from there.
@@ -85,23 +43,30 @@ export function EmptyState() {
         Mention files with <Kbd>@</Kbd> · pick a mode for the kind of help you
         need
       </motion.div>
-      {GROUPS.map((g) => {
+      {groups.map((g) => {
         const headRung = ++rung;
         return (
           <motion.section
-            key={g.label}
+            key={g.label ?? "default"}
             className={s.section}
             {...enterAt(headRung)}
           >
-            <div className={s.sectionHead}>
-              <span className={s.sectionBadge}>{g.label}</span>
-              <div className={s.sectionLine} />
-            </div>
+            {g.label && (
+              <div className={s.sectionHead}>
+                <span className={s.sectionBadge}>{g.label}</span>
+                <div className={s.sectionLine} />
+              </div>
+            )}
             <div className={s.items}>
               {g.items.map((item) => {
                 const itemRung = ++rung;
                 return (
-                  <Suggestion key={item.title} item={item} rung={itemRung} />
+                  <Suggestion
+                    key={item.title}
+                    item={item}
+                    rung={itemRung}
+                    onPick={onPick}
+                  />
                 );
               })}
             </div>
@@ -112,20 +77,41 @@ export function EmptyState() {
   );
 }
 
-function Suggestion({ item, rung }: { item: SuggestionItem; rung: number }) {
+/** The same list the composer's slash popover reads. Requested on mount rather
+ *  than held in a store: the hero unmounts the moment a turn starts. */
+function useSlashCommands(): SlashCommand[] {
+  const [commands, setCommands] = useState<SlashCommand[]>([]);
+  useEffect(() => {
+    send({ type: "requestSlashCommands" });
+    return onMessage((m) => {
+      if (m.type === "slashCommands") setCommands(m.commands);
+    });
+  }, []);
+  return commands;
+}
+
+function Suggestion({
+  item,
+  rung,
+  onPick
+}: {
+  item: StartupCard;
+  rung: number;
+  onPick: (text: string) => void;
+}) {
   return (
     <motion.button
       type="button"
       {...enterAt(rung)}
       className={s.suggestion}
-      onClick={() => send({ type: "prompt", text: item.prompt })}
+      onClick={() => onPick(item.text)}
     >
       <span className={s.suggestionIcon}>
-        <Icon name={item.icon} size={15} />
+        <Icon name="bolt" size={15} />
       </span>
       <span className={s.suggestionBody}>
         <span className={s.suggestionTitle}>{item.title}</span>
-        <span className={s.suggestionSub}>{item.sub}</span>
+        {item.sub && <span className={s.suggestionSub}>{item.sub}</span>}
       </span>
       <Icon name="arrow" size={14} className={s.suggestionArrow} />
     </motion.button>

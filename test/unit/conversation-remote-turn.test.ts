@@ -28,19 +28,27 @@ const sentPrompts = vi.hoisted(() => [] as string[]);
 const steered = vi.hoisted(() => [] as string[]);
 /** Permission answers routed back to the provider. */
 const answered = vi.hoisted(() => [] as string[]);
+const answeredOpts = vi.hoisted(() => [] as unknown[]);
 const cancels = vi.hoisted(() => ({ count: 0 }));
+/** Deltas the fake provider yields on the next panel turn — the other seam,
+ *  reached only while a turn holds the sink. `remote.push` is its opposite. */
+const turnDeltas = vi.hoisted(() => [] as Record<string, unknown>[]);
+/** Permission modes pushed onto the live process at pick time, in order. */
+const livePushes = vi.hoisted(() => [] as string[]);
+/** Models pushed the same way. */
+const liveModels = vi.hoisted(() => [] as string[]);
 
 vi.mock("../../src/providers/factory.js", () => ({
   createProvider: (ctx: { onOutOfTurn?: (d: unknown) => void }) => {
     remote.push = ctx.onOutOfTurn as (d: Record<string, unknown>) => void;
     return {
       id: "fake",
-      // eslint-disable-next-line require-yield
       async *stream(req: { messages: { role: string; content: unknown }[] }) {
         const last = req.messages[req.messages.length - 1];
         if (last?.role === "user" && typeof last.content === "string") {
           sentPrompts.push(last.content);
         }
+        for (const delta of turnDeltas.splice(0)) yield delta as never;
       },
       steer(text: string) {
         steered.push(text);
@@ -49,10 +57,17 @@ vi.mock("../../src/providers/factory.js", () => ({
       cancel() {
         cancels.count += 1;
       },
-      respondToPermission(requestId: string, behavior: string) {
+      respondToPermission(requestId: string, behavior: string, opts?: unknown) {
         answered.push(`${requestId}:${behavior}`);
+        answeredOpts.push(opts);
       },
       updateOptions() {},
+      setLivePermissionMode: async (mode: string) => {
+        livePushes.push(mode);
+      },
+      setLiveModel: async (model: string) => {
+        liveModels.push(model);
+      },
       enableRemoteControl: async () => ({
         state: "ready",
         sessionUrl: "https://claude.ai/code/session_test"
@@ -180,8 +195,12 @@ beforeEach(() => {
   sentPrompts.length = 0;
   steered.length = 0;
   answered.length = 0;
+  answeredOpts.length = 0;
   cancels.count = 0;
   remote.push = undefined;
+  turnDeltas.length = 0;
+  livePushes.length = 0;
+  liveModels.length = 0;
   storage = fs.mkdtempSync(path.join(os.tmpdir(), "luno-remote-storage-"));
   root.path = fs.realpathSync(
     fs.mkdtempSync(path.join(os.tmpdir(), "luno-remote-root-"))
@@ -243,6 +262,187 @@ const publishedBridge = (webview: FakeWebview) =>
   webview.sent.filter((m) => m.type === "remoteControl").at(-1)?.status as
     { state?: string; sessionUrl?: string } | undefined;
 
+describe("a permission mode picked while the phone is driving", () => {
+  it("reaches the live process at pick time, not at the next panel turn", async () => {
+    // `beginRemoteTurn` goes straight to `Orchestrator.observe` — no argv, no
+    // `ensureSession`, no fingerprint. Left to the next panel turn, the CLI
+    // keeps running under the mode it was spawned with while the composer
+    // shows the new one.
+    const { webview } = await openWithBridge();
+    webview.deliver({ type: "setPermissionMode", mode: "auto" });
+    await settle();
+
+    expect(livePushes).toEqual(["auto"]);
+    expect(publishedMode(webview)).toBe("auto");
+  });
+
+  it("sends a model picked while the phone drives to the live process", async () => {
+    // Of everything a turn carries, the model is the only other thing the CLI
+    // will take live — `set_model` and `set_permission_mode` are the whole of
+    // its live-setter vocabulary. The rest travels in argv.
+    const { webview } = await openWithBridge();
+    webview.deliver({ type: "setModel", model: "claude-opus-4-8" });
+    await settle();
+
+    expect(liveModels).toEqual(["claude-opus-4-8"]);
+  });
+
+  it("delivers the direction that matters — leaving Bypass", async () => {
+    // In `bypassPermissions` the CLI emits no `can_use_tool` at all, so a
+    // change that never arrives means destructive calls running with no card
+    // on either surface while the panel reads Default.
+    const { webview } = await openWithBridge();
+    webview.deliver({ type: "setPermissionMode", mode: "bypass" });
+    await settle();
+    webview.deliver({ type: "setPermissionMode", mode: "default" });
+    await settle();
+
+    expect(livePushes).toEqual(["bypass", "default"]);
+  });
+});
+
+describe("the pill and the surface it is drawn on", () => {
+  it("clears when another conversation takes the surface", async () => {
+    // `swapSidebar` hands one webview to a different host through `show()`, and
+    // `ChatScreen` is not remounted by that — the pill's state, and the session
+    // URL under it, stayed with whoever held the surface last. A live-looking
+    // link to somebody else's conversation is worse than no link.
+    const { registry, webview } = await openWithBridge();
+    expect(publishedBridge(webview)?.state).toBe("ready");
+
+    const next = registry.create();
+    next.show({ webview, reveal: () => {} } as never, {});
+    await settle();
+
+    expect(publishedBridge(webview)?.state).toBe("off");
+  });
+
+  it("says connecting before ready, so no link is offered that does not exist", async () => {
+    // The optimistic publish used to be `ready`, which renders identically to a
+    // bridge that is actually up — for as long as the round-trip takes, up to
+    // 30s. The pill invited a click on a session URL nobody had minted.
+    const { webview } = await openWithBridge();
+    const published = webview.sent
+      .filter((m) => m.type === "remoteControl")
+      .map((m) => m.status as { state?: string; sessionUrl?: string });
+
+    expect(published[0]).toEqual({ state: "connecting" });
+    expect(published[0].sessionUrl).toBeUndefined();
+    expect(published.at(-1)?.state).toBe("ready");
+  });
+
+  it("still shows a bridge that was up when the surface arrived", async () => {
+    // The other direction, and the reason `show()` cannot simply post nothing:
+    // swapping *back* to the bridged conversation has to light the pill again.
+    const { registry, host, webview } = await openWithBridge();
+    const next = registry.create();
+    next.show({ webview, reveal: () => {} } as never, {});
+    await settle();
+    expect(publishedBridge(webview)?.state).toBe("off");
+
+    host.show({ webview, reveal: () => {} } as never, {});
+    await settle();
+
+    expect(publishedBridge(webview)?.state).toBe("ready");
+  });
+});
+
+describe("an approval raised with no turn open", () => {
+  it("puts the card on the panel instead of dropping it", async () => {
+    // A `run_in_background` agent outlives the turn that launched it, and the
+    // CLI blocks on the answer for the life of the process. Dropped here, the
+    // only trace was one line in the extension log.
+    const { webview } = await openWithBridge();
+    remote.push!({
+      type: "permission_request",
+      permission: { requestId: "bg-1", toolName: "Edit", input: {} }
+    });
+    await settle();
+
+    expect(
+      webview.sent.filter((m) => m.type === "permissionRequest")
+    ).toHaveLength(1);
+  });
+
+  it("answers it through the session provider, which is the same process", async () => {
+    // `activeProvider` is empty between turns, which is exactly when a
+    // background agent asks. Without the fallback the card renders and cannot
+    // be answered — worse than not rendering at all.
+    const { webview } = await openWithBridge();
+    remote.push!({
+      type: "permission_request",
+      permission: { requestId: "bg-1", toolName: "Edit", input: {} }
+    });
+    await settle();
+
+    webview.deliver({
+      type: "permissionResponse",
+      requestId: "bg-1",
+      behavior: "deny"
+    });
+    expect(answered).toEqual(["bg-1:deny"]);
+  });
+
+  it("takes the card away when the other device answers first", async () => {
+    const { webview } = await openWithBridge();
+    remote.push!({
+      type: "permission_request",
+      permission: { requestId: "bg-1", toolName: "Edit", input: {} }
+    });
+    remote.push!({ type: "permission_resolved", requestId: "bg-1" });
+    await settle();
+
+    expect(
+      webview.sent.filter((m) => m.type === "permissionResolved")
+    ).toHaveLength(1);
+  });
+});
+
+describe("the bridge reporting while a turn is running", () => {
+  it("publishes a bridge that changed mid-turn", async () => {
+    // The enable reply is asynchronous I/O that always lands after the turn
+    // installed its sink, so this delta never reaches the out-of-turn seam —
+    // switching the bridge on during an answer is the ordinary case, not a
+    // race. Dropped, the pill goes on offering a session URL nobody holds.
+    const { webview } = await openWithBridge();
+    turnDeltas.push({
+      type: "remote_control",
+      remoteControl: {
+        state: "connected",
+        sessionUrl: "https://claude.ai/code/session_second"
+      }
+    });
+    webview.deliver({ type: "prompt", text: "carry on" });
+    await settle();
+
+    expect(publishedBridge(webview)).toEqual({
+      state: "connected",
+      sessionUrl: "https://claude.ai/code/session_second"
+    });
+  });
+
+  it("does not leave it to the raw delta forward, which cannot carry it", async () => {
+    // `Delta` in the webview has no `remote_control` member, so a fall-through
+    // to `{type:"delta"}` is a message with no reader — green on both sides
+    // and silent at runtime, which is how this went unnoticed.
+    const { webview } = await openWithBridge();
+    turnDeltas.push({
+      type: "remote_control",
+      remoteControl: { state: "error", error: "bridge lost" }
+    });
+    webview.deliver({ type: "prompt", text: "carry on" });
+    await settle();
+
+    const forwarded = webview.sent.filter(
+      (m) =>
+        m.type === "delta" &&
+        (m.delta as { type?: string } | undefined)?.type === "remote_control"
+    );
+    expect(forwarded).toEqual([]);
+    expect(publishedBridge(webview)?.state).toBe("error");
+  });
+});
+
 describe("a turn started on another device", () => {
   it("puts the phone's prompt and the answer on the timeline", async () => {
     const { webview } = await openWithBridge();
@@ -291,6 +491,80 @@ describe("a turn started on another device", () => {
       behavior: "deny"
     });
     expect(answered).toEqual(["req-1:deny"]);
+    remote.push!({ type: "done" });
+    await settle();
+  });
+
+  it("forwards updatedInput to the provider without reshaping it", async () => {
+    // The answers to an AskUserQuestion ride here. The shape is the CLI's
+    // schema, so the host has to hand it over exactly as the panel built it.
+    const { webview } = await openWithBridge();
+    remote.push!({ type: "remote_prompt", prompt: "which one?" });
+    remote.push!({
+      type: "permission_request",
+      permission: {
+        requestId: "q-1",
+        toolName: "AskUserQuestion",
+        input: { questions: [{ question: "Which library?" }] }
+      }
+    });
+    await settle();
+
+    const updatedInput = {
+      questions: [{ question: "Which library?" }],
+      answers: { "Which library?": "date-fns" },
+      response: "actually, neither"
+    };
+    webview.deliver({
+      type: "permissionResponse",
+      requestId: "q-1",
+      behavior: "allow",
+      updatedInput
+    });
+    expect(answered).toEqual(["q-1:allow"]);
+    expect(answeredOpts[0]).toMatchObject({ updatedInput });
+
+    remote.push!({ type: "done" });
+    await settle();
+  });
+
+  it("forwards what the user typed to do instead", async () => {
+    const { webview } = await openWithBridge();
+    remote.push!({ type: "remote_prompt", prompt: "delete the temp dir" });
+    remote.push!({
+      type: "permission_request",
+      permission: { requestId: "d-1", toolName: "Bash", input: {} }
+    });
+    await settle();
+
+    webview.deliver({
+      type: "permissionResponse",
+      requestId: "d-1",
+      behavior: "deny",
+      reason: "use git clean instead"
+    });
+    expect(answeredOpts[0]).toMatchObject({ reason: "use git clean instead" });
+
+    remote.push!({ type: "done" });
+    await settle();
+  });
+
+  it("omits updatedInput entirely when the panel sent none", async () => {
+    const { webview } = await openWithBridge();
+    remote.push!({ type: "remote_prompt", prompt: "run it" });
+    remote.push!({
+      type: "permission_request",
+      permission: { requestId: "b-1", toolName: "Bash", input: {} }
+    });
+    await settle();
+
+    webview.deliver({
+      type: "permissionResponse",
+      requestId: "b-1",
+      behavior: "allow"
+    });
+    expect(answeredOpts[0]).not.toHaveProperty("updatedInput");
+
     remote.push!({ type: "done" });
     await settle();
   });

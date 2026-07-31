@@ -1,0 +1,210 @@
+// ─────────────────────────────────────────────────────────────
+// Stop-with-agents confirmation. Reads design tokens only.
+//
+// Deliberately the same shape as RewindModal — head, detail rows,
+// foot — because it answers the same class of question: "this
+// destroys work, do you mean it". Its accent is `--err` rather
+// than the brand accent: the confirm button here ends something.
+// ─────────────────────────────────────────────────────────────
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  // No scrim, matching RewindModal: the cards being stopped stay readable
+  // behind the dialog while the user decides.
+  background: transparent;
+}
+
+.panel {
+  position: relative;
+  overflow: hidden;
+  width: 440px;
+  max-width: 92vw;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-lg);
+  background: linear-gradient(to bottom, var(--s2), var(--s1));
+  box-shadow:
+    0 28px 70px color-mix(in srgb, var(--shadow-color) 60%, transparent),
+    0 0 0 1px var(--tint) inset,
+    0 0 40px -16px color-mix(in srgb, var(--err) 35%, transparent);
+}
+
+.hairline {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 1px;
+  opacity: 0.6;
+  background: linear-gradient(to right, transparent, var(--err), transparent);
+}
+
+// ── Head ─────────────────────────────────────────────────────
+
+.head {
+  padding: 20px 20px 16px;
+}
+
+.headRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.iconTile {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--round-lg);
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.headText {
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  color: var(--t1);
+  font-size: 15.5px;
+  font-weight: 700;
+}
+
+.sub {
+  margin: 4px 0 0;
+  color: var(--t3);
+  font-size: 12.5px;
+}
+
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+}
+
+.detail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--b1);
+  border-radius: var(--round-sm);
+  background: color-mix(in srgb, var(--s1) 60%, transparent);
+}
+
+.detailIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: var(--round);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.detailText {
+  color: var(--t2);
+  font-size: 12px;
+}
+
+.strong {
+  color: var(--t1);
+  font-weight: 600;
+}
+
+// ── Foot ─────────────────────────────────────────────────────
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--b1);
+  background: color-mix(in srgb, var(--s2) 40%, transparent);
+}
+
+.escHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t4);
+  font-size: 10.5px;
+}
+
+.kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--b2);
+  border-radius: 4px;
+  background: var(--s3);
+  font-weight: 600;
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cancel {
+  padding: 6px 14px;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-sm);
+  background: var(--s3);
+  color: var(--t2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: color-mix(in srgb, var(--s3) 70%, transparent);
+    color: var(--t1);
+  }
+}
+
+.confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: var(--round-sm);
+  background: var(--err);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px var(--sheen) inset;
+  transition: transform var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0) scale(0.97);
+    transition: transform var(--motion-tap) var(--ease-out);
+  }
+}
+
+.confirmKbd {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--on-accent) 18%, transparent);
+  font-weight: 600;
+}

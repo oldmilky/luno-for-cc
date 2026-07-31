@@ -15,27 +15,35 @@ export interface ToolCardProps {
   input: string;
   result?: string;
   isError?: boolean;
+  /** The reason Agent mode's classifier refused the call. Its own state, not a
+   *  flavour of error: nothing went wrong, something was decided — and the
+   *  card that says "Error" sends the reader looking for a bug that is not
+   *  there. */
+  blockedReason?: string;
   pending?: boolean;
 }
 
-type Status = "pending" | "ok" | "error";
+type Status = "pending" | "ok" | "error" | "blocked";
 
 export function ToolCard({
   name,
   input,
   result,
   isError,
+  blockedReason,
   pending
 }: ToolCardProps) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const status: Status = pending
     ? "pending"
-    : isError
-      ? "error"
-      : result !== undefined
-        ? "ok"
-        : "pending";
+    : blockedReason
+      ? "blocked"
+      : isError
+        ? "error"
+        : result !== undefined
+          ? "ok"
+          : "pending";
   const exitCode = extractExitCode(result);
   const isBash = /bash|run|shell|exec/i.test(name);
 
@@ -132,7 +140,16 @@ export function ToolCard({
                 <pre className={s.pre}>{pretty(input)}</pre>
               </Section>
             )}
+            {blockedReason ? (
+              // Not a `pre`: this is a sentence written for a person, and the
+              // monospace block the other branches use would file it with the
+              // command output it is not.
+              <Section label="Blocked by Agent mode">
+                <p className={s.blocked}>{blockedReason}</p>
+              </Section>
+            ) : null}
             {result !== undefined &&
+              !blockedReason &&
               (isBash ? (
                 <BashOutput
                   result={result}
@@ -179,12 +196,17 @@ function StatusGlyph({ status }: { status: Status }) {
           ? s.statusPending
           : status === "ok"
             ? s.statusOk
-            : s.statusError
+            : status === "blocked"
+              ? s.statusBlocked
+              : s.statusError
       ].join(" ")}
     >
       {status === "pending" && <span className={s.spinner} />}
       {status === "ok" && <Icon name="check" size={11} />}
       {status === "error" && <Icon name="x" size={11} />}
+      {/* A shield, not a cross: the call was stopped, not attempted and
+          failed. */}
+      {status === "blocked" && <Icon name="shield" size={11} />}
     </span>
   );
 }

@@ -120,3 +120,46 @@ describe("Session.truncateAt", () => {
     }
   );
 });
+
+// ─────────────────────────────────────────────────────────────
+// A refusal is not a failure.
+//
+// Agent mode's classifier declines a call by returning an ordinary failed tool
+// result, so nothing on the wire separates "the mode stopped this" from "the
+// command broke" except the sentence the CLI opens with. What the model was
+// told has to stay in `messages` verbatim — that is its memory — while what the
+// person reads becomes the reason alone.
+// ─────────────────────────────────────────────────────────────
+describe("Session.addToolResult — blocked by the mode", () => {
+  const REASON = "this would delete a file outside the workspace";
+  const FULL = `Permission for this action was denied by the Claude Code auto mode classifier. Reason: ${REASON}. If you have other tasks…`;
+
+  it("shows the reason and files it as a decision", () => {
+    const session = new Session();
+    session.emitToolCall("t1", "Bash", { command: "rm -rf /etc/hosts" });
+    session.addToolResult("t1", FULL, true, REASON);
+
+    const event = session.timeline.at(-1)!;
+    expect(event.title).toBe("Blocked");
+    expect(event.body).toBe(REASON);
+    expect(event.meta).toMatchObject({ id: "t1", blockedReason: REASON });
+  });
+
+  it("leaves the model's own copy untouched", () => {
+    // Rewriting this would make the transcript disagree with what the model
+    // actually read, which is the one thing the timeline may not do.
+    const session = new Session();
+    session.addToolResult("t1", FULL, true, REASON);
+    const block = (session.messages.at(-1)!.content as ContentBlock[])[0];
+    expect(block).toMatchObject({ content: FULL, is_error: true });
+  });
+
+  it("still says Tool Error when the tool really did fail", () => {
+    const session = new Session();
+    session.addToolResult("t1", "error: Script not found", true);
+    const event = session.timeline.at(-1)!;
+    expect(event.title).toBe("Tool Error");
+    expect(event.body).toBe("error: Script not found");
+    expect(event.meta).not.toHaveProperty("blockedReason");
+  });
+});

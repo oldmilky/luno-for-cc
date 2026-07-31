@@ -7,9 +7,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import commonMd from "../../prompts/common.md";
 import planModeMd from "../../prompts/plan-mode.md";
 import defaultModeMd from "../../prompts/default-mode.md";
 import autoModeMd from "../../prompts/auto-mode.md";
+import acceptEditsModeMd from "../../prompts/accept-edits-mode.md";
 import bypassModeMd from "../../prompts/bypass-mode.md";
 import backendMd from "../../prompts/task-types/backend.md";
 import frontendMd from "../../prompts/task-types/frontend.md";
@@ -27,8 +29,20 @@ import { PermissionMode, TaskType } from "../core/types.js";
 const BUNDLED_MODE: Record<PermissionMode, string> = {
   plan: planModeMd,
   default: defaultModeMd,
+  acceptEdits: acceptEditsModeMd,
   auto: autoModeMd,
   bypass: bypassModeMd
+};
+
+/** Mode id → file on disk. Only `acceptEdits` differs, and deriving the name
+ *  from the id instead cost the dev override for exactly that mode: it looked
+ *  for `acceptEdits-mode.md` and the file is kebab-case like every other. */
+const MODE_FILE: Record<PermissionMode, string> = {
+  plan: "plan-mode.md",
+  default: "default-mode.md",
+  acceptEdits: "accept-edits-mode.md",
+  auto: "auto-mode.md",
+  bypass: "bypass-mode.md"
 };
 
 const BUNDLED_TASK: Record<Exclude<TaskType, "generic">, string> = {
@@ -54,8 +68,14 @@ function devOverride(rel: string): string | null {
   }
 }
 
+/** What every mode shares: where the model is running, what the surface around
+ *  it can do, and the rules that do not change with the approval posture. */
+export function getCommonPrompt(): string {
+  return devOverride("common.md") ?? commonMd;
+}
+
 export function getModePrompt(mode: PermissionMode): string {
-  return devOverride(`${mode}-mode.md`) ?? BUNDLED_MODE[mode];
+  return devOverride(MODE_FILE[mode]) ?? BUNDLED_MODE[mode];
 }
 
 export function getTaskTypePrompt(type: TaskType): string | null {

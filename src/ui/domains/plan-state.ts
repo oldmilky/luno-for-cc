@@ -34,6 +34,27 @@ export function findCommentEvent<T extends PlanEvent>(
   );
 }
 
+/**
+ * The `plan_question` a tool call produced. Searched from the end: a single
+ * conversation can carry many questions, and the one being answered is always
+ * the most recent match.
+ */
+export function findQuestionEvent<T extends PlanEvent>(
+  timeline: readonly T[],
+  toolUseId: string
+): T | undefined {
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const e = timeline[i];
+    if (
+      e.kind === "plan_question" &&
+      (e.meta as { toolUseId?: string } | undefined)?.toolUseId === toolUseId
+    ) {
+      return e;
+    }
+  }
+  return undefined;
+}
+
 export function findRevisionEvent<T extends PlanEvent>(
   timeline: readonly T[],
   revisionId: string

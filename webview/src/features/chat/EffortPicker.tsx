@@ -20,6 +20,7 @@ import { onMessage } from "../../lib/rpc";
 import type { EffortLevel, ModelInfo } from "../../lib/rpc";
 import { EFFORT_LEVELS, ULTRACODE_OPTION, findEffort } from "./constants";
 import d from "../../design/primitives/Dropdown.module.scss";
+import { PendingDot } from "./PendingDot";
 import s from "./EffortPicker.module.scss";
 
 interface EffortPickerProps {
@@ -29,6 +30,8 @@ interface EffortPickerProps {
   model: string;
   models: ReadonlyArray<ModelInfo>;
   effort: EffortLevel;
+  /** The value is chosen but not in force — see PendingDot. */
+  pending?: boolean;
   ultracode: boolean;
   /** Both halves of one choice — see the `setEffort` message. */
   onEffort: (level: EffortLevel, ultracode: boolean) => void;
@@ -40,6 +43,7 @@ export function EffortPicker({
   model,
   models,
   effort,
+  pending = false,
   ultracode,
   onEffort,
   thinking,
@@ -111,6 +115,7 @@ export function EffortPicker({
         >
           <Icon name={ultracode ? "bolt" : "zap"} size={9} />
           <span className={s.triggerName}>{triggerLabel}</span>
+          {pending && <PendingDot />}
           <Icon name="chevronD" size={9} />
         </button>
       </Tooltip>

@@ -268,8 +268,9 @@ rather than shipped.
 **Remote Control was on this list and is not any more** — decided 2026-07-27.
 It stays tied to Anthropic infrastructure, and that is accepted rather than
 worked around: it needs a claude.ai OAuth login, refuses to run under an API
-key, and keeps the session transcript on Anthropic servers. See
-`.claude/plans/remote-control.md`.
+key, and keeps the session transcript on Anthropic servers. It shipped in
+`d51d5e6`; the constraints and the measured protocol are in
+`.claude/plans/carried-forward.md`.
 
 Terminal mode (`useTerminal`) and Jupyter (`mcp__ide__executeCode`) are also
 absent. Both are plausible, neither has been asked for.

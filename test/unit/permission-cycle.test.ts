@@ -8,7 +8,13 @@ import type { PermissionMode } from "../../src/core/types.js";
 // added to CYCLE_ORDER by mistake should fail here rather than in the field.
 describe("permission mode cycle", () => {
   it("never yields bypass, from any starting point", () => {
-    const starts: PermissionMode[] = ["default", "plan", "auto", "bypass"];
+    const starts: PermissionMode[] = [
+      "default",
+      "acceptEdits",
+      "plan",
+      "auto",
+      "bypass"
+    ];
     for (const start of starts) {
       let mode = start;
       // One full lap plus one, so a cycle of any length is covered.
@@ -23,8 +29,10 @@ describe("permission mode cycle", () => {
     expect(CYCLE_ORDER).not.toContain("bypass");
   });
 
-  it("walks default → plan → auto → default", () => {
-    expect(nextCycleMode("default")).toBe("plan");
+  it("walks default → acceptEdits → plan → auto → default", () => {
+    // The reference client's own order, with bypass left out of ours.
+    expect(nextCycleMode("default")).toBe("acceptEdits");
+    expect(nextCycleMode("acceptEdits")).toBe("plan");
     expect(nextCycleMode("plan")).toBe("auto");
     expect(nextCycleMode("auto")).toBe("default");
   });
@@ -34,7 +42,7 @@ describe("permission mode cycle", () => {
   });
 
   it("recovers from a mode hand-edited into settings", () => {
-    expect(nextCycleMode("acceptEdits" as PermissionMode)).toBe(CYCLE_ORDER[0]);
+    expect(nextCycleMode("dontAsk" as PermissionMode)).toBe(CYCLE_ORDER[0]);
   });
 
   it("returns to the start after a full lap", () => {

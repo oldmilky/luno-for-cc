@@ -2,7 +2,7 @@
   "name": "luno-for-cc",
   "displayName": "LUNO for CC",
   "description": "LUNO for CC — personal Claude Code chat for Cursor / VS Code.",
-  "version": "0.34.0",
+  "version": "0.38.0",
   "publisher": "lunoweb",
   "license": "MIT",
   "icon": "assets/luno-icon-500.png",
@@ -188,18 +188,20 @@
           "type": "string",
           "enum": [
             "default",
+            "acceptEdits",
             "plan",
             "auto",
             "bypass"
           ],
           "enumDescriptions": [
             "Ask — prompts before every edit and command.",
+            "Edits — applies file edits without asking; commands, deletes and network calls still prompt.",
             "Plan — read-only; drafts a plan and executes nothing.",
-            "Agent — auto-applies reversible edits and allow-listed commands; destructive and network commands still prompt.",
+            "Agent — a safety classifier judges each action and pauses for anything it will not judge.",
             "Bypass — DANGEROUS. No approval prompt for anything, including rm, curl | bash and force-push."
           ],
           "default": "default",
-          "description": "Tool approval behavior. 'default' prompts before each action; 'plan' is read-only / no execution; 'auto' auto-approves reversible edits and bash commands matching allowedBashPatterns, while destructive and network commands still prompt. 'bypass' disables the approval gate entirely — the CLI runs every tool without asking, including deletes, arbitrary shell and force-push. Switching into 'bypass' from the panel requires an explicit confirmation, and Shift+Tab never cycles into it. Applies to new chats — each conversation then carries its own, so changing this never retargets a chat that is already open."
+          "description": "Tool approval behavior. 'default' prompts before each action; 'acceptEdits' applies file edits without asking and still prompts for everything else; 'plan' is read-only / no execution; 'auto' hands each call to the CLI's own safety classifier, which reads the conversation and escalates anything it will not judge to an approval card — where the classifier is unavailable, Luno falls back to pre-approving reversible edits and allow-listed commands while destructive and network commands still prompt. 'bypass' disables the approval gate entirely — the CLI runs every tool without asking, including deletes, arbitrary shell and force-push. Switching into 'bypass' from the panel requires an explicit confirmation, and Shift+Tab never cycles into it. Applies to new chats — each conversation then carries its own, so changing this never retargets a chat that is already open."
         },
         "luno.autosave": {
           "type": "boolean",
@@ -248,6 +250,14 @@
           ],
           "description": "Regex patterns of bash commands auto-approved in auto mode."
         },
+        "luno.startupSuggestions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "The cards offered on an empty chat, in order. An entry starting with / names a skill or command — its description is read from the file on disk; anything else is used as a literal prompt. Leave empty to offer the skills found in .claude/skills, this project's first. A card fills the composer and waits: nothing is sent until you press send."
+        },
         "luno.worktree": {
           "type": "string",
           "enum": [
@@ -294,6 +304,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
     "globals": "^17.8.0",
+    "jsdom": "^30.0.1",
     "prettier": "^3.9.6",
     "stylelint": "^17.14.1",
     "stylelint-config-standard-scss": "^17.0.0",

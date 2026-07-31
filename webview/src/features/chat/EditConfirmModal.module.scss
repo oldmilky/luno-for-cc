@@ -126,3 +126,18 @@
   font-size: 11px;
   font-weight: 500;
 }
+
+// The one line in this dialog that reports a loss the user did not ask for:
+// submitting from an earlier message releases the CLI process, and background
+// agents do not survive that. Toned as a warning rather than an error — it is
+// a consequence of a deliberate action, not a failure.
+.warning {
+  margin: -8px 0 18px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+  border-radius: var(--round-sm);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.5;
+}

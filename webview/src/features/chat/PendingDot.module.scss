@@ -1,0 +1,17 @@
+// ─────────────────────────────────────────────────────────────
+// Pending marker for a composer chip. Reads design tokens only.
+// ─────────────────────────────────────────────────────────────
+
+@use "../../themes/motion" as motion;
+
+.dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  // `--warn`, not the accent: this is the chip disagreeing with the process,
+  // and the accent is what the chip uses when it agrees.
+  background: var(--warn);
+  @include motion.halo-breathe;
+}

@@ -7,7 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/install-build%20from%20source-8b64ff" alt="Install: build from source" />
-  <img src="https://img.shields.io/badge/VSIX-598%20kB-555" alt="VSIX size: 598 kB" />
+  <img src="https://img.shields.io/badge/VSIX-627%20kB-555" alt="VSIX size: 627 kB" />
 </p>
 
 <p align="center">
@@ -26,14 +26,14 @@ LUNO brings the full Claude Code agent into a native editor side panel: streamin
 
 - 🔐 **Subscription-powered.** One-click browser sign-in; credentials live in the OS keychain. No API key file on disk.
 - 💬 **Native side-panel chat.** Streaming responses, slash commands, `@`-mention files, Cmd+U to send a selection, Cmd+Shift+I to toggle.
-- 🛡️ **Risk-aware approvals.** Four modes — `Ask`, `Agent`, `Plan`, and `Bypass`. Every gated action shows an inline card with a live diff / command preview before it runs. In `Ask`, `Agent` and `Plan`, **destructive** (`rm`, `sudo`, force-push) and **network** (`curl`, `ssh`, `git push`) commands always prompt — never auto-run, not even in Agent mode. `Bypass` turns the gate off entirely; it asks for confirmation once and then colours the toolbar red for as long as it is on.
+- 🛡️ **Risk-aware approvals.** Five modes — `Ask`, `Edits`, `Agent`, `Plan`, and `Bypass`. Every gated action shows an inline card with a live diff / command preview before it runs. In `Ask`, `Agent` and `Plan`, **destructive** (`rm`, `sudo`, force-push) and **network** (`curl`, `ssh`, `git push`) commands always prompt — never auto-run. `Bypass` turns the gate off entirely; it asks for confirmation once and then colours the toolbar red for as long as it is on.
 - 📝 **Plan-mode review.** Pop the plan into its own editor tab, leave inline comments on individual steps, and ship the revised plan back to the agent in one click.
 - 🧠 **Project conventions.** Reads `CLAUDE.md` / `AGENTS.md` automatically; one-click "Generate CLAUDE.md" to bootstrap a new repo.
 - 🧩 **Skills marketplace.** Browse and install any skill from [claude-plugins.dev](https://claude-plugins.dev) directly from the panel.
 - 🔌 **MCP connectors.** Browse and connect remote MCP servers — Linear, Notion, Atlassian, Sentry and more — over OAuth, straight from the panel.
 - 🕰 **Checkpoints + rewind.** Every assistant turn snapshots edited files so you can roll back without leaving the chat.
 - 📦 **Runs your own CLI.** No bundled copy: LUNO finds the `claude` binary on your
-  PATH (or in the standard install locations) and drives that. The VSIX is 598 kB,
+  PATH (or in the standard install locations) and drives that. The VSIX is 627 kB,
   and model aliases resolve against whatever your CLI knows — a self-updating
   install picks up new models with no LUNO release.
 - 🎨 **Seven palettes.** copper, purple, red, blue, green, pink, white — every
@@ -91,17 +91,25 @@ Open any workspace and pick a starter, or just type. `@` mentions a file, drag-d
 
 Cycle modes with **Shift+Tab** (when chat is focused) or the **Luno: Cycle Permission Mode** command.
 
-| Mode                | Runs without asking                                                                                  | Prompts you                           |
-| ------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| **Ask** _(default)_ | Read-only tools (`Read`, `Grep`, `Glob`)                                                             | Every edit, write, and command        |
-| **Agent**           | Reads **+** file edits (`Edit` / `Write` / `MultiEdit` / `NotebookEdit`) **+** allow-listed commands | Anything not pre-approved             |
-| **Plan**            | Read-only reasoning — nothing executes                                                               | — (review the plan, then **Proceed**) |
-| **Bypass**          | Everything, immediately — the gate is off                                                            | Nothing                               |
+| Mode                | Runs without asking                                                               | Prompts you                            |
+| ------------------- | --------------------------------------------------------------------------------- | -------------------------------------- |
+| **Ask** _(default)_ | Read-only tools (`Read`, `Grep`, `Glob`)                                          | Every edit, write, and command         |
+| **Edits**           | Reads **+** file edits (`Edit` / `Write` / `MultiEdit` / `NotebookEdit`)          | Every command, delete and network call |
+| **Agent**           | Whatever Claude Code's own safety classifier clears, having read the conversation | Anything it will not judge             |
+| **Plan**            | Read-only reasoning — nothing executes                                            | — (review the plan, then **Proceed**)  |
+| **Bypass**          | Everything, immediately — the gate is off                                         | Nothing                                |
 
-**Always gated in `Ask`, `Agent` and `Plan` — even if allow-listed:**
+**Always gated in `Ask`, `Edits` and `Plan` — even if allow-listed:**
 
 - 🔴 **Destructive** — `rm`, `rmdir`, `sudo`, `dd`, `mkfs`, `git reset --hard`, `git push --force`, `chmod -R`, `kill -9`, fork bombs, and piping a remote script to a shell (`curl … | bash`).
 - 🌐 **Network / external** — `curl`, `wget`, `ssh`, `scp`, `rsync`, `nc`, `git push` / `pull` / `clone`, and web-fetch tools.
+
+`Agent` judges differently, and more thoroughly: rather than matching a list, it
+hands each call to Claude Code's own classifier, which reads what you asked for
+before deciding. A delete you asked for goes through; one you did not is
+refused, and the card says so in amber rather than red — nothing failed, a
+decision was made. Where that classifier is unavailable, `Agent` falls back to
+the list above.
 
 > The agent is also instructed to avoid touching `.git`, `.env*`, `.ssh`, and shell rc files. Connected MCP-server tools are pre-approved (connecting is the consent step).
 
@@ -176,9 +184,34 @@ Edited files appear as a collapsible card under the assistant turn with line-add
 | `luno.permissionMode`      | `default`                                                         | `default` (Ask) / `auto` (Agent) / `plan`.                                                                                                                                                                                                               |
 | `luno.effort`              | `high`                                                            | Reasoning effort: `low` / `medium` / `high` / `xhigh` / `max`.                                                                                                                                                                                           |
 | `luno.thinking`            | `true`                                                            | Extended thinking — reason step-by-step before answering.                                                                                                                                                                                                |
-| `luno.maxTokens`           | `4096`                                                            | Max output tokens per assistant turn. Lower → fewer rate-limit hits.                                                                                                                                                                                     |
+| `luno.maxTokens`           | `0`                                                               | Max output tokens per assistant turn, passed as `CLAUDE_CODE_MAX_OUTPUT_TOKENS`. `0` leaves the CLI's own default alone.                                                                                                                                 |
+| `luno.worktree`            | `tabs`                                                            | Whether a chat gets its own git worktree, so parallel chats cannot collide. `off` / `tabs` / `always`.                                                                                                                                                   |
 | `luno.allowedBashPatterns` | `["^git (status\|diff\|log\|branch)$", "^npm (test\|run test)$"]` | Regex allowlist for commands that auto-run in **Agent** mode. Destructive / network commands are **never** auto-run, even if matched.                                                                                                                    |
 | `luno.claudeBinaryPath`    | `""`                                                              | Absolute path to the `claude` binary. Empty → auto-detect from PATH and the standard install locations (`~/.claude/local`, npm global, Homebrew). Set it only to pin a specific install; on Windows point it at `claude.exe`, not the `claude.cmd` shim. |
+
+### What each turn carries
+
+| Setting                  | Default | Description                                                                                                               |
+| ------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `luno.autosave`          | `true`  | Save modified editors before each turn. The CLI reads from disk, so an unsaved buffer means the agent works on stale text |
+| `luno.sendEditorContext` | `true`  | Include the open file and any selection, so "why does this crash?" has something to point at                              |
+| `luno.sendDiagnostics`   | `true`  | Include the editor's Problems, so the agent sees the same errors you do                                                   |
+| `luno.terminalCapture`   | `true`  | Keep the last command's output per terminal, so `@terminal:` can put it in a prompt                                       |
+| `luno.respectGitIgnore`  | `true`  | Use the repository's own ignore rules when listing files for `@`-mentions                                                 |
+
+### Composer and empty state
+
+| Setting                   | Default | Description                                                                                                                                           |
+| ------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `luno.useCtrlEnterToSend` | `false` | Require Ctrl/Cmd+Enter to send, leaving plain Enter for a newline                                                                                     |
+| `luno.startupSuggestions` | `[]`    | The cards offered on an empty chat, in order. An entry starting with `/` names a skill or command. Empty → the skills and commands actually installed |
+
+### Development only
+
+| Setting               | Default | Description                                                                                       |
+| --------------------- | ------- | ------------------------------------------------------------------------------------------------- |
+| `luno.devServerUrl`   | `""`    | Point at a running `bun run dev:webview` and the panel loads from it, hot-reloading webview edits |
+| `luno.devAutoRestart` | `true`  | In an Extension Development Host, restart the host when `dist/extension.js` is rewritten          |
 
 ---
 
@@ -227,7 +260,7 @@ basis. Two things to know before you send one:
 
 ## Privacy
 
-- Your code is sent to Anthropic only when the agent requests a tool that reads it, or when you `@`-mention or paste it. The webview never autouploads workspace files.
+- Your code is sent to Anthropic only when the agent requests a tool that reads it, or when you `@`-mention or paste it. The webview never auto-uploads workspace files.
 - Tokens live in the OS keychain via VS Code's SecretStorage API. Luno does not write credentials to disk under any path it controls.
 - Destructive and network commands always surface an approval prompt before they run in **Ask**, **Agent** and **Plan**. Ask prompts for every edit and command too; Agent auto-applies edits (reversible via checkpoints) but still gates deletes, shell, and network calls. **Bypass** removes the gate — you opt into that explicitly through a confirmation modal, and the toolbar stays red while it lasts.
 

@@ -100,6 +100,17 @@ following it.
 plus `--ok-soft` `--err-soft` `--info-soft` at 12% and `--warn-soft` at 13%.
 Green means ok in every palette on purpose; a theme may still override them.
 
+### The plan surface — `--plan-accent*`
+
+`--plan-accent` `--plan-accent-soft` `--plan-accent-hover` `--plan-accent-active`,
+declared in `theme.css` and derived from `--ok` at 8% / 16% / 28%.
+
+Its own family rather than `--ok` used directly, because the plan surface leans
+on one hue across a whole panel — stripe, row tint, hover, pressed — and four
+call sites reaching for `color-mix(--ok …)` by hand is how those four drift
+apart. A theme that wants a different plan hue overrides the four here and
+nothing else moves.
+
 ## Non-color tokens — shared, never per-theme
 
 ### Shape and type

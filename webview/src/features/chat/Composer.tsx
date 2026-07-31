@@ -25,7 +25,8 @@ import {
   EffortLevel,
   ModelInfo,
   SkillInfo,
-  SlashCommand
+  SlashCommand,
+  PendingSetting
 } from "../../lib/rpc";
 import { useWebviewSettings } from "../../lib/settings";
 import { MODES, findMode } from "./constants";
@@ -39,6 +40,7 @@ import { slashQuery } from "./slash-filter";
 import { SkillsPicker } from "./SkillsPicker";
 import { ModelPicker } from "./ModelPicker";
 import { EffortPicker } from "./EffortPicker";
+import { PendingDot } from "./PendingDot";
 import { ImageLightbox } from "./ImageLightbox";
 import s from "./Composer.module.scss";
 
@@ -62,6 +64,11 @@ export interface ComposerProps {
   ultracode?: boolean;
   models: ReadonlyArray<ModelInfo>;
   skills: ReadonlyArray<SkillInfo>;
+  /** Controls whose value the running CLI has not been given yet — marked so
+   *  the chip does not quietly claim a posture the session is not in. */
+  pendingSettings?: ReadonlyArray<PendingSetting>;
+  /** Modes the user's settings forbid — kept out of the picker entirely. */
+  disabledModes?: ReadonlyArray<PermissionMode>;
   /** External signal (from Cmd+U etc.) to focus the editor. */
   focusKey: number;
   /** When set, splice this code block at the caret then call onInserted. */
@@ -72,6 +79,11 @@ export interface ComposerProps {
    *  whatever is already typed, then cleared via onRestored. */
   pendingRestore?: string | null;
   onRestored?: () => void;
+  /** A suggestion card from the empty state. Goes in *front* of whatever is
+   *  typed, unlike pendingRestore: the CLI expands `/name` only at the start of
+   *  a message, so appending one would file a dead command. */
+  pendingPrefill?: string | null;
+  onPrefilled?: () => void;
   /** Compact in-message edit mode: hides the toolbar, swaps in a Cancel/Send footer. */
   inline?: boolean;
   /** Inline mode only — called when the user discards the edit. */
@@ -111,11 +123,15 @@ export function Composer({
   ultracode = false,
   models,
   skills,
+  pendingSettings = [],
+  disabledModes = [],
   focusKey,
   pendingInsert,
   onInserted,
   pendingRestore,
   onRestored,
+  pendingPrefill,
+  onPrefilled,
   inline = false,
   onDiscard
 }: ComposerProps) {
@@ -158,6 +174,17 @@ export function Composer({
     onRestored?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingRestore]);
+
+  useEffect(() => {
+    if (!pendingPrefill) return;
+    const current = (editorRef.current?.serialize() ?? "").trim();
+    editorRef.current?.setText(
+      current ? `${pendingPrefill.trimEnd()} ${current}` : pendingPrefill
+    );
+    editorRef.current?.focus();
+    onPrefilled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPrefill]);
 
   // Inline edit mode: focus once on mount, then keep listeners alive for
   // the lifetime of the inline editor.
@@ -542,15 +569,18 @@ export function Composer({
       {inline ? null : (
         <div className={s.toolbar}>
           <Dropdown<PermissionMode>
-            options={MODES.map((m) => ({
-              value: m.value,
-              label: m.label,
-              note: m.note,
-              icon: m.icon,
-              // Bypass renders in `--err`, never the accent — the picker is the
-              // last thing between a click and a mode with no approval gate.
-              danger: m.danger
-            }))}
+            options={MODES.filter((m) => !disabledModes.includes(m.value)).map(
+              (m) => ({
+                value: m.value,
+                label: m.label,
+                note: m.note,
+                icon: m.icon,
+                // Bypass renders in `--err`, never the accent — the picker is
+                // the last thing between a click and a mode with no approval
+                // gate.
+                danger: m.danger
+              })
+            )}
             value={permissionMode}
             onSelect={(v) => send({ type: "setPermissionMode", mode: v })}
             align="left"
@@ -563,12 +593,16 @@ export function Composer({
               <>
                 <Icon name={mode.icon} size={12} />
                 <span>{mode.short}</span>
+                {pendingSettings.includes("mode") && <PendingDot />}
                 <Icon name="chevronD" size={9} />
               </>
             )}
           />
 
-          <SkillsPicker skills={skills} />
+          <SkillsPicker
+            skills={skills}
+            pending={pendingSettings.includes("skills")}
+          />
 
           <div className={s.divider} />
 
@@ -594,6 +628,10 @@ export function Composer({
             model={model}
             models={models}
             effort={effort}
+            pending={
+              pendingSettings.includes("effort") ||
+              pendingSettings.includes("thinking")
+            }
             ultracode={ultracode}
             onEffort={(level, ultra) =>
               send({ type: "setEffort", effort: level, ultracode: ultra })

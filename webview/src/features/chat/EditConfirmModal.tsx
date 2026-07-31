@@ -14,10 +14,15 @@
 import { useEffect } from "react";
 import { motion } from "framer-motion";
 import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
+import { formatDuration } from "./tool-buckets";
+import type { LiveAgents } from "./subagent-state";
 import s from "./EditConfirmModal.module.scss";
 
 interface EditConfirmModalProps {
   messagesAfter: number;
+  /** What submitting from here will also destroy — see RewindModal, which
+   *  takes the same warning for the same reason. */
+  agents: LiveAgents;
   onCancel: () => void;
   onDontRevert: () => void;
   onRevert: () => void;
@@ -25,6 +30,7 @@ interface EditConfirmModalProps {
 
 export function EditConfirmModal({
   messagesAfter,
+  agents,
   onCancel,
   onDontRevert,
   onRevert
@@ -85,6 +91,15 @@ export function EditConfirmModal({
       >
         <h2 className={s.title}>Submit from a previous message?</h2>
         <p className={s.body}>{body}</p>
+        {agents.count > 0 && (
+          <p className={s.warning}>
+            {agents.count} agent{agents.count !== 1 ? "s" : ""} still working
+            {agents.longestMs > 0 && (
+              <> — the longest at {formatDuration(agents.longestMs)}</>
+            )}{" "}
+            will be stopped, and their work is not recoverable.
+          </p>
+        )}
         <div className={s.actions}>
           <button type="button" className={s.cancel} onClick={onCancel}>
             Cancel <span className={s.hint}>(esc)</span>

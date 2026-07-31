@@ -18,11 +18,16 @@
 
 import * as vscode from "vscode";
 import type { Session } from "../../core/session.js";
-import type { PermissionMode, PlanRevisionMeta } from "../../core/types.js";
+import type {
+  PermissionMode,
+  PlanQuestionMeta,
+  PlanRevisionMeta
+} from "../../core/types.js";
 import type { PlanArtifactManager } from "../plan-artifact-panel.js";
 import { makeNonce } from "../webview-html.js";
 import {
   findCommentEvent,
+  findQuestionEvent,
   findRevisionEvent,
   incompletePlanSections,
   isCommentRevisionProceeded,
@@ -456,19 +461,52 @@ export class PlanHandlers {
   }
 
   /**
-   * Record the user's question-card answers in the timeline, then forward
-   * them as a synthetic user turn so the model knows how to proceed.
+   * Record the user's question-card answers on the timeline, so a reload or a
+   * rewind still shows what was chosen.
+   *
+   * Recording only. The answers reach the model through the `updatedInput` of
+   * the `AskUserQuestion` permission response — that tool returns the input it
+   * is handed, and nothing else delivers them. This used to also send a
+   * synthetic prompt, which opened a second turn against a tool call the CLI
+   * had already resolved with "The user did not answer the questions."
    */
-  async handlePlanAnswer(
+  handlePlanAnswer(
     questionId: string,
     _toolUseId: string,
     answers: Array<{ choice: string; note?: string }>
   ) {
-    this.session.emitPlanAnswer({ questionId, answers });
-    const summary = answers
-      .map((a, i) => `Q${i + 1}: ${a.choice}${a.note ? ` (${a.note})` : ""}`)
-      .join("; ");
-    await this.handlePrompt(`Answer to your question — ${summary}`);
+    const ev = this.session.emitPlanAnswer({ questionId, answers });
+    this.post({ type: "timeline", event: ev });
+    this.scheduleSave();
+  }
+
+  /**
+   * Record an answer that came back as the `updatedInput` of an
+   * `AskUserQuestion` permission response — the only path there is since the
+   * card stopped submitting on its own.
+   *
+   * Two shapes meet here. On the wire the answers are keyed by question text
+   * (`{"Which library?": "date-fns"}`); on the timeline they are positional,
+   * which is what every stored session already carries and what the plan panel
+   * reads. The question event is the thing that knows both orders, so the
+   * mapping happens against it and nowhere else.
+   *
+   * No-op when nothing matches: a question the interceptor never recorded is
+   * not worth inventing an event for, and a turn that moved on is not an error.
+   */
+  recordAnswerFromTool(
+    toolUseId: string,
+    answers: Record<string, string>
+  ): void {
+    if (!toolUseId) return;
+    const asked = findQuestionEvent(this.session.timeline, toolUseId);
+    if (!asked) return;
+    const meta = asked.meta as unknown as PlanQuestionMeta;
+    const recorded = meta.questions.map((q) => ({
+      choice: answers[q.question] ?? ""
+    }));
+    if (recorded.every((a) => a.choice === "")) return;
+    this.handlePlanAnswer(meta.questionId, toolUseId, recorded);
   }
   // ───────────────────────────────────────────────────────────
 }

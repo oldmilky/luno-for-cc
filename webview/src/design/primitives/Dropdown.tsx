@@ -61,7 +61,7 @@ export function Dropdown<T extends string = string>({
         {open && (
           <motion.div
             role="listbox"
-            className={`${s.menu} ${s[align]} ${s[placement]}`}
+            className={`${s.menu} ${s.options} ${s[align]} ${s[placement]}`}
             {...(placement === "above" ? POPOVER_ABOVE : POPOVER)}
           >
             {options.map((opt) => (
@@ -82,18 +82,18 @@ export function Dropdown<T extends string = string>({
                   setOpen(false);
                 }}
               >
-                {opt.icon && (
-                  <span className={s.icon}>
-                    <Icon name={opt.icon} size={13} />
-                  </span>
-                )}
+                {/* Every row emits all four cells, empty ones included: a
+                    subgrid row that skips a track shifts every cell after it
+                    into the wrong column, so an option with no icon would put
+                    its label where the icons are. */}
+                <span className={s.icon}>
+                  {opt.icon && <Icon name={opt.icon} size={13} />}
+                </span>
                 <span className={s.main}>{opt.label}</span>
-                {opt.note && <span className={s.note}>{opt.note}</span>}
-                {opt.value === value && (
-                  <span className={s.check}>
-                    <Icon name="check" size={12} />
-                  </span>
-                )}
+                <span className={s.note}>{opt.note}</span>
+                <span className={s.check}>
+                  {opt.value === value && <Icon name="check" size={12} />}
+                </span>
               </button>
             ))}
           </motion.div>

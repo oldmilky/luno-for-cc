@@ -6,6 +6,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useReducer, useState } from "react";
+import { AnimatePresence } from "framer-motion";
 import {
   send,
   onMessage,
@@ -19,14 +20,21 @@ import {
   SkillInfo,
   ChatStatus,
   PermissionRequestView,
-  SubagentTaskView
+  SubagentTaskView,
+  PendingSetting,
+  UserDialogView
 } from "./lib/rpc";
 import { subscribeToSettings } from "./lib/settings";
 import { Spinner, type CodeInsert } from "./design/primitives";
 import { ChatScreen } from "./features/chat";
 import { WelcomeScreen } from "./features/auth/WelcomeScreen";
 import { FALLBACK_MODELS } from "./features/chat/constants";
-import { subagentOutcome } from "./features/chat/subagent-state";
+import {
+  liveAgents,
+  subagentOutcome,
+  type LiveAgents
+} from "./features/chat/subagent-state";
+import { StopAgentsModal } from "./features/chat/StopAgentsModal";
 import s from "./App.module.scss";
 
 // ── Auth state ───────────────────────────────────────────────
@@ -155,6 +163,12 @@ export function App() {
   >([]);
   const pendingPermission = pendingPermissions[0] ?? null;
 
+  // Dialogs queue for the same reason permissions do: the CLI can be blocked on
+  // more than one, and a single slot would drop every prompt but the newest and
+  // leave the rest unanswered forever.
+  const [pendingDialogs, setPendingDialogs] = useState<UserDialogView[]>([]);
+  const pendingDialog = pendingDialogs[0] ?? null;
+
   // What each running subagent is doing right now, keyed by CLI task id.
   // Deliberately outside `events` and outside `patchState`: the timeline holds
   // the dispatch and the result, which are what still mean something tomorrow.
@@ -164,6 +178,17 @@ export function App() {
   const [taskProgress, setTaskProgress] = useState<
     Record<string, SubagentTaskView>
   >({});
+  /** Stop was pressed with agents running — see StopAgentsModal for why that
+   *  is a question rather than an action. Holds the count as it was when
+   *  asked, so the dialog cannot renumber itself under the user's cursor. */
+  const [stopWithAgents, setStopWithAgents] = useState<LiveAgents | null>(null);
+  /** Controls showing a value the running CLI has not been given: applying it
+   *  means replacing the process, and the conversation has agents in it. */
+  const [pendingSettings, setPendingSettings] = useState<PendingSetting[]>([]);
+  /** Modes the user's own Claude Code settings forbid. Never offered — a mode
+   *  refused the moment it is picked is worse than one that was not on the
+   *  menu. */
+  const [disabledModes, setDisabledModes] = useState<PermissionMode[]>([]);
 
   // Persist non-volatile UI state. Patch rather than replace — the theme
   // store owns its own slice of the same state object.
@@ -210,6 +235,8 @@ export function App() {
             thinking: m.thinking ?? true,
             ultracode: m.ultracode ?? false
           });
+          setPendingSettings(m.pendingSettings ?? []);
+          setDisabledModes(m.disabledModes ?? []);
           send({ type: "requestModels" });
           send({ type: "requestSkills" });
           break;
@@ -220,6 +247,8 @@ export function App() {
           setError(null);
           setBusy(false);
           setPendingPermissions([]);
+          setPendingDialogs([]);
+          setTaskProgress({});
           break;
         case "reset":
           patchState<Persisted>({ sessionId: m.sessionId });
@@ -229,6 +258,7 @@ export function App() {
           // New Chat always lands on a usable composer, even if a turnEnd was missed.
           setBusy(false);
           setPendingPermissions([]);
+          setPendingDialogs([]);
           setTaskProgress({});
           break;
         case "returnToComposer":
@@ -252,6 +282,23 @@ export function App() {
           if (m.event.kind === "assistant" || m.event.kind === "tool_call") {
             setStreaming("");
           }
+          // The closing row is the only thing that ever says an agent stopped.
+          // Nothing else does: the host deletes the task from its own live map
+          // and writes this event, and posts no further progress for it — so an
+          // entry left here keeps its last `running` status for good, and the
+          // header goes on claiming agents long after the last one answered.
+          if (m.event.kind === "subagent") {
+            const meta = m.event.meta as
+              { taskId?: string; phase?: string } | undefined;
+            if (meta?.phase === "end" && meta.taskId) {
+              setTaskProgress((prev) => {
+                if (!(meta.taskId! in prev)) return prev;
+                const next = { ...prev };
+                delete next[meta.taskId!];
+                return next;
+              });
+            }
+          }
           break;
         case "delta": {
           const d = m.delta;
@@ -271,6 +318,7 @@ export function App() {
           // The turn is over (completed or cancelled) — no prompt can still
           // be live, so drop any card that didn't get an explicit answer.
           setPendingPermissions([]);
+          setPendingDialogs([]);
           // Subagents are not the same case, and used to be treated as one.
           // The process outlives the turn now, so an agent still running at
           // `turnEnd` keeps running — wiping it here left its card with a
@@ -310,10 +358,25 @@ export function App() {
             q.filter((p) => p.requestId !== m.requestId)
           );
           break;
+        case "userDialog":
+          setPendingDialogs((q) =>
+            q.some((d) => d.requestId === m.dialog.requestId)
+              ? q
+              : [...q, m.dialog]
+          );
+          break;
+        case "userDialogResolved":
+          // Withdrawn by the CLI — it retires a dialog the moment a new user
+          // message makes it moot. Nothing goes back; the id is already gone.
+          setPendingDialogs((q) =>
+            q.filter((d) => d.requestId !== m.requestId)
+          );
+          break;
         case "error":
           setError(m.message);
           setBusy(false);
           setPendingPermissions([]);
+          setPendingDialogs([]);
           break;
         case "editorContext":
           setEditorContext(m.context ?? null);
@@ -328,6 +391,7 @@ export function App() {
           setError(null);
           setBusy(false);
           setPendingPermissions([]);
+          setPendingDialogs([]);
           break;
         case "models":
           if (m.models.length) setModels(m.models);
@@ -365,6 +429,12 @@ export function App() {
           setError(null);
           setBusy(false);
           setPendingPermissions([]);
+          setPendingDialogs([]);
+          // Everything above belongs to the conversation being left behind, and
+          // so does this: a chat running twenty agents handed its surface to
+          // another one and the header of the *new* chat kept saying `agents`.
+          // The host re-publishes whatever the incoming conversation has open.
+          setTaskProgress({});
           break;
         case "sessionMeta":
           setSessionMeta({ title: m.title, status: m.status });
@@ -424,6 +494,8 @@ export function App() {
         ultracode={auth.ultracode}
         events={events}
         taskProgress={taskProgress}
+        pendingSettings={pendingSettings}
+        disabledModes={disabledModes}
         streaming={streaming}
         busy={busy}
         input={input}
@@ -467,7 +539,13 @@ export function App() {
           send({ type: "prompt", text: finalText });
           setInput("");
         }}
-        onCancel={() => send({ type: "cancel" })}
+        onCancel={() => {
+          // Stop reaches the CLI as an interrupt, and that takes every
+          // background agent with it. Only ask when there is something to lose.
+          const running = liveAgents(taskProgress);
+          if (running.count > 0) setStopWithAgents(running);
+          else send({ type: "cancel" });
+        }}
         onDismissError={() => setError(null)}
         pendingPermission={pendingPermission}
         onPermissionRespond={(behavior, opts) => {
@@ -477,13 +555,38 @@ export function App() {
             requestId: pendingPermission.requestId,
             behavior,
             restOfTurn: opts?.restOfTurn,
-            always: opts?.always
+            always: opts?.always,
+            updatedInput: opts?.updatedInput,
+            reason: opts?.reason
           });
           // Dequeue only the prompt we just answered; the next queued prompt
           // (if any) becomes the new head and its card renders immediately.
           setPendingPermissions((q) => q.slice(1));
         }}
+        pendingDialog={pendingDialog}
+        onDialogRespond={(result) => {
+          if (!pendingDialog) return;
+          send({
+            type: "userDialogResponse",
+            requestId: pendingDialog.requestId,
+            result
+          });
+          setPendingDialogs((q) => q.slice(1));
+        }}
       />
+      <AnimatePresence>
+        {stopWithAgents && (
+          <StopAgentsModal
+            key="stop-agents-modal"
+            agents={stopWithAgents}
+            onCancel={() => setStopWithAgents(null)}
+            onConfirm={() => {
+              send({ type: "cancel" });
+              setStopWithAgents(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

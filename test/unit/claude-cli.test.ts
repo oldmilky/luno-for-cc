@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as nodeFs from "node:fs";
+import * as nodeOs from "node:os";
+import * as nodePath from "node:path";
 import {
   mapEvent,
   makeProcessor,
@@ -20,8 +23,12 @@ import {
   exitFailure,
   isReadOnlyShellCommand,
   bridgeStatus,
-  mcpToolPatterns
+  mcpToolPatterns,
+  denialMessage,
+  autoModeDenialReason,
+  AUTO_MODE_DENIAL_PREFIX
 } from "../../src/providers/claude-cli.js";
+import { SUPPORTED_DIALOG_KINDS } from "../../src/core/types.js";
 
 describe("claude-cli mapEvent (single event)", () => {
   it("captures session_id from system/init", () => {
@@ -228,6 +235,31 @@ describe("claude-cli bridge_state", () => {
     ).toBeNull();
   });
 
+  it("reads `failed`, which is the word the CLI actually sends", () => {
+    // The 2.1.219 string pool beside `[bridge:sdk] State change:` interns
+    // `failed · connected · ready`; `disconnected` is nowhere in it. Dropping
+    // `failed` left the pill claiming a bridge that had already died.
+    const next = bridgeStatus(
+      {
+        type: "system",
+        subtype: "bridge_state",
+        state: "failed",
+        detail: "transport closed"
+      },
+      { state: "connected" }
+    );
+    expect(next).toEqual({ state: "error", error: "transport closed" });
+  });
+
+  it("says nothing when a `failed` only repeats the error already shown", () => {
+    expect(
+      bridgeStatus(
+        { type: "system", subtype: "bridge_state", state: "failed" },
+        { state: "error", error: "transport closed" }
+      )
+    ).toBeNull();
+  });
+
   it("ignores a state it does not know", () => {
     expect(
       bridgeStatus(
@@ -324,11 +356,10 @@ describe("claude-cli respawnFingerprint", () => {
 });
 
 describe("claude-cli buildArgs", () => {
-  it("maps permissionMode auto -> default (NOT acceptEdits, which auto-runs rm)", () => {
-    // acceptEdits silently runs every Bash command, including `rm`, without
-    // consulting our permission tool. auto mode must use the CLI's `default`
-    // mode and auto-accept edits via --allowedTools instead, so destructive
-    // calls still surface an approval card.
+  it("maps permissionMode auto -> auto (NOT acceptEdits, which auto-runs rm)", () => {
+    // The CLI's own `auto` runs a classifier and escalates what it will not
+    // judge. acceptEdits, the other candidate, silently runs every Bash command
+    // including `rm` without consulting our permission tool at all.
     const args = buildArgs("hi", "claude-sonnet-4-5", {
       binary: "claude",
       cwd: "/tmp",
@@ -336,13 +367,46 @@ describe("claude-cli buildArgs", () => {
     });
     const idx = args.indexOf("--permission-mode");
     expect(idx).toBeGreaterThan(-1);
-    expect(args[idx + 1]).toBe("default");
+    expect(args[idx + 1]).toBe("auto");
     expect(args).not.toContain("acceptEdits");
-    // Edits are still pre-allowed so "auto" keeps auto-applying them.
+    // Still pre-allowed: it keeps reads and edits off the classifier's paid
+    // path, and it is the whole of Agent mode if the CLI refuses `auto`.
     const allowIdx = args.indexOf("--allowedTools");
     expect(allowIdx).toBeGreaterThan(-1);
     expect(args).toContain("Edit");
     expect(args).toContain("Write");
+  });
+
+  it("maps permissionMode acceptEdits -> acceptEdits, with the approval channel", () => {
+    // The mode the CLI has had all along and no LUNO build could reach. Edits
+    // apply without a card; everything else still meets one, so the control
+    // channel has to be wired up exactly as `default` wires it.
+    const args = buildArgs("hi", "claude-sonnet-4-5", {
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "acceptEdits"
+    });
+    const idx = args.indexOf("--permission-mode");
+    expect(args[idx + 1]).toBe("acceptEdits");
+    const toolIdx = args.indexOf("--permission-prompt-tool");
+    expect(toolIdx).toBeGreaterThan(-1);
+    expect(args[toolIdx + 1]).toBe("stdio");
+    // No blanket pre-allow: that belongs to Agent, and here the CLI is the one
+    // waving edits through.
+    expect(args).not.toContain("--allowedTools");
+  });
+
+  it("keeps the git ask routing in acceptEdits (git is not an edit)", () => {
+    const args = buildArgs("hi", "", {
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "acceptEdits"
+    });
+    const idx = args.indexOf("--settings");
+    expect(idx).toBeGreaterThan(-1);
+    expect(JSON.parse(args[idx + 1]).permissions?.ask ?? []).toContain(
+      "Bash(git:*)"
+    );
   });
 
   it("maps permissionMode plan -> plan", () => {
@@ -508,6 +572,23 @@ describe("claude-cli buildArgs", () => {
     expect(ask).toContain("Bash(git:*)");
   });
 
+  it("does NOT inject the git ask routing in auto mode (it would skip the CLI's classifier)", () => {
+    // A matched `ask` rule is one of the CLI's enumerated reasons to bypass its
+    // own classifier and prompt instead, so this would put a card in front of
+    // every git call. Measured on 2.1.219 with an `ask` rule on `Bash(echo:*)`:
+    // `echo hello` raised an approval request, and did not once the rule went.
+    const args = buildArgs("hi", "", {
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "auto"
+    });
+    const idx = args.indexOf("--settings");
+    if (idx > -1) {
+      expect(JSON.parse(args[idx + 1])).not.toHaveProperty("permissions");
+    }
+    expect(args).not.toContain("Bash(git:*)");
+  });
+
   it("does NOT inject the git ask routing in plan mode (no prompt tool to service it)", () => {
     // Plan mode has no --permission-prompt-tool, so an `ask` rule would have
     // nothing to answer it and could block read-only git. Regression guard.
@@ -600,6 +681,86 @@ describe("claude-cli destructive-operation detection", () => {
     }
     // A plain download is network-but-not-destructive.
     expect(isDestructiveBash("curl https://example.com")).toBe(false);
+  });
+
+  // ── The gate reads command positions, not words ──────────────
+  //
+  // Every entry below is a command this repo's own transcripts produced. They
+  // used to come back as red "Run destructive command?" cards because the
+  // patterns were matched against the whole line as free text.
+
+  it("does not read a command name out of an argument", () => {
+    for (const cmd of [
+      // The reported card, verbatim in shape. `\bformat\b` was written for the
+      // Windows `format C: /q`, and `\b` sits happily after a hyphen.
+      `git log --oneline -S"x" -- src/a.ts; echo "--- (input format) ---"; git log -S'--input-format' -- src/b.ts`,
+      'rg "erase" src',
+      "bun run format -- src/a.ts",
+      "npm run del:cache",
+      'grep -rn "rm -rf" docs/',
+      "cat notes.md | grep sudo",
+      'git log -S"git push --force" -- .',
+      "node -e 'console.log(\"format C:\")'",
+      "bun test 2>&1 | tail -20"
+    ]) {
+      expect(isDestructiveBash(cmd)).toBe(false);
+    }
+  });
+
+  it("still finds the command wherever the line puts it", () => {
+    for (const cmd of [
+      "ls && rm -rf .", // a later segment
+      "cd /tmp; rmdir foo",
+      "xargs rm -rf < list.txt", // behind a wrapper
+      "FOO=1 rm -rf x", // behind an assignment
+      "echo hi; $(rm -rf x)", // inside a substitution
+      "echo `rm -rf x`",
+      "/usr/bin/rm -rf x", // by absolute path
+      "RM.EXE -rf x", // and by Windows spelling
+      // Handed to another shell. The old whole-line scan caught these by
+      // accident; anchoring to the command position has to catch them on
+      // purpose, or the fix trades a false card for a silent deletion.
+      'bash -c "rm -rf x"',
+      "sh -c 'rm -rf /'",
+      'powershell -Command "Remove-Item x"',
+      "cmd /c del build.log",
+      'nohup bash -c "rm -rf x"'
+    ]) {
+      expect(isDestructiveBash(cmd)).toBe(true);
+    }
+  });
+
+  it("does not mistake a shell's own quoted argument for a command", () => {
+    // The other half of the same mechanism: what the inner shell runs is an
+    // `echo`, and the word it prints is not a call.
+    expect(isDestructiveBash("bash -c \"echo 'rm -rf x'\"")).toBe(false);
+    expect(isDestructiveBash("bash script.sh")).toBe(false);
+  });
+
+  it("keeps the Windows list, and keeps it off ordinary words", () => {
+    for (const cmd of [
+      "Remove-Item -Path README.md -Confirm:$false",
+      "del build.log",
+      "format C: /q",
+      "rd /s /q build",
+      "reg delete HKLM\\Software\\X",
+      "diskpart",
+      "Stop-Process -Id 4 -Force",
+      "mkfs.ext4 /dev/sdb1"
+    ]) {
+      expect(isDestructiveBash(cmd)).toBe(true);
+    }
+    for (const cmd of ["format", "reg query HKLM", "rd"]) {
+      expect(isDestructiveBash(cmd)).toBe(false);
+    }
+  });
+
+  it("reads git by its subcommand, not by the line mentioning one", () => {
+    expect(isDestructiveBash("git checkout -- src/a.ts")).toBe(true);
+    expect(isDestructiveBash("git push -f")).toBe(true);
+    expect(isDestructiveBash("git reset HEAD~1")).toBe(false);
+    expect(isDestructiveBash("git -C /repo clean -fdx")).toBe(true);
+    expect(isDestructiveBash('git commit -m "git clean -fdx"')).toBe(false);
   });
 });
 
@@ -777,9 +938,33 @@ describe("decidePermission policy", () => {
     );
   });
 
-  it("auto-allows plan/answer helper tools regardless of the edits flag", () => {
-    for (const t of ["ExitPlanMode", "TodoWrite", "AskUserQuestion"]) {
+  it("auto-allows plan helper tools regardless of the edits flag", () => {
+    for (const t of ["ExitPlanMode", "TodoWrite"]) {
       expect(decidePermission(t, {}, noAuto).action).toBe("allow");
+    }
+  });
+
+  // AskUserQuestion carries no answer until the user supplies one: the CLI
+  // echoes back the input it was handed, so an "allow" that changed nothing
+  // resolves the call to "The user did not answer the questions."
+  it("never auto-allows AskUserQuestion — in any mode", () => {
+    const modes = [
+      { name: "default", ctx: noAuto },
+      { name: "allow-edits", ctx: auto },
+      { name: "agent", ctx: { autoAllowEdits: false, agentMode: true } },
+      {
+        name: "standing grant",
+        ctx: {
+          autoAllowEdits: false,
+          grants: [{ tool: "AskUserQuestion" }]
+        }
+      }
+    ];
+    for (const { name, ctx } of modes) {
+      expect(
+        decidePermission("AskUserQuestion", { questions: [] }, ctx).action,
+        name
+      ).toBe("prompt");
     }
   });
 
@@ -963,6 +1148,44 @@ describe("ClaudeCliProvider.respondToPermission (control_response wire format)",
           updatedInput: { file_path: "a.ts", content: "x" }
         }
       }
+    });
+  });
+
+  // The AskUserQuestion channel: the tool returns the input it is handed, so
+  // the answers exist on the wire only if they replace it here.
+  it("sends the caller's updatedInput in place of the proposed one", () => {
+    const { provider, writes, setPending } = harness();
+    setPending("q1", {
+      toolName: "AskUserQuestion",
+      input: { questions: [{ question: "Which library?", options: [] }] }
+    });
+    provider.respondToPermission("q1", "allow", {
+      updatedInput: {
+        questions: [{ question: "Which library?", options: [] }],
+        answers: { "Which library?": "date-fns" }
+      }
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].response.response).toEqual({
+      behavior: "allow",
+      updatedInput: {
+        questions: [{ question: "Which library?", options: [] }],
+        answers: { "Which library?": "date-fns" }
+      }
+    });
+  });
+
+  // The regression guard for every card that is not a question: adding the
+  // option must not change what an ordinary allow puts on the wire.
+  it("still echoes the proposed input when no updatedInput is given", () => {
+    const { provider, writes, setPending } = harness();
+    setPending("req1", {
+      toolName: "Bash",
+      input: { command: "bun run test" }
+    });
+    provider.respondToPermission("req1", "allow", { restOfTurn: true });
+    expect(writes[0].response.response.updatedInput).toEqual({
+      command: "bun run test"
     });
   });
 
@@ -2073,5 +2296,988 @@ describe("agent mode (auto)", () => {
     expect(decidePermission("Read", { file_path: "a.ts" }, ask).action).toBe(
       "allow"
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// The auto-continue deadline on a question's permission payload.
+//
+// It exists only because the CLI has no timer of its own: `checkPermissions`
+// returns "ask" and the core blocks on the response, so whoever renders the
+// question owns the deadline. The user's own Claude setting decides whether
+// there is one at all, and its default — unset means `never` — is why most
+// payloads must not carry the field.
+// ─────────────────────────────────────────────────────────────
+describe("claude-cli permission payload — auto-continue deadline", () => {
+  let dir: string;
+  let previous: string | undefined;
+
+  beforeEach(() => {
+    dir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), "luno-afk-"));
+    previous = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = dir;
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previous;
+    nodeFs.rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  const setTimeoutSetting = (value?: string) =>
+    nodeFs.writeFileSync(
+      nodePath.join(dir, "settings.json"),
+      JSON.stringify(
+        value === undefined ? {} : { askUserQuestionTimeout: value }
+      )
+    );
+
+  /** Drive one `can_use_tool` through the provider and return the payload the
+   *  panel would have been handed. */
+  function ask(toolName: string, input: Record<string, unknown>) {
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default"
+    });
+    (provider as any).child = { killed: false, stdin: { write: () => true } };
+    const deltas: any[] = [];
+    (provider as any).handleControlRequest(
+      {
+        type: "control_request",
+        request_id: "r1",
+        request: { subtype: "can_use_tool", tool_name: toolName, input }
+      },
+      (d: any) => deltas.push(d)
+    );
+    return deltas.find((d) => d.type === "permission_request")?.permission;
+  }
+
+  const QUESTION = { questions: [{ question: "Which?", options: [] }] };
+
+  it("carries the deadline on a question when the user set one", () => {
+    setTimeoutSetting("5m");
+    expect(ask("AskUserQuestion", QUESTION)?.afkTimeoutMs).toBe(300_000);
+  });
+
+  it("omits it entirely when the setting is unset", () => {
+    setTimeoutSetting();
+    const payload = ask("AskUserQuestion", QUESTION);
+    expect(payload).toBeDefined();
+    expect(payload).not.toHaveProperty("afkTimeoutMs");
+  });
+
+  it("omits it on `never`", () => {
+    setTimeoutSetting("never");
+    expect(ask("AskUserQuestion", QUESTION)).not.toHaveProperty("afkTimeoutMs");
+  });
+
+  it("never puts it on an ordinary permission card", () => {
+    // A deadline that auto-approves a file write is a different feature, and
+    // not one anybody asked for.
+    setTimeoutSetting("60s");
+    expect(ask("Write", { file_path: "a.ts" })).not.toHaveProperty(
+      "afkTimeoutMs"
+    );
+    expect(ask("Edit", { file_path: "a.ts" })).not.toHaveProperty(
+      "afkTimeoutMs"
+    );
+  });
+
+  it("raises no card at all for a tool that auto-allows", () => {
+    // Guards the test above from passing for the wrong reason: `Bash ls` is
+    // read-only and never reaches a card, so asserting on its payload would
+    // assert on `undefined`.
+    setTimeoutSetting("60s");
+    expect(ask("Bash", { command: "ls" })).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// The rest of what a control request carries, and how the subtypes this
+// client does not implement are answered. An empty success is not a neutral
+// ack: for several subtypes it is a malformed answer claiming we did
+// something.
+// ─────────────────────────────────────────────────────────────
+describe("claude-cli control requests we do not implement", () => {
+  beforeEach(() => vi.spyOn(console, "log").mockImplementation(() => {}));
+  afterEach(() => vi.restoreAllMocks());
+
+  function harness() {
+    const writes: any[] = [];
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default"
+    });
+    (provider as any).child = {
+      killed: false,
+      stdin: {
+        write: (s: string) => {
+          writes.push(JSON.parse(s.trim()));
+          return true;
+        }
+      }
+    };
+    const deliver = (request: Record<string, unknown>) => {
+      const deltas: any[] = [];
+      (provider as any).handleControlRequest(
+        { type: "control_request", request_id: "r1", request },
+        (d: any) => deltas.push(d)
+      );
+      return deltas;
+    };
+    return { writes, deliver };
+  }
+
+  it("declines an MCP elicitation instead of claiming success", () => {
+    // `{}` tells the server a prompt it never saw went fine. The SDK's own
+    // no-handler answer is a decline.
+    const { writes, deliver } = harness();
+    deliver({ subtype: "elicitation", mcp_server_name: "docs" });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].response.response).toEqual({ action: "decline" });
+  });
+
+  it("cancels a dialog kind it cannot draw rather than answering wrongly", () => {
+    // It used to stay silent, which was right while nothing was declared. Now
+    // that a kind IS declared the channel is live, and an undeclared one gets
+    // the cancel every kind defaults to — an empty object was never a reply,
+    // the CLI validates a response as {behavior:"completed"|"cancelled"}.
+    const { writes, deliver } = harness();
+    deliver({
+      subtype: "request_user_dialog",
+      dialog_kind: "mcp_url_elicitation"
+    });
+    expect(writes[0].response.response).toEqual({ behavior: "cancelled" });
+  });
+
+  it("still acks the subtypes that only want to know we are alive", () => {
+    const { writes, deliver } = harness();
+    deliver({ subtype: "hook_callback", callback_id: "h1" });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].response).toMatchObject({
+      subtype: "success",
+      request_id: "r1",
+      response: {}
+    });
+  });
+});
+
+describe("claude-cli permission request — fields the CLI already sends", () => {
+  beforeEach(() => vi.spyOn(console, "log").mockImplementation(() => {}));
+  afterEach(() => vi.restoreAllMocks());
+
+  function ask(
+    request: Record<string, unknown>,
+    // Agent mode by default on purpose: it auto-allows everything harmless, so
+    // a call that still prompts under it is one the interactive gate caught.
+    permissionMode: "auto" | "default" = "auto",
+    // What the CLI announced at `init`. `default` under a requested `auto` is
+    // the downgrade, where Luno's own policy is the only judge — which is the
+    // configuration every assertion in this suite is about.
+    cliMode = "default"
+  ) {
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode
+    });
+    (provider as any).noteEffectiveMode({
+      type: "system",
+      subtype: "init",
+      permissionMode: cliMode
+    });
+    (provider as any).child = { killed: false, stdin: { write: () => true } };
+    const deltas: any[] = [];
+    (provider as any).handleControlRequest(
+      {
+        type: "control_request",
+        request_id: "r1",
+        request: { subtype: "can_use_tool", ...request }
+      },
+      (d: any) => deltas.push(d)
+    );
+    return deltas.find((d) => d.type === "permission_request")?.permission;
+  }
+
+  it("prompts for any tool the CLI marks requires_user_interaction", () => {
+    // The generalisation: a future tool of the same shape needs no name list.
+    const payload = ask({
+      tool_name: "SomeFutureDialogTool",
+      input: {},
+      requires_user_interaction: true
+    });
+    expect(payload).toBeDefined();
+    expect(payload.toolName).toBe("SomeFutureDialogTool");
+  });
+
+  it("leaves an ordinary tool alone when the flag is absent", () => {
+    expect(
+      ask({ tool_name: "Read", input: { file_path: "a.ts" } })
+    ).toBeUndefined();
+  });
+
+  it("offers no standing grant when the CLI suppresses it", () => {
+    // A tool that normally DOES get one, so the assertion is not vacuous.
+    const normal = ask(
+      { tool_name: "Write", input: { file_path: "a.ts" } },
+      "default"
+    );
+    expect(normal.grantLabel).toBeTruthy();
+
+    const suppressed = ask(
+      {
+        tool_name: "Write",
+        input: { file_path: "a.ts" },
+        suppress_always_allow_rule: true
+      },
+      "default"
+    );
+    expect(suppressed.grantLabel).toBeUndefined();
+  });
+
+  it("offers no standing grant for an interactive tool either", () => {
+    // It could never fire: the interactive gate sits above the grant list, so
+    // the button would promise something the next round cannot deliver.
+    const payload = ask({
+      tool_name: "SomeFutureDialogTool",
+      input: {},
+      requires_user_interaction: true
+    });
+    expect(payload.grantLabel).toBeUndefined();
+  });
+
+  it("says which agent asked, when it was not the main turn", () => {
+    const fromAgent = ask({
+      tool_name: "SomeFutureDialogTool",
+      input: {},
+      requires_user_interaction: true,
+      agent_id: "agent_017"
+    });
+    expect(fromAgent.agentId).toBe("agent_017");
+    const fromMain = ask({
+      tool_name: "SomeFutureDialogTool",
+      input: {},
+      requires_user_interaction: true
+    });
+    expect(fromMain).not.toHaveProperty("agentId");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Which classifier is in force.
+//
+// Agent mode has two implementations. The CLI's own `auto` reads the whole
+// conversation and escalates only what it will not judge; ours is a pair of
+// regex lists that has to say yes to everything harmless to be usable at all.
+// Running the second one on top of the first would answer, from a list, the
+// very calls the first one asked a human about.
+//
+// The switch is `system/init`: a CLI that cannot provide `auto` downgrades in
+// silence and names the mode it took there — measured on 2.1.219.
+// ─────────────────────────────────────────────────────────────
+describe("claude-cli agent mode — who judged the call", () => {
+  beforeEach(() => vi.spyOn(console, "log").mockImplementation(() => {}));
+  afterEach(() => vi.restoreAllMocks());
+
+  function ask(
+    request: Record<string, unknown>,
+    opts: { init?: string | null; grants?: any[] } = {}
+  ) {
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "auto",
+      getToolGrants: () => opts.grants ?? []
+    } as any);
+    // `null` means no init has landed yet — the state a request can genuinely
+    // arrive in, and the one where the safe guess matters.
+    if (opts.init !== null) {
+      (provider as any).noteEffectiveMode({
+        type: "system",
+        subtype: "init",
+        permissionMode: opts.init ?? "auto"
+      });
+    }
+    (provider as any).child = { killed: false, stdin: { write: () => true } };
+    const deltas: any[] = [];
+    (provider as any).handleControlRequest(
+      {
+        type: "control_request",
+        request_id: "r1",
+        request: { subtype: "can_use_tool", ...request }
+      },
+      (d: any) => deltas.push(d)
+    );
+    return deltas.find((d) => d.type === "permission_request")?.permission;
+  }
+
+  const read = { tool_name: "Read", input: { file_path: "a.ts" } };
+
+  it("shows a card for a read the CLI escalated", () => {
+    // Not because reading is dangerous — because the classifier had the whole
+    // conversation and still wanted a human. Answering it from our list is
+    // exactly the auto-approval this mode must not make.
+    expect(ask(read)).toBeDefined();
+  });
+
+  it("auto-allows the same read once the CLI has downgraded", () => {
+    // `auto` was refused, so our policy is the only one there is, and under it
+    // Agent mode means Read never interrupts.
+    expect(ask(read, { init: "default" })).toBeUndefined();
+  });
+
+  it("treats an unannounced mode as the CLI's, not ours", () => {
+    // The two ways of being wrong are not symmetric: this costs a card for
+    // something that would have passed, the other auto-approves an escalation.
+    expect(ask(read, { init: null })).toBeDefined();
+  });
+
+  it("still honours a standing grant the user made", () => {
+    // The one thing that outranks the CLI's escalation, because it is not our
+    // judgement being substituted for its — it is the user's own, made on a
+    // card for this exact call.
+    expect(
+      ask(
+        { tool_name: "Bash", input: { command: "bun run build" } },
+        { grants: [{ tool: "Bash", prefix: "bun run" }] }
+      )
+    ).toBeUndefined();
+  });
+
+  it("still prompts for a question, whoever classified it", () => {
+    // The answer is the payload and only the user has it. Above every mode,
+    // and the CLI's own resolver agrees — it forces `ask` for these too.
+    expect(
+      ask({ tool_name: "AskUserQuestion", input: { questions: [] } })
+    ).toBeDefined();
+  });
+
+  it("still flags a destructive call as destructive", () => {
+    // The card's red stripe and its withheld "Always" button are ours to
+    // decide even when the decision to show a card was not.
+    const payload = ask({
+      tool_name: "Bash",
+      input: { command: "rm -rf build" }
+    });
+    expect(payload.destructive).toBe(true);
+    expect(payload.grantLabel).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// An edited command, and a denial that carries the user's words.
+//
+// The first is the riskiest line in this feature: the approval the user gave
+// was for the call on the card, and an edit makes it a different call.
+// ─────────────────────────────────────────────────────────────
+describe("claude-cli respondToPermission — an edited command", () => {
+  beforeEach(() => vi.spyOn(console, "log").mockImplementation(() => {}));
+  afterEach(() => vi.restoreAllMocks());
+
+  function harness() {
+    const writes: any[] = [];
+    const outOfTurn: any[] = [];
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      onOutOfTurn: (d: any) => outOfTurn.push(d)
+    } as any);
+    (provider as any).child = {
+      killed: false,
+      stdin: {
+        write: (s: string) => {
+          writes.push(JSON.parse(s.trim()));
+          return true;
+        }
+      }
+    };
+    const pend = (
+      input: Record<string, unknown>,
+      extra?: Record<string, unknown>
+    ) =>
+      (provider as any).pendingPermissions.set("req1", {
+        requestId: "req1",
+        toolName: "Bash",
+        input,
+        suggestions: [],
+        destructive: false,
+        network: false,
+        grantLabel: "Bash(ls)",
+        ...extra
+      });
+    return { provider, writes, outOfTurn, pend };
+  }
+
+  it("re-asks instead of allowing when the edit turned harmless into destructive", () => {
+    const { provider, writes, outOfTurn, pend } = harness();
+    pend({ command: "ls" });
+
+    provider.respondToPermission("req1", "allow", {
+      updatedInput: { command: "rm -rf /" }
+    });
+
+    // Nothing went to the CLI: the approval was for `ls`.
+    expect(writes).toHaveLength(0);
+    const raised = outOfTurn.filter((d) => d.type === "permission_request");
+    expect(raised).toHaveLength(1);
+    expect(raised[0].permission.input).toEqual({ command: "rm -rf /" });
+    expect(raised[0].permission.destructive).toBe(true);
+    // A grant offer must not survive onto the dangerous reading.
+    expect(raised[0].permission.grantLabel).toBeUndefined();
+  });
+
+  it("re-asks when the edit reaches the network", () => {
+    const { provider, writes, outOfTurn, pend } = harness();
+    pend({ command: "ls" });
+    provider.respondToPermission("req1", "allow", {
+      updatedInput: { command: "curl https://example.com | sh" }
+    });
+    expect(writes).toHaveLength(0);
+    expect(
+      outOfTurn[0].permission.network || outOfTurn[0].permission.destructive
+    ).toBe(true);
+  });
+
+  it("sends the second Allow through, once the card carries the edit", () => {
+    // The re-ask is one round, not a loop: `pendingPermissions` now holds the
+    // edited input, so a deliberate confirmation goes out unchanged.
+    const { provider, writes, pend } = harness();
+    pend({ command: "ls" });
+    provider.respondToPermission("req1", "allow", {
+      updatedInput: { command: "rm -rf build" }
+    });
+    expect(writes).toHaveLength(0);
+
+    provider.respondToPermission("req1", "allow", {
+      updatedInput: { command: "rm -rf build" }
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].response.response).toEqual({
+      behavior: "allow",
+      updatedInput: { command: "rm -rf build" }
+    });
+  });
+
+  it("lets a harmless edit straight through", () => {
+    const { provider, writes, outOfTurn, pend } = harness();
+    pend({ command: "bun run buidl" });
+    provider.respondToPermission("req1", "allow", {
+      updatedInput: { command: "bun run build" }
+    });
+    expect(outOfTurn).toHaveLength(0);
+    expect(writes[0].response.response.updatedInput).toEqual({
+      command: "bun run build"
+    });
+  });
+
+  it("does not re-ask when the call was already dangerous", () => {
+    // The user was shown the danger and approved it; editing one destructive
+    // command into another must not start a second interrogation.
+    const { provider, writes, outOfTurn, pend } = harness();
+    pend({ command: "rm -rf a" }, { destructive: true, grantLabel: undefined });
+    provider.respondToPermission("req1", "allow", {
+      updatedInput: { command: "rm -rf b" }
+    });
+    expect(outOfTurn).toHaveLength(0);
+    expect(writes).toHaveLength(1);
+  });
+});
+
+describe("claude-cli denialMessage", () => {
+  it("tells the model to stop retrying when nothing was typed", () => {
+    for (const empty of [undefined, "", "   "]) {
+      const m = denialMessage(empty);
+      expect(m).toMatch(/do not retry/i);
+      expect(m).toMatch(/stop and briefly explain/i);
+    }
+  });
+
+  it("drops the do-not-retry clause once the user said what to do instead", () => {
+    // Telling a model both "do not attempt an alternative" and "use fs.rm
+    // instead" leaves it choosing which half to obey.
+    const m = denialMessage("use fs.rm instead");
+    expect(m).toContain("use fs.rm instead");
+    expect(m).not.toMatch(/do not retry it or attempt an alternative/i);
+  });
+
+  it("trims what the user typed", () => {
+    expect(denialMessage("  do it with git  ")).toContain("do it with git\n");
+  });
+});
+
+describe("claude-cli autoModeDenialReason", () => {
+  // The wire shape, assembled from 2.1.219: the prefix, the reason, then advice
+  // addressed to the model rather than to the person reading the transcript.
+  const denial =
+    AUTO_MODE_DENIAL_PREFIX +
+    "this would delete a directory outside the workspace. " +
+    "If you have other tasks that don't depend on this action, continue " +
+    "working on those. To allow this type of action in the future, the user " +
+    "can add a Bash permission rule to their settings.";
+
+  it("reads the reason and leaves the advice to the model behind", () => {
+    expect(autoModeDenialReason(denial)).toBe(
+      "this would delete a directory outside the workspace"
+    );
+  });
+
+  it("says nothing about an ordinary tool failure", () => {
+    // The distinction the whole function exists for: auto mode refusing looks
+    // exactly like the tool breaking, and only this sentence tells them apart.
+    expect(autoModeDenialReason("error: ENOENT, no such file")).toBeNull();
+    expect(autoModeDenialReason("")).toBeNull();
+  });
+
+  it("puts the reason on the delta, and only on the ones that carry it", () => {
+    // The card downstream reads `autoModeDenial`, not the prose: a refusal has
+    // to survive a reworded heading, and it changes what the card means rather
+    // than how it is captioned.
+    const result = (content: string, isError: boolean) =>
+      mapEvent({
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "t1",
+              content,
+              is_error: isError
+            }
+          ]
+        }
+      } as never).find((d) => d.type === "tool_result");
+
+    expect(result(denial, true)).toMatchObject({
+      resultIsError: true,
+      autoModeDenial: "this would delete a directory outside the workspace"
+    });
+    expect(result("error: ENOENT", true)).not.toHaveProperty("autoModeDenial");
+    // A success that happens to quote the sentence is still a success.
+    expect(result(denial, false)).not.toHaveProperty("autoModeDenial");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Leaving plan mode is the user's call, and in LUNO they make it on the plan
+// card — which proceeds by respawning in Agent mode, not by answering this
+// tool. Refusing is what the tool is built for.
+// ─────────────────────────────────────────────────────────────
+describe("decidePermission — ExitPlanMode", () => {
+  const base = { autoAllowEdits: false };
+
+  it("refuses while the session is in plan mode", () => {
+    expect(
+      decidePermission("ExitPlanMode", {}, { ...base, planMode: true }).action
+    ).toBe("deny");
+  });
+
+  it("refuses even in agent mode, when the session is planning", () => {
+    // The mode setting and the live process disagree right after Proceed.
+    expect(
+      decidePermission(
+        "ExitPlanMode",
+        {},
+        { ...base, agentMode: true, planMode: true }
+      ).action
+    ).toBe("deny");
+  });
+
+  it("allows it once the session is no longer planning", () => {
+    expect(decidePermission("ExitPlanMode", {}, base).action).toBe("allow");
+    expect(
+      decidePermission("ExitPlanMode", {}, { ...base, planMode: false }).action
+    ).toBe("allow");
+  });
+
+  it("leaves the other plan helper alone in plan mode", () => {
+    expect(
+      decidePermission("TodoWrite", {}, { ...base, planMode: true }).action
+    ).toBe("allow");
+  });
+
+  it("does not make a question answerable by the plan-mode branch", () => {
+    expect(
+      decidePermission("AskUserQuestion", {}, { ...base, planMode: true })
+        .action
+    ).toBe("prompt");
+  });
+});
+
+describe("claude-cli ExitPlanMode on the wire", () => {
+  beforeEach(() => vi.spyOn(console, "log").mockImplementation(() => {}));
+  afterEach(() => vi.restoreAllMocks());
+
+  function harness(permissionMode: "plan" | "default") {
+    const writes: any[] = [];
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode
+    });
+    (provider as any).child = {
+      killed: false,
+      stdin: {
+        write: (s: string) => {
+          writes.push(JSON.parse(s.trim()));
+          return true;
+        }
+      }
+    };
+    const deltas: any[] = [];
+    (provider as any).handleControlRequest(
+      {
+        type: "control_request",
+        request_id: "r1",
+        request: {
+          subtype: "can_use_tool",
+          tool_name: "ExitPlanMode",
+          input: { plan: "the plan" }
+        }
+      },
+      (d: any) => deltas.push(d)
+    );
+    return { writes, deltas };
+  }
+
+  it("answers deny with the CLI's own stay-in-plan wording", () => {
+    const { writes, deltas } = harness("plan");
+    expect(writes).toHaveLength(1);
+    expect(writes[0].response.response).toEqual({
+      behavior: "deny",
+      message: "User chose to stay in plan mode and continue planning"
+    });
+    // No card: the user answers this on the plan card, not on a prompt.
+    expect(deltas.filter((d) => d.type === "permission_request")).toHaveLength(
+      0
+    );
+  });
+
+  it("sends no interrupt with it", () => {
+    // Interrupting takes every running background agent with it.
+    const { writes } = harness("plan");
+    expect(writes[0].response.response).not.toHaveProperty("interrupt");
+  });
+
+  it("allows it outside plan mode", () => {
+    const { writes } = harness("default");
+    expect(writes[0].response.response.behavior).toBe("allow");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// The opening handshake exists for one thing: the reply carries the prompts
+// the CLI is still blocked on. A process replaced mid-turn leaves its cards
+// behind in the old stdin, and this is how they come back.
+// ─────────────────────────────────────────────────────────────
+describe("claude-cli initialize", () => {
+  beforeEach(() => vi.spyOn(console, "log").mockImplementation(() => {}));
+  afterEach(() => vi.restoreAllMocks());
+
+  /** A session whose control replies are scripted. */
+  function harness(reply: Record<string, unknown> | Error) {
+    const writes: any[] = [];
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default"
+    });
+    const session: any = {
+      child: {},
+      exited: false,
+      permissionMode: "default",
+      sink: null
+    };
+    (provider as any).session = session;
+    (provider as any).child = { killed: false, stdin: { write: () => true } };
+    (provider as any).sendControl = (
+      _s: unknown,
+      req: Record<string, unknown>
+    ) => {
+      writes.push(req);
+      return reply instanceof Error
+        ? Promise.reject(reply)
+        : Promise.resolve(reply);
+    };
+    const deltas: any[] = [];
+    const run = () =>
+      (provider as any).initializeSession(session, (d: any) => deltas.push(d));
+    return { provider, writes, deltas, run };
+  }
+
+  it("declares exactly the dialog kinds it can draw", () => {
+    // The declaration is what turns `request_user_dialog` on, and the CLI is
+    // explicit that naming a kind with nothing behind it parks dialogs nobody
+    // can answer. So this list and the cards must move together.
+    const { writes, run } = harness({});
+    void run();
+    expect(writes[0]).toEqual({
+      subtype: "initialize",
+      supportedDialogKinds: ["fable_overage_consent_prompt"]
+    });
+  });
+
+  it("raises a card for every prompt the CLI hands back", async () => {
+    const { deltas, run } = harness({
+      pending_permission_requests: [
+        {
+          type: "control_request",
+          request_id: "held-1",
+          request: {
+            subtype: "can_use_tool",
+            tool_name: "Bash",
+            input: { command: "rm -rf build" }
+          }
+        }
+      ]
+    });
+    await run();
+    const raised = deltas.filter((d) => d.type === "permission_request");
+    expect(raised).toHaveLength(1);
+    expect(raised[0].permission.requestId).toBe("held-1");
+    // Classified fresh, not taken on trust: a redelivered prompt is not a
+    // pre-approved one.
+    expect(raised[0].permission.destructive).toBe(true);
+  });
+
+  it("ignores redelivered entries that are not permission prompts", async () => {
+    const { deltas, run } = harness({
+      pending_permission_requests: [
+        {
+          type: "control_request",
+          request_id: "d-1",
+          request: { subtype: "request_user_dialog" }
+        },
+        { request: { subtype: "can_use_tool", tool_name: "Read" } },
+        null
+      ]
+    });
+    await run();
+    expect(deltas).toHaveLength(0);
+  });
+
+  it("carries on when the CLI never answers", async () => {
+    // Nothing downstream waits on this: a CLI that does not know the request
+    // is one we go on talking to exactly as before.
+    const { deltas, run } = harness(new Error("timed out"));
+    await expect(run()).resolves.toBeUndefined();
+    expect(deltas).toHaveLength(0);
+  });
+
+  it("does nothing when there is nothing outstanding", async () => {
+    const { deltas, run } = harness({ commands: [], agents: [], pid: 42 });
+    await run();
+    expect(deltas).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Windows deletion verbs. Everything the destructive list had was POSIX, and
+// this extension ships on Windows — where a live run showed the CLI answering
+// "delete README.md" with `Remove-Item -Path … -Confirm:$false`, which matched
+// nothing: no warning on the card, a standing grant offered for the whole
+// shell, and in agent mode no prompt at all.
+// ─────────────────────────────────────────────────────────────
+describe("claude-cli destructive detection — Windows shells", () => {
+  const destructive = [
+    "Remove-Item -Path README.md -Confirm:$false",
+    "Remove-Item -Recurse -Force .\\src",
+    "remove-item x",
+    "del README.md",
+    "erase notes.txt",
+    "rd /s /q build",
+    "Clear-Content notes.txt",
+    "Clear-Item HKCU:\\Software\\X",
+    "reg delete HKCU\\Software\\X /f",
+    "Stop-Process -Id 4 -Force",
+    "diskpart"
+  ];
+  for (const cmd of destructive) {
+    it(`flags ${cmd}`, () => {
+      expect(isDestructiveBash(cmd)).toBe(true);
+      // And through the tool-name path the CLI actually uses on Windows.
+      expect(isDestructiveRequest("PowerShell", { command: cmd })).toBe(true);
+    });
+  }
+
+  const harmless = [
+    "Get-ChildItem",
+    "Set-Content a.txt x",
+    "bun run build",
+    "npm install",
+    "cd C:\\models\\delta",
+    "echo 3rd place",
+    "git log --oneline",
+    "New-Item -ItemType Directory probe"
+  ];
+  for (const cmd of harmless) {
+    it(`leaves ${cmd} alone`, () => {
+      expect(isDestructiveBash(cmd)).toBe(false);
+    });
+  }
+
+  it("offers no standing grant once a Windows deletion is recognised", () => {
+    // The grant is the part that made this dangerous rather than merely
+    // unhelpful: accepting it would auto-allow every command in that shell.
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default"
+    });
+    (provider as any).child = { killed: false, stdin: { write: () => true } };
+    const deltas: any[] = [];
+    (provider as any).handleControlRequest(
+      {
+        type: "control_request",
+        request_id: "r1",
+        request: {
+          subtype: "can_use_tool",
+          tool_name: "PowerShell",
+          input: { command: "Remove-Item -Recurse -Force .\\src" }
+        }
+      },
+      (d: any) => deltas.push(d)
+    );
+    const card = deltas.find(
+      (d) => d.type === "permission_request"
+    )?.permission;
+    expect(card.destructive).toBe(true);
+    expect(card.grantLabel).toBeUndefined();
+    vi.restoreAllMocks();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// The dialog channel: a decision the CLI needs that is not about a tool.
+//
+// Reached only because we declare a kind on `initialize` — the CLI sends a
+// dialog solely to a client that named it, and a named kind nothing draws
+// parks the turn. So the declaration and the handler must agree, and these
+// tests are mostly about them not drifting apart.
+// ─────────────────────────────────────────────────────────────
+describe("claude-cli user dialogs", () => {
+  beforeEach(() => vi.spyOn(console, "log").mockImplementation(() => {}));
+  afterEach(() => vi.restoreAllMocks());
+
+  function harness() {
+    const writes: any[] = [];
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default"
+    });
+    (provider as any).child = {
+      killed: false,
+      kill: () => true,
+      stdin: {
+        write: (s: string) => {
+          writes.push(JSON.parse(s.trim()));
+          return true;
+        }
+      }
+    };
+    const deltas: any[] = [];
+    const deliver = (request: Record<string, unknown>, id = "r1") =>
+      (provider as any).handleControlRequest(
+        { type: "control_request", request_id: id, request },
+        (d: any) => deltas.push(d)
+      );
+    const answer = (d: any) => d.response.response;
+    return { provider, writes, deltas, deliver, answer };
+  }
+
+  const OVERAGE = {
+    subtype: "request_user_dialog",
+    dialog_kind: "fable_overage_consent_prompt",
+    payload: { overagesEnabled: true, balanceCents: 500 }
+  };
+
+  it("raises a card for a kind we declared, and answers nothing yet", () => {
+    const { writes, deltas, deliver } = harness();
+    deliver(OVERAGE);
+    // Still blocked: the point is that the person decides.
+    expect(writes).toHaveLength(0);
+    const raised = deltas.filter((d) => d.type === "user_dialog");
+    expect(raised).toHaveLength(1);
+    expect(raised[0].dialog).toMatchObject({
+      requestId: "r1",
+      kind: "fable_overage_consent_prompt",
+      payload: { overagesEnabled: true, balanceCents: 500 }
+    });
+  });
+
+  it("cancels a kind we never declared rather than showing it", () => {
+    // A card we cannot draw is worse than none: it is the thing holding the
+    // turn. The CLI should not send one, but its list is its bookkeeping.
+    const { writes, deltas, deliver, answer } = harness();
+    deliver({
+      subtype: "request_user_dialog",
+      dialog_kind: "mcp_url_elicitation"
+    });
+    expect(deltas.filter((d) => d.type === "user_dialog")).toHaveLength(0);
+    expect(answer(writes[0])).toEqual({ behavior: "cancelled" });
+  });
+
+  it("sends a completed result when answered", () => {
+    const { provider, writes, deliver, answer } = harness();
+    deliver(OVERAGE);
+    provider.respondToDialog("r1", "consent");
+    expect(answer(writes[0])).toEqual({
+      behavior: "completed",
+      result: "consent"
+    });
+  });
+
+  it("sends a cancel when answered with nothing", () => {
+    // Every kind defaults to a cancel, so this is what a closed card means.
+    const { provider, writes, deliver, answer } = harness();
+    deliver(OVERAGE);
+    provider.respondToDialog("r1");
+    expect(answer(writes[0])).toEqual({ behavior: "cancelled" });
+  });
+
+  it("ignores a second answer to the same dialog", () => {
+    const { provider, writes, deliver } = harness();
+    deliver(OVERAGE);
+    provider.respondToDialog("r1", "consent");
+    provider.respondToDialog("r1", "switch_default");
+    expect(writes).toHaveLength(1);
+  });
+
+  it("retires a withdrawn dialog without answering it", () => {
+    // The CLI drops a dialog the moment a new user message makes it moot; its
+    // id is already forgotten, so a response would write against nothing.
+    const { provider, writes, deltas, deliver } = harness();
+    deliver(OVERAGE);
+    const route = (d: any) => deltas.push(d);
+    (provider as any).pendingDialogs.delete("r1");
+    route({ type: "user_dialog_resolved", requestId: "r1" });
+    provider.respondToDialog("r1", "consent");
+    expect(writes).toHaveLength(0);
+  });
+
+  it("cancels everything outstanding when the turn is cancelled", () => {
+    // A dialog nobody can answer any more holds the CLI exactly as a
+    // permission would.
+    const { provider, writes, deliver, answer } = harness();
+    deliver(OVERAGE, "a");
+    deliver(OVERAGE, "b");
+    expect(writes).toHaveLength(0);
+    provider.cancel();
+    expect(
+      writes.filter((w) => answer(w)?.behavior === "cancelled")
+    ).toHaveLength(2);
+  });
+
+  it("declares exactly the kinds it can draw", () => {
+    // The list is a switch. Anything in it with no card behind it parks a turn,
+    // and anything drawn but unlisted never arrives.
+    expect([...SUPPORTED_DIALOG_KINDS]).toEqual([
+      "fable_overage_consent_prompt"
+    ]);
   });
 });
