@@ -51,12 +51,17 @@ describe("getModePrompt", () => {
     expect(md).toMatch(/card/);
   });
 
-  it("warns auto mode that destructive calls still surface a card", () => {
-    // `decidePermission` wraps every auto-allow branch in `!destructive &&
-    // !network`, so this holds however the CLI's classifier votes. A model
-    // that believed otherwise would report a delete as done while it waits.
+  it("does not promise auto mode a gate in front of a delete", () => {
+    // `!destructive && !network` guards every auto-allow branch in
+    // `decidePermission` — but that runs only when the CLI asks us, and under
+    // its own `auto` it mostly does not. Measured against 2.1.219: `rm -rf` of
+    // a directory outside the workspace, asked for in plain words, ran with no
+    // `can_use_tool` at all. A model told the gate is unconditional treats an
+    // irreversible call as someone else's decision to catch.
     const md = getModePrompt("auto").toLowerCase();
-    expect(md).toMatch(/destructive and network calls still surface a card/);
+    expect(md).not.toMatch(/still surface a card, always/);
+    expect(md).toMatch(/do not assume a destructive call will be stopped/);
+    expect(md).toMatch(/before you make it/);
   });
 
   it("tells plan mode the five sections and where the steps come from", () => {
