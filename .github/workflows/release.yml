@@ -118,6 +118,10 @@ jobs:
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "$VSIX" --clobber
+            # Deleting a tag turns its release into a draft, and re-cutting a
+            # tag is exactly what happens while a release is being fixed. Left
+            # alone, the artifact is there and nobody can see it.
+            gh release edit "$GITHUB_REF_NAME" --draft=false
           else
             gh release create "$GITHUB_REF_NAME" "$VSIX" \
               --title "$GITHUB_REF_NAME" --generate-notes
