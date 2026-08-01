@@ -805,7 +805,9 @@ describe("permission modes the settings forbid", () => {
   const forbidBypass = () =>
     fs.writeFileSync(
       path.join(cfgDir, "settings.json"),
-      JSON.stringify({ permissions: { disableBypassPermissionsMode: "disable" } })
+      JSON.stringify({
+        permissions: { disableBypassPermissionsMode: "disable" }
+      })
     );
 
   it("refuses to apply one, and republishes so the picker snaps back", async () => {

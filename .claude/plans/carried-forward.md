@@ -397,7 +397,7 @@ its test are the whole defence.
 
 - **`allowDangerouslySkipPermissions` is deliberately not adopted.** The
   reference treats Bypass as opt-in and hides it unless the key is set; LUNO
-  honours the *prohibition* (`disableBypassPermissionsMode`) and does not newly
+  honours the _prohibition_ (`disableBypassPermissionsMode`) and does not newly
   demand a permission it never required. Divergence, on purpose.
 - **Under native `auto`, a user's own `permissions.allow` for git is back in
   play**, because the `ask` injection is gone there. A project allowlist can let

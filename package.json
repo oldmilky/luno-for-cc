@@ -1,7 +1,7 @@
 {
   "name": "luno-for-cc",
-  "displayName": "LUNO for CC",
-  "description": "LUNO for CC — personal Claude Code chat for Cursor / VS Code.",
+  "displayName": "LUNO for Claude Code",
+  "description": "The full Claude Code agent in a native side panel — multi-file edits, a permission gate you control, and plan review. Runs on your Claude subscription: no API key, no per-token billing.",
   "version": "0.38.0",
   "publisher": "lunoweb",
   "license": "MIT",
@@ -11,18 +11,18 @@
   },
   "categories": [
     "AI",
-    "Programming Languages",
+    "Chat",
     "Other"
   ],
   "keywords": [
     "claude",
     "claude code",
-    "ai",
-    "agent",
-    "coding assistant",
     "anthropic",
-    "copilot",
-    "chat"
+    "ai agent",
+    "coding assistant",
+    "chat",
+    "cursor",
+    "mcp"
   ],
   "galleryBanner": {
     "color": "#141619",
@@ -32,7 +32,7 @@
     "type": "git",
     "url": "https://github.com/oldmilky/luno-for-cc.git"
   },
-  "homepage": "https://github.com/oldmilky/luno-for-cc#readme",
+  "homepage": "https://lunoweb.com",
   "bugs": {
     "url": "https://github.com/oldmilky/luno-for-cc/issues"
   },

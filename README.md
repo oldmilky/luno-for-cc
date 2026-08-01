@@ -6,11 +6,12 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT" /></a>
-  <img src="https://img.shields.io/badge/install-build%20from%20source-8b64ff" alt="Install: build from source" />
+  <a href="https://open-vsx.org/extension/lunoweb/luno-for-cc"><img src="https://img.shields.io/badge/Open%20VSX-lunoweb.luno--for--cc-a60ee5" alt="Open VSX" /></a>
   <img src="https://img.shields.io/badge/VSIX-605%20kB-555" alt="VSIX size: 605 kB" />
 </p>
 
 <p align="center">
+  <a href="https://lunoweb.com">lunoweb.com</a> ·
   <a href="https://github.com/oldmilky/luno-for-cc/issues">Issues</a> ·
   <a href="#getting-started">Getting started</a> ·
   <a href="#how-it-works">How it works</a>
@@ -18,7 +19,9 @@
 
 LUNO brings the full Claude Code agent into a native editor side panel: streaming chat, multi-file edits with inline diff previews, terminal execution under a permission gate, plan-mode review with inline comments, and the Claude Code Skills marketplace — all driven by your existing **Claude.ai Pro / Team / Enterprise** subscription. No per-token billing, no separate API key.
 
-**Not on the VS Code Marketplace or Open VSX, by choice.** Build the VSIX from this repo and install it — see [Getting started](#getting-started). There is no monetization and no telemetry.
+Search **Luno** in the Extensions view, or install it from
+[Open VSX](https://open-vsx.org/extension/lunoweb/luno-for-cc). No monetization
+and no telemetry. Built by [lunoweb.com](https://lunoweb.com).
 
 ---
 
@@ -50,10 +53,25 @@ LUNO ships no CLI; it drives yours. Install [Claude Code](https://docs.claude.co
 and sign in to it once. LUNO then finds the binary on `PATH` or in the standard
 install locations, so there is normally nothing to configure.
 
-### 1. Build and install
+### 1. Install
 
-The toolchain is [bun](https://bun.sh). Works the same in Cursor, VS Code,
-VSCodium and Windsurf — substitute your editor's CLI for `cursor`.
+Search **Luno** in the Extensions view and install it. Cursor, VSCodium and
+Windsurf read [Open VSX](https://open-vsx.org/extension/lunoweb/luno-for-cc);
+VS Code reads the Visual Studio Marketplace. The same version goes to both.
+
+From a terminal, substituting your editor's CLI:
+
+```bash
+cursor --install-extension lunoweb.luno-for-cc
+```
+
+Install this way rather than from a downloaded `.vsix` — a file install is not
+bound to a registry, so it never updates itself.
+
+<details>
+<summary>Build it yourself instead</summary>
+
+The toolchain is [bun](https://bun.sh).
 
 ```bash
 git clone https://github.com/oldmilky/luno-for-cc.git
@@ -65,6 +83,8 @@ cursor --install-extension luno-for-cc-<version>.vsix
 ```
 
 Then **Ctrl+Shift+P → Developer: Reload Window**.
+
+</details>
 
 ### 2. Sign in
 
