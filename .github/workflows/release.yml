@@ -1,0 +1,77 @@
+# Cut a release from a tag.
+#
+# Nothing here publishes on a push to main: the trigger is a `v*` tag, so the
+# act of tagging is the decision to ship. The gates run *before* either registry
+# is touched, because a version number cannot be taken back — both marketplaces
+# refuse a re-publish of one that already exists.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install both halves
+        run: bun run install:all
+
+      # The tag is what people will quote in a bug report; package.json is what
+      # the marketplaces index. A mismatch publishes a version nobody can name.
+      - name: Tag and manifest must agree
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          MANIFEST=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "$MANIFEST" ]; then
+            echo "tag v$TAG does not match package.json $MANIFEST" >&2
+            exit 1
+          fi
+          echo "version=$MANIFEST" >> "$GITHUB_ENV"
+
+      - name: Gates
+        run: |
+          bun run lint
+          bun run test
+
+      - name: Package
+        run: bun run package
+
+      # Open VSX first: it is the registry Cursor, VSCodium and Windsurf read,
+      # and the one this extension's own users are on.
+      - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: bunx ovsx publish "luno-for-cc-${{ env.version }}.vsix" -p "$OVSX_PAT"
+
+      # Skipped rather than failed when the secret is absent, so Open VSX can go
+      # out before a Marketplace publisher exists.
+      - name: Publish to the VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        if: env.VSCE_PAT != ''
+        run: >
+          bunx @vscode/vsce publish
+          --packagePath "luno-for-cc-${{ env.version }}.vsix"
+          -p "$VSCE_PAT"
+
+      # The same artifact both registries got, attached where someone who
+      # cannot reach either can still download it.
+      - name: Attach the VSIX to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          "luno-for-cc-${{ env.version }}.vsix"
+          --title "$GITHUB_REF_NAME"
+          --generate-notes
