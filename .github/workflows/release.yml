@@ -79,11 +79,13 @@ jobs:
       # release that had in fact published.
       - name: The registry has it
         run: |
+          # grep over the raw JSON rather than a node one-liner: the previous
+          # version of this check was a quoting hazard that died on its own
+          # syntax and failed two releases that had published fine.
           for i in $(seq 1 10); do
-            FOUND=$(curl -s -H "Cache-Control: no-cache" \
-              "https://open-vsx.org/api/lunoweb/luno-for-cc/latest?cb=$RANDOM$i" \
-              | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{process.stdout.write(JSON.parse(d).version||'')}catch{}}")
-            if [ "$FOUND" = "${{ env.version }}" ]; then
+            if curl -s -H "Cache-Control: no-cache" \
+                 "https://open-vsx.org/api/lunoweb/luno-for-cc/latest?cb=$RANDOM$i" \
+                 | grep -q "\"version\":\"${{ env.version }}\""; then
               echo "open-vsx.org serves ${{ env.version }}"
               exit 0
             fi
