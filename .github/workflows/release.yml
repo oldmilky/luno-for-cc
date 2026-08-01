@@ -62,22 +62,34 @@ jobs:
             echo "OVSX_PAT is empty — add it under Settings → Secrets and variables → Actions." >&2
             exit 1
           fi
-          bunx ovsx publish "luno-for-cc-${{ env.version }}.vsix" -p "$OVSX_PAT"
+          # `--skip-duplicate` so a rerun after a later step failed is a no-op
+          # here rather than an error: the registry refuses a version it already
+          # has, and that refusal would block the rerun from reaching the steps
+          # that did not get to run.
+          bunx ovsx publish "luno-for-cc-${{ env.version }}.vsix" \
+            -p "$OVSX_PAT" --skip-duplicate
 
-      # Ask the registry rather than the exit code. The step above already
-      # lied once; the only proof of a publish is the version answering.
+      # Ask the registry rather than the exit code. The publish step already
+      # lied once — an empty token prompted, read EOF and exited 0 — so the
+      # only proof is the version answering.
+      #
+      # `no-cache` and the cache-buster are load-bearing, not belt-and-braces:
+      # open-vsx.org serves this API through a CDN that holds the pre-publish
+      # 404 for about a minute, and the first version of this check failed a
+      # release that had in fact published.
       - name: The registry has it
         run: |
-          for i in 1 2 3 4 5 6; do
-            FOUND=$(curl -sf "https://open-vsx.org/api/lunoweb/luno-for-cc/${{ env.version }}" \
-              | node -p "try{JSON.parse(require('fs').readFileSync(0,'utf8')).version}catch{''}" || true)
+          for i in $(seq 1 10); do
+            FOUND=$(curl -s -H "Cache-Control: no-cache" \
+              "https://open-vsx.org/api/lunoweb/luno-for-cc/latest?cb=$RANDOM$i" \
+              | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{process.stdout.write(JSON.parse(d).version||'')}catch{}}")
             if [ "$FOUND" = "${{ env.version }}" ]; then
               echo "open-vsx.org serves ${{ env.version }}"
               exit 0
             fi
-            sleep 10
+            sleep 15
           done
-          echo "open-vsx.org does not serve ${{ env.version }} a minute after publishing" >&2
+          echo "open-vsx.org still does not serve ${{ env.version }}" >&2
           exit 1
 
       # Skipped rather than failed when the secret is absent, so Open VSX can go
