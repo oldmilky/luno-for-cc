@@ -49,10 +49,36 @@ jobs:
 
       # Open VSX first: it is the registry Cursor, VSCodium and Windsurf read,
       # and the one this extension's own users are on.
+      #
+      # The empty-token guard is not defensive programming — it is a measured
+      # failure. Handed `-p ""`, ovsx falls through to an interactive prompt
+      # ("Personal Access Token for namespace 'lunoweb':"), reads EOF on a
+      # runner, and **exits 0**. v0.38.0 went green with nothing published.
       - name: Publish to Open VSX
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: bunx ovsx publish "luno-for-cc-${{ env.version }}.vsix" -p "$OVSX_PAT"
+        run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "OVSX_PAT is empty — add it under Settings → Secrets and variables → Actions." >&2
+            exit 1
+          fi
+          bunx ovsx publish "luno-for-cc-${{ env.version }}.vsix" -p "$OVSX_PAT"
+
+      # Ask the registry rather than the exit code. The step above already
+      # lied once; the only proof of a publish is the version answering.
+      - name: The registry has it
+        run: |
+          for i in 1 2 3 4 5 6; do
+            FOUND=$(curl -sf "https://open-vsx.org/api/lunoweb/luno-for-cc/${{ env.version }}" \
+              | node -p "try{JSON.parse(require('fs').readFileSync(0,'utf8')).version}catch{''}" || true)
+            if [ "$FOUND" = "${{ env.version }}" ]; then
+              echo "open-vsx.org serves ${{ env.version }}"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "open-vsx.org does not serve ${{ env.version }} a minute after publishing" >&2
+          exit 1
 
       # Skipped rather than failed when the secret is absent, so Open VSX can go
       # out before a Marketplace publisher exists.
@@ -67,11 +93,18 @@ jobs:
 
       # The same artifact both registries got, attached where someone who
       # cannot reach either can still download it.
+      #
+      # Idempotent on purpose: a tag re-pushed after a failed publish finds its
+      # release already there, and `create` alone would fail the rerun on the
+      # one step that had actually worked.
       - name: Attach the VSIX to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "$GITHUB_REF_NAME"
-          "luno-for-cc-${{ env.version }}.vsix"
-          --title "$GITHUB_REF_NAME"
-          --generate-notes
+          VSIX: luno-for-cc-${{ env.version }}.vsix
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$VSIX" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$VSIX" \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          fi
