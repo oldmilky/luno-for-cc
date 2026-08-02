@@ -42,6 +42,8 @@ import type { NotifyTrigger } from "../core/notify.js";
 import { additionalDirectories } from "../core/workspace-dirs.js";
 import { permittedModel } from "../core/model-allowlist.js";
 import { raiseNotification } from "./domains/notify.js";
+import { VoiceSession } from "./domains/voice.js";
+import { keytermsFrom } from "../core/voice/protocol.js";
 import type {
   ClaudeCliProvider,
   EffortLevel,
@@ -470,7 +472,32 @@ export class ConversationHost {
    * closed tab must not wait for extension shutdown to release its CLI process.
    * The registry decides when a conversation is over.
    */
+  /**
+   * Dictation for this conversation, while it is running.
+   *
+   * Per conversation rather than per window: two chats open at once are two
+   * composers, and a transcript belongs to the one whose button was pressed.
+   */
+  private voice: VoiceSession | null = null;
+
+  private async startVoice(): Promise<void> {
+    if (this.voice?.active) return;
+    const root = await this.ensureWorkingRoot();
+    this.voice = new VoiceSession({
+      post: this.post,
+      extensionPath: this.ctx.extensionPath,
+      workspaceRoot: root,
+      keyterms: keytermsFrom({
+        folder: root ? path.basename(root) : undefined,
+        branch: this.worktree?.branch
+      })
+    });
+    await this.voice.start();
+  }
+
   dispose(): void {
+    // A microphone left open on a closed tab is the one leak a user can hear.
+    this.voice?.stop();
     this.abortTurn();
     // `abortTurn` interrupts the turn; it deliberately leaves the process
     // alive, which is the whole point of a session that outlives a turn. Here
@@ -1628,6 +1655,8 @@ export class ConversationHost {
       });
     },
     captureSelection: () => this.sendSelectionToChat(),
+    voiceStart: () => this.startVoice(),
+    voiceStop: () => this.voice?.stop(),
     refreshEditorContext: () => broadcastEditorContext(this.post),
     chatFocus: (m) => {
       const focused = bool(m, "focused");

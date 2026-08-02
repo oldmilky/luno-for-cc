@@ -60,6 +60,7 @@ import {
   mergeTaskState,
   type FoldedSubagents
 } from "./subagent-state";
+import type { VoiceState } from "./voice-state";
 import { BackgroundAgentsModal } from "./BackgroundAgentsModal";
 import { TurnHeader } from "./TurnHeader";
 import { ThoughtBlock } from "./ThoughtBlock";
@@ -107,6 +108,9 @@ export interface ChatScreenProps {
    *  whenever the name or the attention could have moved. */
   sessionTitle: string;
   sessionStatus: ChatStatus | null;
+  /** Dictation, for the composer's strip and its mic button. */
+  voice: VoiceState;
+  onDismissVoiceError: () => void;
   pendingRestore: string | null;
   onRestored: () => void;
   bannerVisible: boolean;
@@ -169,6 +173,8 @@ export function ChatScreen({
   pendingInsert,
   sessionTitle,
   sessionStatus,
+  voice,
+  onDismissVoiceError,
   pendingRestore,
   onRestored,
   bannerVisible,
@@ -696,6 +702,8 @@ export function ChatScreen({
           focusKey={composerFocusKey}
           pendingInsert={pendingInsert}
           onInserted={onInserted}
+          voice={voice}
+          onDismissVoiceError={onDismissVoiceError}
           pendingRestore={pendingRestore}
           onRestored={onRestored}
           pendingPrefill={pendingPrefill}

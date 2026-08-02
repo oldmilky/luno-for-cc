@@ -43,6 +43,8 @@ import { EffortPicker } from "./EffortPicker";
 import { PendingDot } from "./PendingDot";
 import { ImageLightbox } from "./ImageLightbox";
 import type { AgentPanel } from "./subagent-state";
+import type { VoiceState } from "./voice-state";
+import { DictationStrip } from "./DictationStrip";
 import s from "./Composer.module.scss";
 
 export interface ComposerProps {
@@ -90,6 +92,10 @@ export interface ComposerProps {
    *  the first task. */
   agents?: AgentPanel;
   onOpenAgents?: () => void;
+  /** Dictation, when there is any. Absent in the inline edit composer, which
+   *  has no toolbar to put a microphone in. */
+  voice?: VoiceState;
+  onDismissVoiceError?: () => void;
   /** Compact in-message edit mode: hides the toolbar, swaps in a Cancel/Send footer. */
   inline?: boolean;
   /** Inline mode only — called when the user discards the edit. */
@@ -140,6 +146,8 @@ export function Composer({
   onPrefilled,
   agents,
   onOpenAgents,
+  voice,
+  onDismissVoiceError,
   inline = false,
   onDiscard
 }: ComposerProps) {
@@ -574,6 +582,20 @@ export function Composer({
         />
       </div>
 
+      <AnimatePresence>
+        {voice && (voice.listening || voice.error) && (
+          <div className={s.dictation}>
+            <DictationStrip
+              listening={voice.listening}
+              committed={voice.committed}
+              interim={voice.interim}
+              error={voice.error}
+              level={voice.level}
+            />
+          </div>
+        )}
+      </AnimatePresence>
+
       {inline ? null : (
         <div className={s.toolbar}>
           <Dropdown<PermissionMode>
@@ -704,6 +726,29 @@ export function Composer({
                 aria-label="Cancel"
               >
                 <Icon name="stop" size={11} />
+              </button>
+            </Tooltip>
+          )}
+          {/* Left of send, because it is the other way to fill the same box.
+              Listening turns it into a stop: one control, two states, so a
+              recording can never be started twice or left with no way out. */}
+          {voice && (
+            <Tooltip
+              label={voice.listening ? "Stop dictation" : "Dictate a message"}
+            >
+              <button
+                type="button"
+                className={`${s.micBtn}${
+                  voice.listening ? ` ${s.micBtnLive}` : ""
+                }`}
+                onClick={() => {
+                  if (voice.error) onDismissVoiceError?.();
+                  send({ type: voice.listening ? "voiceStop" : "voiceStart" });
+                }}
+                aria-label={voice.listening ? "Stop dictation" : "Dictate"}
+                aria-pressed={voice.listening}
+              >
+                <Icon name={voice.listening ? "stop" : "mic"} size={13} />
               </button>
             </Tooltip>
           )}

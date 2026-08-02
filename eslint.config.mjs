@@ -24,7 +24,10 @@ export default tseslint.config(
       "node_modules/**",
       "webview/node_modules/**",
       "ghost.one/**",
-      "**/*.vsix"
+      "**/*.vsix",
+      // Throwaway probes and their output. Gitignored, never shipped, and a
+      // bundle dropped here would otherwise be linted line by minified line.
+      "scratch/**"
     ]
   },
 

@@ -63,6 +63,7 @@ import { SettingsIcon } from "@solar-icons/react/linear/settings";
 import { ShieldIcon } from "@solar-icons/react/linear/shield";
 import { ShieldCrossIcon } from "@solar-icons/react/linear/shield-cross";
 import { Stars2Icon } from "@solar-icons/react/linear/stars-2";
+import { MicrophoneIcon } from "@solar-icons/react/linear/microphone";
 import { StopIcon } from "@solar-icons/react/linear/stop";
 import { UserIcon } from "@solar-icons/react/linear/user";
 
@@ -131,7 +132,8 @@ const SOLAR = {
   logout: LogoutIcon,
   plug: PlugCircleIcon,
   // A desktop with a phone beside it — which is what Remote Control is.
-  remoteControl: MonitorSmartphoneIcon
+  remoteControl: MonitorSmartphoneIcon,
+  mic: MicrophoneIcon
 } satisfies Record<string, SolarIcon>;
 
 export type IconName = keyof typeof SOLAR;

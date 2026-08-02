@@ -1,0 +1,20 @@
+[package]
+name = "luno-audio"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Microphone capture for LUNO — raw linear16 16 kHz mono on stdout"
+
+[dependencies]
+cpal = "0.15"
+
+# Size is the whole reason this is a separate binary rather than a dependency:
+# six of these ride in one universal VSIX, so every kilobyte is multiplied by
+# six. `panic = "abort"` also means a driver that panics takes this process
+# down and nothing else — which is the other reason it is a separate binary.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

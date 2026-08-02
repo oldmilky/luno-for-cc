@@ -15,10 +15,30 @@ permissions:
   contents: write
 
 jobs:
+  # The microphone recorders, one per target, built fresh for every release
+  # rather than committed. A binary in git is a binary nobody can prove came
+  # from the source beside it.
+  native:
+    uses: ./.github/workflows/native.yml
+
   publish:
+    needs: native
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Every slot under one directory, laid out exactly as the extension
+      # looks for them: resources/audio/<platform>-<arch>/luno-audio.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: audio-*
+          path: resources/audio
+      - name: Name the slots
+        run: |
+          cd resources/audio
+          for dir in audio-*; do mv "$dir" "${dir#audio-}"; done
+          chmod +x */luno-audio 2>/dev/null || true
+          ls -laR .
 
       - uses: oven-sh/setup-bun@v2
         with:

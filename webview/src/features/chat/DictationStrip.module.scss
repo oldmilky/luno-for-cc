@@ -1,0 +1,69 @@
+.strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--round);
+  background: var(--b2);
+  border: 1px solid var(--b3);
+  overflow: hidden;
+}
+
+.stripError {
+  border-color: color-mix(in srgb, var(--err) 40%, var(--b3));
+  background: var(--err-soft);
+}
+
+// The meter is the only proof the microphone is live before the first word
+// comes back, so it sits where the eye already is: left of the text.
+.meter {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+  flex: none;
+  padding-top: 1px;
+}
+
+.bar {
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  transform-origin: center;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t1);
+  overflow-wrap: anywhere;
+}
+
+// Dimmed rather than a different colour: this text is the same sentence, one
+// step less certain, and a second hue would read as a second kind of thing.
+.interim {
+  color: var(--t3);
+}
+
+.waiting {
+  color: var(--t3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.error {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--err);
+  overflow-wrap: anywhere;
+}
+
+.errorIcon {
+  flex: none;
+  color: var(--err);
+  padding-top: 2px;
+}

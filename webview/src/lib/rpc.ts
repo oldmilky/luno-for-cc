@@ -591,6 +591,8 @@ export type Outbound =
   | { type: "requestSlashCommands" }
   | { type: "requestFileSearch"; id: string; query: string }
   | { type: "captureSelection" }
+  | { type: "voiceStart" }
+  | { type: "voiceStop" }
   | { type: "requestHistory" }
   | { type: "loadSession"; id: string }
   | { type: "deleteHistoryEntry"; id: string }
@@ -817,6 +819,20 @@ export type Inbound =
       endLine: number;
       text: string;
     }
+  | {
+      /** Dictation, as one state rather than three messages: the composer
+       *  renders committed and interim together, and a phase change that
+       *  arrived separately from the text it belongs to would flicker. */
+      type: "voice";
+      phase: "listening" | "idle";
+      committed: string;
+      interim: string;
+      /** Said out loud in the composer. Absent when nothing went wrong. */
+      error?: string;
+    }
+  /** Its own message because of its rate — twenty a second, and it carries no
+   *  state anything else depends on. */
+  | { type: "voiceLevel"; level: number }
   | { type: "historyList"; sessions: HistoryEntry[] }
   | {
       type: "loadedSession";

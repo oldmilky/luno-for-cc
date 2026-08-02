@@ -353,3 +353,30 @@
     box-shadow: none;
   }
 }
+
+.dictation {
+  padding: 0 10px 8px;
+}
+
+.micBtn {
+  @extend %toolbar-button;
+  border: 0;
+  color: var(--t3);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+// Lit while the microphone is open. The accent is the same one the send button
+// carries, because both are "this control is doing something right now".
+.micBtnLive {
+  color: var(--accent);
+  background: var(--accent-soft);
+
+  &:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+}

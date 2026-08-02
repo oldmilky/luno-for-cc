@@ -77,3 +77,7 @@ TESTING.md
 
 # Live probes and throwaway scripts — never shipped.
 scratch/**
+# The Rust source for the microphone recorder. The built binaries under
+# `resources/audio/**` ship; the crate that produced them is dev-only, and
+# `**/*.rs` would not catch Cargo.toml or the lockfile.
+native/**

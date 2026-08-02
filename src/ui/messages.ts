@@ -52,6 +52,8 @@ export type InboundType =
   | "revokeToolGrant"
   | "requestPermissionRules"
   | "captureSelection"
+  | "voiceStart"
+  | "voiceStop"
   | "refreshEditorContext"
   | "chatFocus"
   // models

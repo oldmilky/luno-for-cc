@@ -34,6 +34,7 @@ import {
   subagentOutcome,
   type LiveAgents
 } from "./features/chat/subagent-state";
+import { IDLE_VOICE, type VoiceState } from "./features/chat/voice-state";
 import { StopAgentsModal } from "./features/chat/StopAgentsModal";
 import s from "./App.module.scss";
 
@@ -137,6 +138,9 @@ export function App() {
   const [composerFocusKey, setComposerFocusKey] = useState(0);
   const [pendingInsert, setPendingInsert] = useState<CodeInsert | null>(null);
   const [pendingRestore, setPendingRestore] = useState<string | null>(null);
+  // Dictation, held here rather than in the composer because it arrives from
+  // the host and outlives a remount of the editor.
+  const [voice, setVoice] = useState<VoiceState>(IDLE_VOICE);
   // What the host calls this conversation and how it reads its stored
   // timeline. Both arrive together because the host recomputes them together.
   const [sessionMeta, setSessionMeta] = useState<{
@@ -416,6 +420,30 @@ export function App() {
           });
           setComposerFocusKey((k) => k + 1);
           break;
+        case "voice":
+          setVoice((prev) => ({
+            listening: m.phase === "listening",
+            committed: m.committed,
+            interim: m.interim,
+            error: m.error,
+            // The level keeps its last value across a text update: the two
+            // messages are independent and reading zero between them would
+            // make the meter stutter at the frame rate of the transcript.
+            level: m.phase === "listening" ? prev.level : 0
+          }));
+          // The transcript reaches the editor once, at the end. Appending it
+          // through the same path a cancelled turn uses means it lands behind
+          // whatever was already typed rather than replacing it.
+          if (m.phase === "idle" && m.committed.trim()) {
+            setPendingRestore(m.committed.trim());
+            setComposerFocusKey((k) => k + 1);
+          }
+          break;
+        case "voiceLevel":
+          setVoice((prev) =>
+            prev.listening ? { ...prev, level: m.level } : prev
+          );
+          break;
         case "fileSearchResults":
           // Consumed by MentionPopover via its own subscription.
           break;
@@ -505,6 +533,8 @@ export function App() {
         skills={skills}
         composerFocusKey={composerFocusKey}
         pendingInsert={pendingInsert}
+        voice={voice}
+        onDismissVoiceError={() => setVoice(IDLE_VOICE)}
         pendingRestore={pendingRestore}
         onRestored={() => setPendingRestore(null)}
         sessionTitle={sessionMeta.title}
