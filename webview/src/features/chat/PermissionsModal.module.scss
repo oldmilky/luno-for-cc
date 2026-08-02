@@ -18,7 +18,10 @@
 
 .panel {
   width: 100%;
-  max-width: 460px;
+  // Wider than the grants list alone needed: a CLI rule is a whole pattern
+  // (`Bash(git push:*)`) beside a source badge, and truncating the pattern
+  // would hide exactly the part that says what it covers.
+  max-width: 560px;
   border: 1px solid var(--b2);
   border-radius: 16px;
   background: var(--s1);
@@ -85,14 +88,35 @@
   text-align: center;
 }
 
+// One scroller for both sections, so a long CLI rule list cannot push the
+// grants out of reach and the two never scroll independently.
+.body {
+  max-height: 62vh;
+  overflow-y: auto;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 6px;
+}
+
+.sectionTitle {
+  flex: 1;
+  color: var(--t2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
 .list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 50vh;
   margin: 0;
   padding: 8px;
-  overflow-y: auto;
   list-style: none;
 }
 
@@ -149,12 +173,97 @@
   }
 }
 
-.foot {
+// `deny` reads as the strongest and `allow` as the loosest, so they are the
+// error and success hues rather than two neutral chips — a denied tool and an
+// allowed one must not look alike at a glance.
+.kind {
+  flex-shrink: 0;
+  min-width: 42px;
+  padding: 2px 6px;
+  border-radius: var(--round-sm);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.deny {
+  background: color-mix(in srgb, var(--err) 16%, transparent);
+  color: var(--err);
+}
+
+.ask {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+}
+
+.allow {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  color: var(--ok);
+}
+
+.rule {
+  flex: 1;
+  overflow: hidden;
+  color: var(--t1);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-sm);
+  color: var(--t3);
+  font-size: 10px;
+}
+
+.open {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--round-sm);
+  background: transparent;
+  color: var(--t4);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s2);
+    color: var(--t1);
+  }
+}
+
+.warn {
   display: flex;
-  justify-content: flex-end;
-  padding: 8px 16px;
-  border-top: 1px solid var(--b1);
-  background: color-mix(in srgb, var(--s1) 60%, transparent);
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0;
+  padding: 10px 16px;
+  color: var(--t3);
+  font-size: 11.5px;
+  line-height: 1.5;
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    word-break: break-all;
+  }
+
+  svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
 }
 
 .revokeAll {

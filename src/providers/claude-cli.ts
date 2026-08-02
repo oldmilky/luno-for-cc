@@ -9,6 +9,7 @@ import {
   grantLabel,
   type ToolGrant
 } from "../core/tool-grants.js";
+import { fallbackModelList, maxBudgetUsd } from "../core/workspace-dirs.js";
 import {
   ContentBlock,
   DialogKind,
@@ -27,6 +28,12 @@ import {
   UserDialogPayload,
   WorkflowProgressEntry
 } from "../core/types.js";
+import {
+  handleIdeMcpMessage,
+  ideAllowedToolPatterns,
+  type IdeToolOps,
+  type JsonRpcMessage
+} from "../core/ide-tools.js";
 import {
   getCommonPrompt,
   getModePrompt,
@@ -365,6 +372,26 @@ export interface ClaudeCliOpts {
    *  next call of that turn, and the provider outlives no reload but does
    *  outlive the decision. */
   getToolGrants?: () => ReadonlyArray<ToolGrant>;
+  /** The editor half of the `ide` MCP server. Injected rather than imported so
+   *  this file keeps importing zero VS Code APIs — which is what lets the
+   *  control protocol be tested without a mock editor. */
+  ideOps?: IdeToolOps;
+  /** Withdraw any editor work still waiting on the user — today that is an
+   *  open proposed diff. Called wherever a pending dialog is cancelled, and
+   *  for the same reason: an `openDiff` nobody will answer parks the turn. */
+  onAbortIdeWork?: (reason: string) => void;
+  /** Folders the agent may touch besides `cwd` — every other workspace folder,
+   *  plus `luno.additionalDirectories`. Decided by `additionalDirectories()`. */
+  additionalDirectories?: string[];
+  /** Models to try when the first is overloaded, highest preference first. */
+  fallbackModels?: string[];
+  /** Per-session spend ceiling in dollars. Absent means none. */
+  maxBudgetUsd?: number;
+  /** What the CLI calls this session in its own `/resume` picker. */
+  sessionName?: string;
+  /** Run with every customization off — CLAUDE.md, skills, hooks, MCP. A
+   *  support switch, for telling "my setup is broken" from "LUNO is broken". */
+  safeMode?: boolean;
   /** Skill ids the user toggled OFF in the picker. Enforced via
    *  --disallowedTools "Skill(<id>)" plus a system-prompt append. */
   disabledSkills?: string[];
@@ -976,11 +1003,48 @@ export class ClaudeCliProvider implements ChatProvider {
   }
 
   /** Cancel every dialog still outstanding. A dialog nobody can answer any
-   *  more holds the CLI exactly as a permission would. */
+   *  more holds the CLI exactly as a permission would.
+   *
+   *  A proposed diff waiting in the editor is the same shape of debt — the
+   *  tool call is parked on a decision the user is no longer going to make —
+   *  so it is withdrawn here rather than in a place of its own. */
   private cancelPendingDialogs(): void {
     for (const id of [...this.pendingDialogs.keys()]) {
       this.respondToDialog(id);
     }
+    this.opts.onAbortIdeWork?.("the turn was cancelled");
+  }
+
+  /**
+   * Serve one JSON-RPC message for an in-process MCP server.
+   *
+   * The reply rides inside the control response as `mcp_response` — the
+   * envelope read out of the reference's own handler. Nothing here rejects: an
+   * unknown server or a failing tool comes back as a JSON-RPC error, because
+   * the alternative is a turn that hangs on a request nobody answered.
+   */
+  private async answerMcpMessage(
+    requestId: string,
+    req: NonNullable<CliEvent["request"]>
+  ): Promise<void> {
+    const mcpResponse = await handleIdeMcpMessage(
+      req.server_name,
+      req.message,
+      this.opts.ideOps
+    );
+    if (mcpResponse.error) {
+      logInfo(
+        `[luno] mcp ${req.server_name ?? "?"}/${req.message?.method ?? "?"} → ${mcpResponse.error.message}`
+      );
+    }
+    this.writeControl({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: requestId,
+        response: { mcp_response: mcpResponse }
+      }
+    });
   }
 
   /** Route a CLI control request. `can_use_tool` becomes a permission prompt;
@@ -993,6 +1057,10 @@ export class ClaudeCliProvider implements ChatProvider {
     const req = ev.request;
     if (requestId && req?.subtype === "request_user_dialog") {
       this.raiseUserDialog(requestId, req, push);
+      return;
+    }
+    if (requestId && req?.subtype === "mcp_message") {
+      void this.answerMcpMessage(requestId, req);
       return;
     }
     if (!requestId || !req || req.subtype !== "can_use_tool") {
@@ -2489,6 +2557,13 @@ export function respawnFingerprint(args: ReadonlyArray<string>): string {
       i++;
       continue;
     }
+    // Renaming a chat must not take its CLI process away. The name is what
+    // `/resume` shows in a terminal; nothing about the running turn depends on
+    // it, and the next spawn picks up whatever it is called by then.
+    if (args[i] === "--name") {
+      i++;
+      continue;
+    }
     kept.push(args[i]);
   }
   return JSON.stringify(kept);
@@ -2716,13 +2791,16 @@ export function buildArgs(
       // in a different order. A reordered argv replaced the CLI process — and
       // with Remote Control on, that hands the phone a session URL it is not
       // holding.
-      ...mcpToolPatterns(opts.mcpServerNames)
+      ...mcpToolPatterns(opts.mcpServerNames),
+      // The editor server goes in per tool, never as one `mcp__<name>` block:
+      // the nine tools differ in weight, and `saveDocument` writing to disk has
+      // no business riding in on `getWorkspaceFolders`'s ticket.
+      ...ideAllowedToolPatterns()
     ];
     args.push("--allowedTools", ...tools);
   } else if (
-    (opts.permissionMode === "default" ||
-      opts.permissionMode === "acceptEdits") &&
-    opts.mcpServerNames?.length
+    opts.permissionMode === "default" ||
+    opts.permissionMode === "acceptEdits"
   ) {
     // These modes otherwise gate every tool call behind an interactive
     // prompt the `-p` flow can't service — the agent ends up verbalizing
@@ -2730,7 +2808,11 @@ export function buildArgs(
     // an MCP server via the Connectors page is an explicit consent grant
     // (OAuth + click-through), so pre-allow that server's tools here.
     // Plan mode is intentionally not covered — it's read-only by design.
-    args.push("--allowedTools", ...mcpToolPatterns(opts.mcpServerNames));
+    args.push(
+      "--allowedTools",
+      ...mcpToolPatterns(opts.mcpServerNames),
+      ...ideAllowedToolPatterns()
+    );
   }
 
   // Skills the user has toggled off in the picker need to be *actually*
@@ -2801,6 +2883,30 @@ export function buildArgs(
   if (opts.mcpConfigPath) {
     args.push("--mcp-config", opts.mcpConfigPath);
   }
+
+  // Every other folder in a multi-root window. Without it the agent knows
+  // about one of them and reports the rest as missing files.
+  if (opts.additionalDirectories?.length) {
+    args.push("--add-dir", ...opts.additionalDirectories);
+  }
+  // One flag with a comma-separated list, not one flag per model — READ from
+  // `--help`. Repeated, only the last would survive.
+  const fallback = fallbackModelList(opts.fallbackModels, opts.model);
+  if (fallback) args.push("--fallback-model", fallback);
+  // `--max-budget-usd` is documented as working only with `--print`, which is
+  // the `-p` this argv always begins with.
+  const budget = maxBudgetUsd(opts.maxBudgetUsd);
+  if (budget !== null) args.push("--max-budget-usd", String(budget));
+  // What `/resume` in a terminal will call this conversation. Excluded from
+  // `respawnFingerprint`, so renaming a chat does not replace its process.
+  const name = opts.sessionName?.trim();
+  if (name) args.push("--name", name);
+  if (opts.safeMode) args.push("--safe-mode");
+  // `--prompt-suggestions true` is deliberately NOT passed. The flag exists and
+  // is accepted, but two isolated probes against 2.1.219 — a trivial turn and a
+  // substantive one in a real project — produced no `prompt_suggestion` event
+  // at all. A renderer built against a shape never observed is guesswork at
+  // field names, and argv nothing consumes is noise.
 
   const resumeId = opts.getResumeSessionId?.();
   if (resumeId) args.push("--resume", resumeId);
@@ -3086,6 +3192,32 @@ export function isNetworkBash(command: string): boolean {
       return sub !== null && NETWORK_GIT.has(sub);
     }
     return matches(NETWORK_COMMANDS, cmd);
+  });
+}
+
+/**
+ * True when this command is safe **as written** but has arguments that would
+ * make it unsafe — so a rule covering it plus anything is not safe.
+ *
+ * Only one caller needs this, and only because of what a written permission
+ * rule means: `Bash(git reset:*)` matches `git reset --hard`, and `git reset`
+ * alone passes both gates above. A grant judged on its prefix would sail
+ * through and take the argument that undoes it along for free.
+ *
+ * Answered off the same tables the gates use, so a command added there is
+ * covered here without anybody remembering to.
+ */
+export function isConditionallyGatedBash(command: string): boolean {
+  return shellCommands(command).some((cmd) => {
+    if (cmd.head === "git") {
+      const sub = gitSubcommand(cmd.segment);
+      // No subcommand yet: every gated one is still reachable by extension.
+      if (sub === null) return true;
+      return DESTRUCTIVE_GIT.get(sub) instanceof RegExp || NETWORK_GIT.has(sub);
+    }
+    return [...DESTRUCTIVE_COMMANDS, ...NETWORK_COMMANDS].some(
+      (rule) => rule.args !== undefined && rule.head.test(cmd.head)
+    );
   });
 }
 
@@ -3577,6 +3709,10 @@ export interface CliEvent {
     /** `request_user_dialog` only — which dialog, and what it needs to say. */
     dialog_kind?: string;
     payload?: Record<string, unknown>;
+    /** `mcp_message` only — which in-process server the JSON-RPC below is
+     *  addressed to, and the message itself. */
+    server_name?: string;
+    message?: JsonRpcMessage;
   };
   /** The CLI's answer to a control request we sent. */
   response?: {

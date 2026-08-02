@@ -50,6 +50,7 @@ export type InboundType =
   | "requestTerminals"
   | "requestToolGrants"
   | "revokeToolGrant"
+  | "requestPermissionRules"
   | "captureSelection"
   | "refreshEditorContext"
   | "chatFocus"

@@ -4,11 +4,15 @@
 
 import type { IconName } from "../../design/icons";
 
+/** Lowercased, because `classifyTool` folds the name before matching. */
+const IDE_TOOL_PREFIX = "mcp__luno_ide__";
+
 export type ToolBucket =
   | "read"
   | "search"
   | "explore"
   | "edit"
+  | "editor"
   | "run"
   | "web"
   | "task"
@@ -41,6 +45,7 @@ const META: Record<ToolBucket, BucketMeta> = {
     icon: "folder"
   },
   edit: { verb: "Edited", noun: "file", nounPlural: "files", icon: "edit" },
+  editor: { verb: "Opened", noun: "file", nounPlural: "files", icon: "arrow" },
   run: {
     verb: "Ran",
     noun: "command",
@@ -80,6 +85,16 @@ export function classifyTool(name: string, input?: string): ToolBucket {
   if (n === "task" || n === "agent" || n === "workflow") return "task";
   if (n === "webfetch" || n === "web_fetch") return "web";
 
+  // The editor tools arrive as `mcp__luno_ide__<tool>` — the namespace is
+  // `IDE_SERVER_NAME` in src/core/ide-tools.ts. `openFile` and `openDiff` move
+  // the user's window, and the generic `open` rule below would file them under
+  // "Read": a focus-stealing command rendered as a passive read, which is the
+  // one thing 1.5 of the parity spec says must stay visible.
+  if (n.startsWith(IDE_TOOL_PREFIX)) {
+    const tool = n.slice(IDE_TOOL_PREFIX.length);
+    return tool === "openfile" || tool === "opendiff" ? "editor" : "other";
+  }
+
   if (/glob|ls$|^ls /.test(n)) return "explore";
   if (/grep|search/.test(n)) return "search";
   if (/read|view|open|cat$/.test(n)) return "read";
@@ -116,6 +131,16 @@ function extractBashCommand(input?: string): string {
   } catch {
     return "";
   }
+}
+
+/** Format a token count for a chip: "940" / "19.2k" / "128k" / "1.4M". */
+export function formatTokens(n: number): string {
+  if (n < 1000) return String(Math.round(n));
+  if (n < 1_000_000) {
+    const k = n / 1000;
+    return `${k < 100 ? k.toFixed(1) : Math.round(k)}k`;
+  }
+  return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
 /** Format a turn duration: "2s" / "47s" / "1m 12s" / "4m". */

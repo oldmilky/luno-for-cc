@@ -42,6 +42,7 @@ import { ModelPicker } from "./ModelPicker";
 import { EffortPicker } from "./EffortPicker";
 import { PendingDot } from "./PendingDot";
 import { ImageLightbox } from "./ImageLightbox";
+import type { AgentPanel } from "./subagent-state";
 import s from "./Composer.module.scss";
 
 export interface ComposerProps {
@@ -84,6 +85,11 @@ export interface ComposerProps {
    *  a message, so appending one would file a dead command. */
   pendingPrefill?: string | null;
   onPrefilled?: () => void;
+  /** Background work this conversation has dispatched, for the toolbar's agents
+   *  button. Absent where the host has none — the button does not exist until
+   *  the first task. */
+  agents?: AgentPanel;
+  onOpenAgents?: () => void;
   /** Compact in-message edit mode: hides the toolbar, swaps in a Cancel/Send footer. */
   inline?: boolean;
   /** Inline mode only — called when the user discards the edit. */
@@ -132,6 +138,8 @@ export function Composer({
   onRestored,
   pendingPrefill,
   onPrefilled,
+  agents,
+  onOpenAgents,
   inline = false,
   onDiscard
 }: ComposerProps) {
@@ -618,6 +626,38 @@ export function Composer({
               <kbd className={s.kbd}>⌘U</kbd>
             </button>
           </Tooltip>
+
+          {/* Only once something has been dispatched: a control for work that
+              does not exist is noise in a panel this narrow. It stays for the
+              rest of the conversation afterwards, so "what did that audit
+              cost" is still answerable once it is over. */}
+          {agents && agents.total > 0 && onOpenAgents && (
+            <Tooltip
+              label={
+                agents.running > 0
+                  ? `${agents.running} background agent${
+                      agents.running === 1 ? "" : "s"
+                    } running`
+                  : "Background agents — all finished"
+              }
+            >
+              <button
+                type="button"
+                className={`${s.agentsBtn}${
+                  agents.running > 0 ? ` ${s.agentsBtnLive}` : ""
+                }`}
+                aria-label="Background agents"
+                onClick={onOpenAgents}
+              >
+                <Icon name="layers" size={12} />
+                {agents.running > 0 ? (
+                  <span>{agents.running}</span>
+                ) : (
+                  <Icon name="check" size={11} />
+                )}
+              </button>
+            </Tooltip>
+          )}
 
           <div className={s.spacer} />
 

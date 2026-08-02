@@ -79,6 +79,9 @@ export interface WorkflowProgressEntry {
   tokens?: number;
   toolCalls?: number;
   durationMs?: number;
+  startedAt?: number;
+  queuedAt?: number;
+  lastProgressAt?: number;
   resultPreview?: string;
 }
 
@@ -293,6 +296,28 @@ export interface ToolGrantView {
   prefix?: string;
 }
 
+/** Mirrors `GrantScope` in src/core/types.ts. `"luno"` keeps our own gate on
+ *  the path; the other three are the CLI's settings files, where it is not. */
+export type GrantScope = "luno" | "project" | "local" | "user";
+
+/** Mirrors `PermissionRule` in src/core/permission-rules.ts — a rule the CLI
+ *  is already applying, which LUNO shows but does not enforce. */
+export interface PermissionRuleView {
+  source: "managed" | "project" | "local" | "user";
+  kind: "allow" | "deny" | "ask";
+  rule: string;
+  file: string;
+  line?: number;
+}
+
+/** A settings file that is present but could not be used. Shown rather than
+ *  swallowed: a policy that failed to parse is not the same as no policy. */
+export interface UnreadableSourceView {
+  source: PermissionRuleView["source"];
+  file: string;
+  reason: string;
+}
+
 /** Mirrors `SlashCommand` in src/services/slash-commands.ts. Expansion is the
  *  CLI's own — this only drives the composer's popover. */
 export interface SlashCommand {
@@ -352,6 +377,14 @@ export interface PermissionRequestView {
    *  Absent means no standing grant is on offer and the button is not shown:
    *  a destructive or network call, or a composed shell command. */
   grantLabel?: string;
+  /** Where that grant may be stored. `"luno"` is always present when
+   *  `grantLabel` is; a settings-file scope appears only when the grant is
+   *  eligible for one, because a rule in a file means the CLI stops asking
+   *  LUNO about the call at all. */
+  grantScopes?: GrantScope[];
+  /** Why the file scopes are absent, in words — shown rather than left to be
+   *  inferred from a missing option. */
+  grantScopeReason?: string;
   /** `AskUserQuestion` only. Milliseconds after which the card answers itself
    *  with whatever is selected, from the user's own Claude setting. Absent
    *  means it waits — which is the CLI's default and most cards' behaviour. */
@@ -504,6 +537,10 @@ export type Outbound =
        *  what "this shape" means from the request it is answering — the panel
        *  says which approval, not what to grant. */
       always?: boolean;
+      /** Where to store that grant. Absent means `"luno"`, which is what every
+       *  build before the scope picker did. The host re-checks eligibility
+       *  whatever this says: the panel chooses, it does not decide. */
+      alwaysScope?: GrantScope;
       /** Allow, but run the tool with this input instead of the one it
        *  proposed. Omitted means unchanged, which is every card but one:
        *  `AskUserQuestion` returns the input it is handed, so the answers the
@@ -637,7 +674,10 @@ export type Outbound =
   | { type: "requestTerminals"; id: string }
   | { type: "requestToolGrants" }
   /** Revoke one standing grant, or all of them with `"*"`. */
-  | { type: "revokeToolGrant"; key: string };
+  | { type: "revokeToolGrant"; key: string }
+  /** The rules already in force in the CLI's own settings files. Read fresh:
+   *  the user may have edited one in the editor since the modal last opened. */
+  | { type: "requestPermissionRules" };
 
 // ── Inbound (extension → webview) ─────────────────────────────
 
@@ -741,6 +781,15 @@ export type Inbound =
   /** Every standing grant, after any change. Broadcast to all conversations —
    *  they are global, so revoking one in a tab empties the sidebar's list. */
   | { type: "toolGrants"; grants: ToolGrantView[] }
+  /** Answer to `requestPermissionRules`. `cannotRead` names sources the CLI
+   *  honours that LUNO has no way to see, so the list never implies it is
+   *  complete when it is not. */
+  | {
+      type: "permissionRules";
+      rules: PermissionRuleView[];
+      unreadable: UnreadableSourceView[];
+      cannotRead: string[];
+    }
   /** Settings the webview itself acts on, as opposed to the many the host
    *  reads on its behalf. Sent on attach and whenever the user edits one. */
   | {

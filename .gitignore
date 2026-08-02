@@ -28,6 +28,15 @@ docs/PLAN.md
 docs/DESIGN.md
 TESTING.md
 
+# The parity work's own notes. These quote a proprietary bundle at length —
+# paths, sizes, argv, wire protocol, read out of a shipped artefact for our own
+# use. Describing a competitor's internals is a working method, not a document
+# to publish under this repository's name. The audits directory is otherwise
+# committed on purpose; this one file is the exception, not a new rule.
+docs/PARITY-PLAN.md
+docs/WORKFLOW-AGENTS-PANEL.md
+.claude/audits/parity-vs-official-and-cli.md
+
 # Personal workspace preferences — `luno.permissionMode: auto` in particular has
 # no business being a default for anyone who clones this. `launch.json` and
 # `tasks.json` stay: those are the dev loop, and they are the same for everyone.

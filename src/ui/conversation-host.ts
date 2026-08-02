@@ -16,6 +16,7 @@ import {
   isWorkflowTask,
   PermissionMode,
   PermissionBehavior,
+  GrantScope,
   PermissionRequestPayload,
   RemoteControlStatus,
   StreamDelta,
@@ -23,7 +24,24 @@ import {
 } from "../core/types.js";
 import type { ChatProvider } from "../providers/base.js";
 import { createProvider } from "../providers/factory.js";
-import { disabledPermissionModes } from "../services/claude-settings.js";
+import {
+  claudePreferences,
+  disabledPermissionModes,
+  modelPolicy
+} from "../services/claude-settings.js";
+import {
+  readPermissionRules,
+  unreadableRuleSources
+} from "../services/permission-sources.js";
+import {
+  availableFileScopes,
+  writeAllowRule
+} from "../services/permission-writer.js";
+import { grantFileEligibility, grantToCliRule } from "../core/grant-rules.js";
+import type { NotifyTrigger } from "../core/notify.js";
+import { additionalDirectories } from "../core/workspace-dirs.js";
+import { permittedModel } from "../core/model-allowlist.js";
+import { raiseNotification } from "./domains/notify.js";
 import type {
   ClaudeCliProvider,
   EffortLevel,
@@ -319,6 +337,9 @@ export class ConversationHost {
    *  forever. Invisible, that reads as a chat that simply stopped. */
   private awaitingApproval = false;
   private finishedWhileHidden = false;
+  /** When the running turn began, for the one notification that depends on how
+   *  long it took. Zero between turns. */
+  private turnStartedAt = 0;
   /**
    * Subagents dispatched this turn that have not reported a terminal status,
    * keyed by CLI task id.
@@ -788,6 +809,77 @@ export class ConversationHost {
     this.refreshSurface();
   }
 
+  /**
+   * The model this conversation may actually use.
+   *
+   * Filtering the picker is not enough on its own. A model pinned in settings
+   * can become disallowed between sessions — an administrator adds
+   * `availableModels` and what is already stored is not on it. Running it
+   * anyway would be the same override the picker filter exists to prevent, so
+   * it falls back rather than quietly persisting.
+   */
+  private get effectiveModel(): string {
+    const policy = modelPolicy(this.workingRoot);
+    return (
+      permittedModel(
+        this.settings.model,
+        policy.availableModels,
+        policy.enforceAvailableModels
+      ) ?? this.settings.model
+    );
+  }
+
+  /**
+   * The argv-shaped options that come from settings rather than from the turn.
+   *
+   * Gathered in one place so every spawn gets the same set: a conversation
+   * whose process is replaced mid-flight must come back with the folders and
+   * the fallbacks it had, or the agent quietly loses sight of half the window.
+   */
+  private extraCliOptions(root: string | undefined) {
+    const config = vscode.workspace.getConfiguration("luno");
+    return {
+      additionalDirectories: additionalDirectories({
+        cwd: root,
+        workspaceFolders: (vscode.workspace.workspaceFolders ?? []).map(
+          (f) => f.uri.fsPath
+        ),
+        configured: config.get<string[]>("additionalDirectories", []),
+        isolated: this.isolate
+      }),
+      fallbackModels: config.get<string[]>("fallbackModels", []),
+      maxBudgetUsd: config.get<number>("maxBudgetUsd", 0),
+      safeMode: config.get<boolean>("safeMode", false),
+      sessionName: this.session.title
+    };
+  }
+
+  /**
+   * Raise a banner for something this conversation needs, if the rule and the
+   * user's switches allow one.
+   *
+   * The badge is not decided here — every trigger raises it, through
+   * `refreshSurface`. This is only the loud channel.
+   */
+  private notify(trigger: NotifyTrigger): void {
+    const turnMs =
+      trigger === "turnFinished" && this.turnStartedAt > 0
+        ? Date.now() - this.turnStartedAt
+        : undefined;
+    if (trigger === "turnFinished") this.turnStartedAt = 0;
+    raiseNotification(
+      {
+        trigger,
+        visible: this.visible,
+        turnMs,
+        // Named, because a person with several chats open needs to know which
+        // one is asking before deciding whether to leave what they are doing.
+        title: this.session.title
+      },
+      () => this.reveal()
+    );
+  }
+
   /** Told by the surface when the user can or cannot see this conversation. */
   setVisible(visible: boolean): void {
     this.visible = visible;
@@ -1077,14 +1169,78 @@ export class ConversationHost {
    * not offer the button for one, and this is the half that has to hold if the
    * message arrives anyway.
    */
-  private async grantFromRequest(requestId: string): Promise<void> {
+  private async grantFromRequest(
+    requestId: string,
+    scope: GrantScope
+  ): Promise<void> {
     const asked = this.askedPermissions.get(requestId);
     if (!asked || asked.destructive || asked.network) return;
     const grant = grantFor(asked.toolName, asked.input);
     if (!grant) return;
+
+    // A file scope is re-checked here, whatever the panel asked for. The picker
+    // chooses; it does not decide. Anything our own gate would stop falls back
+    // to LUNO's own storage, where that gate still runs on every call.
+    const rule = scope === "luno" ? null : grantToCliRule(grant);
+    if (rule && grantFileEligibility(grant).eligible) {
+      try {
+        const { file, added, warning } = await writeAllowRule(
+          scope,
+          this.workingRoot,
+          rule
+        );
+        logInfo(
+          `[luno] ${added ? "wrote" : "already present"}: ${rule} → ${file}`
+        );
+        // A rule the CLI will ignore has to be said out loud. Silently it
+        // reads as a permission granted, and the user is asked for it again
+        // on the very next call with nothing explaining why.
+        if (warning) this.post({ type: "error", message: warning });
+        // Not also stored in `globalState`: two copies of one permission is
+        // two places to revoke it from, and only one of them would work.
+        return;
+      } catch (err) {
+        const why = err instanceof Error ? err.message : String(err);
+        logWarn(`[luno] could not write ${rule}: ${why}`);
+        this.post({
+          type: "error",
+          message: `The permission was kept in LUNO instead: ${why}`
+        });
+      }
+    }
+
     const grants = await grantTool(this.ctx, grant);
     logInfo(`[luno] standing grant added: ${grantLabel(grant)}`);
     this.shared.broadcast({ type: "toolGrants", grants });
+  }
+
+  /**
+   * Tell the card where an "always allow" on it could go.
+   *
+   * Computed here rather than in the provider: which scopes exist depends on
+   * the workspace and on our own storage, neither of which the CLI bridge
+   * knows about — and the eligibility rule imports that bridge, so asking it
+   * from inside would be a cycle.
+   */
+  private withGrantScopes(
+    request: PermissionRequestPayload
+  ): PermissionRequestPayload {
+    if (!request.grantLabel) return request;
+    const grant = grantFor(request.toolName, request.input);
+    if (!grant) return request;
+
+    const verdict = grantFileEligibility(grant);
+    if (!verdict.eligible) {
+      return {
+        ...request,
+        grantScopes: ["luno"],
+        grantScopeReason: verdict.reason
+      };
+    }
+    return {
+      ...request,
+      grantScopes: ["luno", ...availableFileScopes(this.workingRoot)]
+    };
   }
 
   /** Put text in the composer without sending it. The way in from outside the
@@ -1233,7 +1389,15 @@ export class ConversationHost {
       this.awaitingApproval = false;
       this.refreshSurface();
       if (behavior === "allow" && m.always === true) {
-        await this.grantFromRequest(requestId);
+        await this.grantFromRequest(
+          requestId,
+          oneOf(m, "alwaysScope", [
+            "luno",
+            "project",
+            "local",
+            "user"
+          ] as const) ?? "luno"
+        );
       }
       // Between turns `activeProvider` is empty, and a prompt raised by a
       // background agent is answered exactly then. The session provider is the
@@ -1435,6 +1599,18 @@ export class ConversationHost {
       );
     },
     requestToolGrants: () => broadcastGrants(this.post, readGrants(this.ctx)),
+    requestPermissionRules: () => {
+      // Scoped to this conversation's own root, which for a worktree chat is
+      // the worktree — the same checkout the CLI reads `.claude/settings.json`
+      // from, so the answer is what is in force for *this* conversation.
+      const { rules, unreadable } = readPermissionRules(this.workingRoot);
+      this.post({
+        type: "permissionRules",
+        rules,
+        unreadable,
+        cannotRead: unreadableRuleSources()
+      });
+    },
     revokeToolGrant: async (m) => {
       const key = str(m, "key");
       if (!key) return;
@@ -2099,6 +2275,12 @@ export class ConversationHost {
     }
     const cfg = vscode.workspace.getConfiguration("luno");
     const provider = createProvider({
+      // Also here, not only on `updateOptions`: the Remote Control bridge can
+      // spawn before any turn has run, and argv built without these would
+      // differ from argv built with them — which `respawnFingerprint` reads as
+      // a settings change and answers by replacing the process the phone is
+      // attached to. The same trap `--model` is already excluded for.
+      ...this.extraCliOptions(workspaceRoot),
       cwd: workspaceRoot,
       permissionMode: this.settings.permissionMode,
       allowedBashPatterns: cfg.get<string[]>("allowedBashPatterns", []),
@@ -2197,7 +2379,7 @@ export class ConversationHost {
             d.type === "user_dialog" ||
             d.type === "user_dialog_resolved")
         ) {
-          this.onTurnDelta(d, this.settings.model);
+          this.onTurnDelta(d, this.effectiveModel);
           return;
         }
         // Everything else belongs to that turn — or to no turn at all, in which
@@ -2338,7 +2520,7 @@ export class ConversationHost {
       // Not for this turn — that carries its own on the request. For the next
       // spawn with no turn behind it, so the Remote Control toggle builds the
       // argv an ordinary turn would and does not read as a settings change.
-      model: this.settings.model,
+      model: this.effectiveModel,
       taskType,
       conventions,
       diagnostics: collectDiagnostics(workspaceRoot),
@@ -2348,7 +2530,8 @@ export class ConversationHost {
       mcpServerNames: mcpConfig?.serverNames,
       effort,
       thinking,
-      ultracode
+      ultracode,
+      ...this.extraCliOptions(workspaceRoot)
     });
 
     // In `default`/`auto` the provider routes each mutating tool call back to
@@ -2370,6 +2553,7 @@ export class ConversationHost {
       onDelta: (d: StreamDelta) => this.onTurnDelta(d, model)
     });
 
+    this.turnStartedAt = Date.now();
     this.post({ type: "turnStart" });
     const orchestrator = this.orchestrator;
     const turn = (async () => {
@@ -2388,6 +2572,7 @@ export class ConversationHost {
         // thing worth a glyph: the answer is sitting there unread.
         if (!this.visible) this.finishedWhileHidden = true;
         this.refreshSurface();
+        this.notify("turnFinished");
         this.post({ type: "turnEnd" });
         // Refresh authoritative usage after every turn — Claude Code writes
         // its session JSONL synchronously, so by this point the new tokens
@@ -2429,7 +2614,7 @@ export class ConversationHost {
     this.remoteTurn?.close();
     const queue = new DeltaQueue();
     this.remoteTurn = queue;
-    const model = this.settings.model;
+    const model = this.effectiveModel;
     const maxTokens = vscode.workspace
       .getConfiguration("luno")
       .get<number>("maxTokens", 0);
@@ -2453,6 +2638,7 @@ export class ConversationHost {
       this.orchestrator = orchestrator;
       this.activeProvider = provider;
       this.armCheckpoints();
+      this.turnStartedAt = Date.now();
       this.post({ type: "turnStart" });
       try {
         await orchestrator.observe(text, queue);
@@ -2474,6 +2660,7 @@ export class ConversationHost {
         if (queue.sessionEnded) this.sweepLiveTasks();
         if (!this.visible) this.finishedWhileHidden = true;
         this.refreshSurface();
+        this.notify("turnFinished");
         this.post({ type: "turnEnd" });
         this.scheduleSave();
         void broadcastUsage(this.post, this.shared.rateLimits);
@@ -2507,16 +2694,29 @@ export class ConversationHost {
     if (d.type === "permission_request" && d.permission) {
       // The turn now cannot continue until someone answers. Off screen that
       // reads as a chat that simply stopped, so it has to say so.
+      // Before the flag is raised, so a second card arriving while the first
+      // is still unanswered does not stack a second banner. A background agent
+      // can ask while the main turn is already parked, which is the only way
+      // two are outstanding at once.
+      const alreadyWaiting = this.awaitingApproval;
       this.awaitingApproval = true;
       this.refreshSurface();
-      this.post({ type: "permissionRequest", request: d.permission });
+      if (!alreadyWaiting) this.notify("approval");
+      this.post({
+        type: "permissionRequest",
+        request: this.withGrantScopes(d.permission)
+      });
       return;
     }
     // A decision that is not about a tool. Blocks the turn exactly as an
     // approval does, and reads the same off screen, so it raises the same flag.
     if (d.type === "user_dialog" && d.dialog) {
+      const dialogAlreadyWaiting = this.awaitingApproval;
       this.awaitingApproval = true;
       this.refreshSurface();
+      // Its own trigger, not `approval`: the CLI can time a question out, so a
+      // missed one costs the answer rather than merely waiting for it.
+      if (!dialogAlreadyWaiting) this.notify("question");
       this.post({ type: "userDialog", dialog: d.dialog });
       return;
     }
@@ -2748,11 +2948,20 @@ export class ConversationHost {
  */
 function defaultSettings(): ConversationSettings {
   const cfg = vscode.workspace.getConfiguration("luno");
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const claude = claudePreferences(root);
+  // `luno.*` explicitly set wins over Claude's own file; Claude's wins over
+  // LUNO's built-in default. That is what makes these preferences rather than
+  // restrictions — a restriction is enforced elsewhere and cannot be overridden
+  // by either, which is the whole difference this phase turns on.
   return {
-    model: cfg.get<string>("model", "default"),
-    permissionMode: cfg.get<PermissionMode>("permissionMode", "default"),
-    effort: cfg.get<EffortLevel>("effort", "high"),
-    thinking: cfg.get<boolean>("thinking", true),
+    model: explicit(cfg, "model") ?? claude.model ?? "default",
+    permissionMode:
+      explicit<PermissionMode>(cfg, "permissionMode") ??
+      claude.defaultMode ??
+      "default",
+    effort: explicit<EffortLevel>(cfg, "effort") ?? claude.effort ?? "high",
+    thinking: explicit<boolean>(cfg, "thinking") ?? claude.thinking ?? true,
     // Deliberately not a `luno.*` setting: ultracode makes the model stand up
     // fleets of agents, and something that spends the quota that fast is a
     // choice per conversation rather than the shape every new one is born in.
@@ -2928,4 +3137,25 @@ async function ensureLunoGitignore(workspaceRoot: string): Promise<void> {
       /* swallow */
     }
   }
+}
+
+/**
+ * A `luno.*` value only when someone actually set one.
+ *
+ * `getConfiguration().get(key, fallback)` cannot tell "the user chose this"
+ * from "this is the packaged default", and the difference decides whether
+ * Claude's own preference gets a say. Without it, LUNO's default would silently
+ * outrank a value the user had already set for Claude Code.
+ */
+function explicit<T>(
+  cfg: vscode.WorkspaceConfiguration,
+  key: string
+): T | undefined {
+  const info = cfg.inspect<T>(key);
+  return (
+    info?.workspaceFolderValue ??
+    info?.workspaceValue ??
+    info?.globalValue ??
+    undefined
+  );
 }

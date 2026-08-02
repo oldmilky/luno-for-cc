@@ -240,6 +240,30 @@
   }
 }
 
+.agentsBtn {
+  @extend %toolbar-button;
+  border: 0;
+  color: var(--t3);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+// Lit while work is in flight, ordinary once it is over. The hover rules are
+// repeated rather than inherited: both classes are on the element at the same
+// specificity, so the later one has to restate what it wants to keep.
+.agentsBtnLive {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+
+  &:hover {
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+    color: var(--accent);
+  }
+}
+
 .kbd {
   padding: 1px 5px;
   border: 1px solid var(--b2);

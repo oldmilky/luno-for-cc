@@ -15,6 +15,11 @@ import { spawn } from "node:child_process";
 import { ClaudeCliProvider } from "../../src/providers/claude-cli.js";
 import type { StreamDelta } from "../../src/core/types.js";
 import type { ProviderRequest } from "../../src/providers/base.js";
+import {
+  IDE_SERVER_NAME,
+  IDE_TOOLS,
+  type IdeToolOps
+} from "../../src/core/ide-tools.js";
 
 /** A minimal stand-in for the spawned `claude` process: real streams for
  *  stdout/stderr/stdin plus EventEmitter exit/error and a kill() that records
@@ -1784,5 +1789,130 @@ describe("ClaudeCliProvider.stream — the CLI's background-task roster", () => 
     await finished;
 
     expect(collected.some((d) => d.type === "done")).toBe(true);
+  });
+});
+
+describe("ClaudeCliProvider — the ide MCP server over the control channel", () => {
+  let child: any;
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    child = makeFakeChild();
+    (spawn as unknown as ReturnType<typeof vi.fn>).mockReturnValue(child);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const mcpMessage = (
+    id: string,
+    message: unknown,
+    server: string = IDE_SERVER_NAME
+  ) => ({
+    type: "control_request",
+    request_id: id,
+    request: { subtype: "mcp_message", server_name: server, message }
+  });
+
+  /** Every `mcp_response` the host wrote back, by control-request id. */
+  const responses = () =>
+    (
+      child.written as {
+        type?: string;
+        response?: {
+          request_id?: string;
+          response?: { mcp_response?: Record<string, any> };
+        };
+      }[]
+    )
+      .filter((m) => m.type === "control_response" && m.response?.response)
+      .map((m) => ({
+        requestId: m.response!.request_id,
+        mcp: m.response!.response!.mcp_response
+      }))
+      .filter((r) => r.mcp !== undefined);
+
+  const withIde = () =>
+    new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      // Built off the table so a tool added to it needs no edit here.
+      ideOps: Object.fromEntries(
+        IDE_TOOLS.map((t) => [
+          t.name,
+          async () => ({
+            content: [{ type: "text" as const, text: '{"folders":[]}' }]
+          })
+        ])
+      ) as unknown as IdeToolOps
+    });
+
+  it("answers a tools/call inside an mcp_response envelope", async () => {
+    await drive(withIde());
+    child.emitLine(
+      mcpMessage("c-1", {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: { name: "getWorkspaceFolders" }
+      })
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(responses()).toEqual([
+      {
+        requestId: "c-1",
+        mcp: {
+          jsonrpc: "2.0",
+          id: 4,
+          result: { content: [{ type: "text", text: '{"folders":[]}' }] }
+        }
+      }
+    ]);
+  });
+
+  it("answers a server we never declared, rather than leaving the CLI waiting", async () => {
+    await drive(withIde());
+    child.emitLine(
+      mcpMessage(
+        "c-2",
+        { jsonrpc: "2.0", id: 1, method: "tools/list" },
+        "chrome"
+      )
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    const [only] = responses();
+    expect(only.requestId).toBe("c-2");
+    expect(only.mcp!.error.code).toBe(-32601);
+  });
+
+  it("acknowledges a notification without inventing a result", async () => {
+    await drive(withIde());
+    child.emitLine(
+      mcpMessage("c-3", { jsonrpc: "2.0", method: "notifications/initialized" })
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(responses()[0].mcp).toEqual({ jsonrpc: "2.0", result: {}, id: 0 });
+  });
+
+  it("does not route an mcp_message through the unhandled-request ack", async () => {
+    // The empty `{}` that path sends claims we did something. For an
+    // `mcp_message` it is a JSON-RPC message with no jsonrpc, no id and no
+    // result — the CLI has nothing to correlate it with.
+    await drive(withIde());
+    child.emitLine(
+      mcpMessage("c-4", {
+        jsonrpc: "2.0",
+        id: 9,
+        method: "initialize",
+        params: {}
+      })
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    const [only] = responses();
+    expect(only.mcp!.jsonrpc).toBe("2.0");
+    expect(only.mcp!.id).toBe(9);
+    expect(only.mcp!.result.serverInfo.name).toBe(IDE_SERVER_NAME);
   });
 });

@@ -5,9 +5,15 @@ import {
   workflowAgentOutcome,
   subagentOutcome,
   liveAgents,
+  agentPanel,
+  mergeTaskState,
+  runningUnits,
   TASK_TOOL_NAMES
 } from "../../webview/src/features/chat/subagent-state";
-import type { TimelineEvent } from "../../webview/src/lib/rpc";
+import type {
+  TimelineEvent,
+  WorkflowProgressEntry
+} from "../../webview/src/lib/rpc";
 
 // The chat sees a subagent as two rows: one when it is dispatched, one when it
 // answers. The card is a fold of the pair, and the fold has to hold two things
@@ -353,5 +359,298 @@ describe("live agents", () => {
       count: 0,
       longestMs: 0
     });
+  });
+});
+
+// The background-agents panel. Three of its rules are the opposite of the
+// obvious version because a recorded run said so — see
+// `docs/WORKFLOW-AGENTS-PANEL.md`. These are the tests that keep them that way.
+describe("agentPanel", () => {
+  /** Every agent starting together, so concurrency is the whole fleet. */
+  const TOGETHER = 1_785_239_740_000;
+
+  const agent = (
+    label: string,
+    state: string,
+    extra: Partial<WorkflowProgressEntry> = {}
+  ): WorkflowProgressEntry => ({
+    type: "workflow_agent",
+    phaseIndex: 1,
+    phaseTitle: "One",
+    label,
+    state,
+    ...extra
+  });
+
+  const workflow = (
+    agents: WorkflowProgressEntry[],
+    over: Record<string, unknown> = {}
+  ) => ({
+    taskId: "wf",
+    taskType: "local_workflow",
+    workflowName: "review-changes",
+    status: "running",
+    totalTokens: 19_210,
+    durationMs: 5_593,
+    workflowProgress: agents.length
+      ? [{ type: "workflow_phase", index: 1, title: "One" }, ...agents]
+      : undefined,
+    ...over
+  });
+
+  const lone = (status: string, over: Record<string, unknown> = {}) => ({
+    taskId: "solo",
+    taskType: "local_agent",
+    subagentType: "Explore",
+    status,
+    totalTokens: 9_000,
+    durationMs: 22_000,
+    ...over
+  });
+
+  // A workflow of four and a lone Explore must not weigh the same in one bar.
+  it("counts agents rather than launches", () => {
+    const progress = {
+      wf: workflow([
+        agent("a", "done", { durationMs: 1_000 }),
+        agent("b", "done", { durationMs: 2_000 }),
+        agent("c", "start"),
+        agent("d", "running")
+      ]),
+      solo: lone("running")
+    } as never;
+
+    const panel = agentPanel(progress);
+    expect(panel.total).toBe(5);
+    expect(panel.done).toBe(2);
+    expect(panel.running).toBe(3);
+  });
+
+  // The capture: the task's `usage.total_tokens` and its one agent's `tokens`
+  // were the same 19210. Summing both would report 38420.
+  it("reads tokens off the task, never the sum of its agents", () => {
+    const progress = {
+      wf: workflow(
+        [agent("only", "done", { tokens: 19_210, durationMs: 5_580 })],
+        { status: "completed" }
+      )
+    } as never;
+
+    expect(agentPanel(progress).tokens).toBe(19_210);
+  });
+
+  // A running agent carries no `tokens` field at all, so the sum would read
+  // low for exactly as long as anyone is watching.
+  it("does not let a running agent's missing tokens lower the total", () => {
+    const progress = {
+      wf: workflow([
+        agent("finished", "done", { tokens: 19_210, durationMs: 5_580 }),
+        agent("still going", "running")
+      ])
+    } as never;
+
+    expect(agentPanel(progress).tokens).toBe(19_210);
+  });
+
+  it("withholds an estimate until three agents have finished", () => {
+    const two = {
+      wf: workflow([
+        agent("a", "done", { durationMs: 1_000, startedAt: TOGETHER }),
+        agent("b", "done", { durationMs: 3_000, startedAt: TOGETHER }),
+        agent("c", "running", { startedAt: TOGETHER }),
+        agent("d", "running", { startedAt: TOGETHER })
+      ])
+    } as never;
+    expect(agentPanel(two).etaMs).toBeUndefined();
+
+    const three = {
+      wf: workflow([
+        agent("a", "done", { durationMs: 1_000, startedAt: TOGETHER }),
+        agent("b", "done", { durationMs: 2_000, startedAt: TOGETHER }),
+        agent("c", "done", { durationMs: 3_000, startedAt: TOGETHER }),
+        agent("d", "running", { startedAt: TOGETHER }),
+        agent("e", "running", { startedAt: TOGETHER })
+      ])
+    } as never;
+    // Median 2000ms, all five overlapped, two left: one more wave.
+    expect(agentPanel(three).etaMs).toBe(2_000);
+  });
+
+  // An older CLI sends no `startedAt`, and a concurrency of zero would divide.
+  it("still estimates when the CLI sent no start times", () => {
+    const progress = {
+      wf: workflow([
+        agent("a", "done", { durationMs: 1_000 }),
+        agent("b", "done", { durationMs: 2_000 }),
+        agent("c", "done", { durationMs: 3_000 }),
+        agent("d", "running"),
+        agent("e", "running")
+      ])
+    } as never;
+
+    expect(agentPanel(progress).etaMs).toBe(4_000);
+  });
+
+  // `workflow_progress` can stop arriving before an agent's own terminal state
+  // does. One row stuck at `start` must not keep the button lit forever.
+  it("leaves nothing running once the CLI closes the run", () => {
+    const progress = {
+      wf: workflow(
+        [agent("a", "done", { durationMs: 1_000 }), agent("stuck", "start")],
+        { status: "completed" }
+      )
+    } as never;
+
+    const panel = agentPanel(progress);
+    expect(panel.running).toBe(0);
+    expect(panel.done).toBe(2);
+    expect(panel.etaMs).toBeUndefined();
+  });
+
+  it("marks a restored workflow as unknown rather than empty", () => {
+    const progress = { wf: workflow([], { status: "completed" }) } as never;
+
+    const [run] = agentPanel(progress).runs;
+    expect(run.detailsUnavailable).toBe(true);
+    expect(run.phases).toEqual([]);
+    expect(run.total).toBe(1);
+  });
+
+  it("reports the longest run's own duration, not a sum", () => {
+    const progress = {
+      wf: workflow([agent("a", "running")]),
+      solo: lone("running", { durationMs: 61_000 })
+    } as never;
+
+    expect(agentPanel(progress).elapsedMs).toBe(61_000);
+  });
+
+  it("puts what is still running first", () => {
+    const progress = {
+      solo: lone("completed"),
+      wf: workflow([agent("a", "running")])
+    } as never;
+
+    expect(agentPanel(progress).runs.map((r) => r.taskId)).toEqual([
+      "wf",
+      "solo"
+    ]);
+  });
+
+  it("is empty when nothing has been dispatched", () => {
+    expect(agentPanel({} as never)).toEqual({
+      runs: [],
+      running: 0,
+      done: 0,
+      total: 0,
+      tokens: 0,
+      elapsedMs: 0,
+      etaMs: undefined
+    });
+  });
+});
+
+// The panel outlives the work it reports on, and `taskProgress` does not: the
+// host deletes a task from it as the closing row lands, and `turnEnd` sweeps
+// the rest. Reading it alone made the toolbar button vanish at exactly the
+// moment someone would ask what the audit cost.
+describe("mergeTaskState", () => {
+  const finished = {
+    taskId: "wf",
+    taskType: "local_workflow",
+    workflowName: "review-changes",
+    status: "completed",
+    totalTokens: 19_210,
+    durationMs: 5_593
+  };
+
+  it("keeps a run the live map has already dropped", () => {
+    const merged = mergeTaskState(
+      new Map([["wf", finished]]) as never,
+      {} as never
+    );
+    const panel = agentPanel(merged);
+
+    expect(panel.total).toBe(1);
+    expect(panel.tokens).toBe(19_210);
+    expect(panel.running).toBe(0);
+  });
+
+  // Live is the fresher of the two while a run is open — the timeline holds
+  // only the dispatch until the closing row arrives.
+  it("lets live detail win over what the timeline stored", () => {
+    const merged = mergeTaskState(
+      new Map([
+        ["wf", { ...finished, status: "running", totalTokens: 0 }]
+      ]) as never,
+      { wf: { taskId: "wf", totalTokens: 42_000 } } as never
+    );
+
+    expect(agentPanel(merged).tokens).toBe(42_000);
+  });
+});
+
+// The stop confirmation and the panel used to disagree one click apart: a
+// workflow with two running agents read "2 running" on one and "1 agent still
+// working" on the other. One definition now feeds both.
+describe("runningUnits — the count both surfaces read", () => {
+  const wfTask = (states: string[], status = "running") => ({
+    taskId: "wf",
+    taskType: "local_workflow",
+    status,
+    durationMs: 60_000,
+    workflowProgress: [
+      { type: "workflow_phase", index: 1, title: "One" },
+      ...states.map((state, i) => ({
+        type: "workflow_agent",
+        agentId: `a${i}`,
+        phaseIndex: 1,
+        label: `a${i}`,
+        state
+      }))
+    ]
+  });
+
+  it("counts a workflow's running agents, not the workflow", () => {
+    expect(runningUnits(wfTask(["done", "running", "running"]) as never)).toBe(
+      2
+    );
+  });
+
+  it("counts a lone agent as itself", () => {
+    expect(runningUnits({ taskId: "solo", status: "running" } as never)).toBe(
+      1
+    );
+  });
+
+  it("is zero once the task has reported a terminal status", () => {
+    expect(runningUnits(wfTask(["running"], "completed") as never)).toBe(0);
+  });
+
+  // The floor. A workflow between phases has dispatched nobody at this
+  // instant — counted as zero it takes the confirmation off Stop, and the
+  // interrupt goes through silently.
+  it("never reports zero for a workflow that is still alive", () => {
+    expect(runningUnits(wfTask(["done", "done"]) as never)).toBe(1);
+  });
+
+  it("is the same number the panel and the stop warning both show", () => {
+    const progress = {
+      wf: wfTask(["done", "running", "running"]),
+      solo: { taskId: "solo", status: "running", durationMs: 9_000 }
+    } as never;
+
+    expect(liveAgents(progress).count).toBe(3);
+    expect(agentPanel(progress).running).toBe(3);
+  });
+
+  // Same pairing at the moment the disagreement used to appear.
+  it("agrees between phases too", () => {
+    const progress = { wf: wfTask(["done", "done"]) } as never;
+
+    expect(liveAgents(progress).count).toBe(1);
+    expect(agentPanel(progress).running).toBe(1);
+    // The row still reports its own agents honestly — none of them is running.
+    expect(agentPanel(progress).runs[0].running).toBe(0);
   });
 });

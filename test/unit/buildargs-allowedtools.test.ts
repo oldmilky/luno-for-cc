@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { buildArgs } from "../../src/providers/claude-cli.js";
+import {
+  buildArgs,
+  respawnFingerprint
+} from "../../src/providers/claude-cli.js";
 
 // Focused on the auto-mode tool pre-allow list. The existing claude-cli.test.ts
 // only checks a simple "^npm test$" pattern's presence; these exercise the
@@ -150,5 +153,96 @@ describe("buildArgs diagnostics", () => {
     const without = buildArgs("hi", "sonnet", { ...base });
 
     expect(appends(withNone)).toEqual(appends(without));
+  });
+});
+
+/** The value after a flag, or undefined when the flag is absent. */
+function after(args: string[], flag: string): string | undefined {
+  const i = args.indexOf(flag);
+  return i === -1 ? undefined : args[i + 1];
+}
+
+describe("buildArgs — the argv-shaped settings", () => {
+  it("adds no flag at all when nothing is configured", () => {
+    // Every user's default. A flag with nothing after it is worse than none.
+    const args = buildArgs("hi", "sonnet", { ...base });
+    for (const flag of [
+      "--add-dir",
+      "--fallback-model",
+      "--max-budget-usd",
+      "--name",
+      "--safe-mode"
+    ]) {
+      expect(args).not.toContain(flag);
+    }
+  });
+
+  it("passes every extra directory after one --add-dir", () => {
+    const args = buildArgs("hi", "sonnet", {
+      ...base,
+      additionalDirectories: ["/w/lib", "/w/docs"]
+    });
+    const i = args.indexOf("--add-dir");
+    expect(args.slice(i + 1, i + 3)).toEqual(["/w/lib", "/w/docs"]);
+  });
+
+  it("passes fallbacks as one comma-separated value", () => {
+    const args = buildArgs("hi", "sonnet", {
+      ...base,
+      model: "sonnet",
+      fallbackModels: ["opus", "haiku"]
+    });
+    expect(after(args, "--fallback-model")).toBe("opus,haiku");
+    // One flag, not one per model.
+    expect(args.filter((a) => a === "--fallback-model")).toHaveLength(1);
+  });
+
+  it("omits a budget of zero rather than capping every turn at nothing", () => {
+    expect(buildArgs("hi", "s", { ...base, maxBudgetUsd: 0 })).not.toContain(
+      "--max-budget-usd"
+    );
+    expect(
+      after(
+        buildArgs("hi", "s", { ...base, maxBudgetUsd: 4 }),
+        "--max-budget-usd"
+      )
+    ).toBe("4");
+  });
+
+  it("names the session for the CLI's own /resume picker", () => {
+    expect(
+      after(
+        buildArgs("hi", "s", { ...base, sessionName: "Fix the parser" }),
+        "--name"
+      )
+    ).toBe("Fix the parser");
+  });
+
+  it("turns customizations off only when asked", () => {
+    expect(buildArgs("hi", "s", { ...base, safeMode: true })).toContain(
+      "--safe-mode"
+    );
+    expect(buildArgs("hi", "s", { ...base, safeMode: false })).not.toContain(
+      "--safe-mode"
+    );
+  });
+
+  it("does not replace a live process when the chat is renamed", () => {
+    // The name is what `/resume` shows in a terminal. Nothing about a running
+    // turn depends on it, and respawning would take any live agent with it.
+    const before = buildArgs("hi", "s", { ...base, sessionName: "one" });
+    const after2 = buildArgs("hi", "s", { ...base, sessionName: "two" });
+    expect(respawnFingerprint(before)).toBe(respawnFingerprint(after2));
+  });
+
+  it("does replace it when the folders the agent can see change", () => {
+    // The opposite case, and it has to be the opposite: a running CLI cannot
+    // be told about a folder it was not spawned with.
+    const before = buildArgs("hi", "s", { ...base });
+    const after2 = buildArgs("hi", "s", {
+      ...base,
+      additionalDirectories: ["/w/lib"]
+    });
+    expect(respawnFingerprint(before)).not.toBe(respawnFingerprint(after2));
   });
 });

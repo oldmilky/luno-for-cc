@@ -2,7 +2,7 @@
   "name": "luno-for-cc",
   "displayName": "LUNO for Claude Code",
   "description": "The full Claude Code agent in a native side panel — multi-file edits, a permission gate you control, and plan review. Runs on your Claude subscription: no API key, no per-token billing.",
-  "version": "0.38.0",
+  "version": "1.0.0",
   "publisher": "lunoweb",
   "license": "MIT",
   "icon": "assets/luno-icon-500.png",
@@ -108,6 +108,20 @@
       {
         "command": "luno.showLogs",
         "title": "LUNO: Show Logs"
+      },
+      {
+        "command": "luno.toggleSafeMode",
+        "title": "LUNO: Toggle Safe Mode (run with customizations off)"
+      },
+      {
+        "command": "luno.acceptProposedDiff",
+        "title": "LUNO: Accept Proposed Changes",
+        "icon": "$(check)"
+      },
+      {
+        "command": "luno.rejectProposedDiff",
+        "title": "LUNO: Reject Proposed Changes",
+        "icon": "$(close)"
       }
     ],
     "keybindings": [
@@ -141,6 +155,28 @@
           "command": "luno.openInNewTab",
           "when": "view == luno.chat",
           "group": "navigation@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "luno.acceptProposedDiff",
+          "when": "luno.viewingProposedDiff",
+          "group": "navigation@1"
+        },
+        {
+          "command": "luno.rejectProposedDiff",
+          "when": "luno.viewingProposedDiff",
+          "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "luno.acceptProposedDiff",
+          "when": "luno.viewingProposedDiff"
+        },
+        {
+          "command": "luno.rejectProposedDiff",
+          "when": "luno.viewingProposedDiff"
         }
       ]
     },
@@ -212,6 +248,47 @@
           "type": "boolean",
           "default": true,
           "description": "Use the repository's own ignore rules when listing files for @-mentions, instead of a fixed exclude list. Off falls back to excluding node_modules, dist, build, out, .next, .venv and __pycache__ only — which offers up gitignored files the project deliberately keeps out."
+        },
+        "luno.additionalDirectories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra folders the agent may read and write, on top of the ones open in this window. Every other workspace folder is already included automatically — this is for directories outside the window entirely. Absolute paths. A chat running in its own isolated worktree still gets these, because you named them deliberately, but it never gets the window's folders."
+        },
+        "luno.fallbackModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Models to try, in order, when the one you picked is overloaded or unavailable — otherwise the turn simply ends. Aliases work (sonnet, opus, haiku) as do explicit versions. The model the conversation is already using is skipped: falling back to the one that just failed is not a fallback."
+        },
+        "luno.safeMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run the agent with every customization off — CLAUDE.md, skills, plugins, hooks, MCP servers, custom commands and agents. For telling \"my setup is broken\" apart from \"LUNO is broken\" when something misbehaves. Toggle it from the command palette with LUNO: Toggle Safe Mode; it takes effect on the next message."
+        },
+        "luno.maxBudgetUsd": {
+          "type": "number",
+          "default": 0,
+          "description": "Stop a session once it has spent this much, in dollars. 0 means no ceiling. Applies per conversation, not per day."
+        },
+        "luno.notify.approval": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification when a chat you are not looking at is parked on an approval card. The count on the LUNO activity-bar icon appears either way; this is the louder banner on top of it, and it only fires when the panel is hidden. VS Code has no OS-notification API, so this is an in-window banner, not a desktop one."
+        },
+        "luno.notify.question": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification when a hidden chat is asking you a question. Separate from the approval switch because the CLI can time a question out: a missed one does not simply wait, it costs the answer."
+        },
+        "luno.notify.turnFinished": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show a notification when a hidden chat finishes a long turn. Off by default and deliberately: measured over 33k real turns, half finish inside 8 seconds, so a banner for each would be noise. Only turns that ran longer than a minute qualify."
         },
         "luno.sendDiagnostics": {
           "type": "boolean",

@@ -13,11 +13,8 @@ import { ChatPanelProvider } from "../ui/panel.js";
 export async function generateConventionsCommand(
   panel: ChatPanelProvider
 ): Promise<void> {
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!workspaceRoot) {
-    vscode.window.showWarningMessage("Luno: open a folder first.");
-    return;
-  }
+  const workspaceRoot = await chooseConventionsFolder();
+  if (!workspaceRoot) return;
 
   const targetPath = path.join(workspaceRoot, "CLAUDE.md");
   try {
@@ -164,4 +161,29 @@ async function isCurrentlyGitignored(
   } catch {
     return false;
   }
+}
+
+/**
+ * Which folder gets the CLAUDE.md.
+ *
+ * One folder open: that one, no question asked. Several: ask, because writing
+ * a conventions file into whichever folder happens to be first is a silent
+ * choice about someone else's repository — and in a multi-root window the
+ * first one is frequently not the one being worked in.
+ *
+ * @returns the folder, or undefined when there is none or the user backed out.
+ */
+async function chooseConventionsFolder(): Promise<string | undefined> {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (folders.length === 0) {
+    vscode.window.showWarningMessage("Luno: open a folder first.");
+    return undefined;
+  }
+  if (folders.length === 1) return folders[0].uri.fsPath;
+
+  const picked = await vscode.window.showQuickPick(
+    folders.map((f) => ({ label: f.name, description: f.uri.fsPath })),
+    { title: "Which folder should the CLAUDE.md describe?" }
+  );
+  return picked?.description;
 }

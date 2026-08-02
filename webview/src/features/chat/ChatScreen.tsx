@@ -16,6 +16,7 @@ import {
   SkillInfo,
   ChatStatus,
   PermissionRequestView,
+  GrantScope,
   RemoteControlStatus,
   PendingSetting,
   SubagentTaskView,
@@ -55,8 +56,11 @@ import {
   TASK_TOOL_NAMES,
   foldSubagents,
   liveAgents,
+  agentPanel,
+  mergeTaskState,
   type FoldedSubagents
 } from "./subagent-state";
+import { BackgroundAgentsModal } from "./BackgroundAgentsModal";
 import { TurnHeader } from "./TurnHeader";
 import { ThoughtBlock } from "./ThoughtBlock";
 import { EditedFilesCard } from "./EditedFilesCard";
@@ -130,6 +134,8 @@ export interface ChatScreenProps {
     opts?: {
       restOfTurn?: boolean;
       always?: boolean;
+      /** Where the standing grant goes. Absent means LUNO's own storage. */
+      alwaysScope?: GrantScope;
       updatedInput?: Record<string, unknown>;
       reason?: string;
     }
@@ -201,6 +207,7 @@ export function ChatScreen({
   const [hintsOpen, setHintsOpen] = useState(false);
   const [connectorsOpen, setConnectorsOpen] = useState(false);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [agentsOpen, setAgentsOpen] = useState(false);
   const [remoteControl, setRemoteControl] = useState<RemoteControlStatus>({
     state: "off"
   });
@@ -306,7 +313,21 @@ export function ChatScreen({
   // model's, so it goes at `turnEnd` — this is what keeps the header from
   // calling a conversation done while a workflow runs in it.
   const running = useMemo(() => liveAgents(taskProgress), [taskProgress]);
-  const agentsRunning = running.count > 0;
+  // History first, live detail over it — `taskProgress` alone empties as soon
+  // as a run ends, and the panel has to outlive the work it reports on.
+  // Recomputed only when one of the two moves, which is also the only time any
+  // of these numbers can change: every one of them is the CLI's own figure, and
+  // none is a clock read.
+  const agents = useMemo(
+    () => agentPanel(mergeTaskState(grouped.subagents.byTaskId, taskProgress)),
+    [grouped.subagents, taskProgress]
+  );
+  // The panel's reading, not `liveAgents`', so the header chip and the toolbar
+  // button can never claim different things about the same work. Both sides of
+  // this count agents through `runningUnits`; they differ only in the map they
+  // read, and the host replays `subagentProgress` for every live task when a
+  // panel attaches, so the two converge as soon as it does.
+  const agentsRunning = agents.running > 0;
   const planContext = useMemo<RenderCtx>(
     () => ({
       views: grouped.views,
@@ -374,6 +395,8 @@ export function ChatScreen({
         awaitingApproval={pendingPermission !== null}
         errored={error !== null}
         agentsRunning={agentsRunning}
+        agentCount={agents.running}
+        onOpenAgents={() => setAgentsOpen(true)}
         events={events}
         streaming={streaming}
         onOpenHistory={() => setHistoryOpen(true)}
@@ -579,6 +602,20 @@ export function ChatScreen({
         {hintsOpen && (
           <KeyboardHints key="kbd-hints" onClose={() => setHintsOpen(false)} />
         )}
+        {agentsOpen && (
+          <BackgroundAgentsModal
+            key="bg-agents"
+            panel={agents}
+            onClose={() => setAgentsOpen(false)}
+            // The same door the composer's Stop uses, so the confirmation that
+            // names what is about to be lost is reached either way — and there
+            // is exactly one path that sends the interrupt.
+            onStopAll={() => {
+              setAgentsOpen(false);
+              onCancel();
+            }}
+          />
+        )}
       </AnimatePresence>
 
       <div
@@ -663,6 +700,8 @@ export function ChatScreen({
           onRestored={onRestored}
           pendingPrefill={pendingPrefill}
           onPrefilled={() => setPendingPrefill(null)}
+          agents={agents}
+          onOpenAgents={() => setAgentsOpen(true)}
         />
       </div>
     </>

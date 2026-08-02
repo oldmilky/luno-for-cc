@@ -212,9 +212,21 @@ export interface WorkflowProgressEntry {
    *  same reason a task status is: the CLI adds values between releases. */
   state?: string;
   attempt?: number;
+  /** Only once the agent finishes — a running one reports none, which is why
+   *  a panel's token total reads the task's `usage` instead of summing these. */
   tokens?: number;
   toolCalls?: number;
   durationMs?: number;
+  /** Epoch ms the agent began. With `durationMs` it reconstructs how many ran
+   *  at once, which the CLI never states, and gives a running agent an elapsed
+   *  time it otherwise has no field for. */
+  startedAt?: number;
+  /** Epoch ms it entered the queue. Earlier than `startedAt` whenever the
+   *  concurrency cap made it wait. */
+  queuedAt?: number;
+  /** Epoch ms of its last progress record — the only signal separating a slow
+   *  agent from a wedged one. */
+  lastProgressAt?: number;
   /** The head of what the agent returned. `done` only. */
   resultPreview?: string;
 }
@@ -485,7 +497,32 @@ export interface PermissionRequestPayload {
    * something other than what gets stored.
    */
   grantLabel?: string;
+  /**
+   * Where an "always allow" on this card may be stored.
+   *
+   * `"luno"` is always here when `grantLabel` is. The three file scopes appear
+   * only when the grant is eligible for one — a rule in a settings file means
+   * the CLI stops asking us at all, so anything our own destructive/network
+   * gate guards is offered LUNO-only. Absent entirely when no grant is on
+   * offer at all.
+   */
+  grantScopes?: GrantScope[];
+  /** Why the file scopes are missing, in words. The card says which case it is
+   *  rather than leaving an option quietly absent. */
+  grantScopeReason?: string;
 }
+
+/**
+ * Where a standing grant is stored.
+ *
+ * `"luno"` is `globalState`, where our own gate still runs on every call. The
+ * other three are the CLI's own settings files, where it does not: a rule there
+ * means the CLI never asks us about the call again.
+ *
+ * There is deliberately no `managed` — an administrator's policy file is not a
+ * target this extension has.
+ */
+export type GrantScope = "luno" | "project" | "local" | "user";
 
 /** How the user answered a permission prompt. */
 export type PermissionBehavior = "allow" | "deny";

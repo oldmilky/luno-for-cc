@@ -27,6 +27,8 @@ import { getToken } from "../../secrets.js";
 import { EFFORT_LADDERS } from "../../providers/claude-cli.js";
 import type { EffortLevel } from "../../providers/claude-cli.js";
 import type { Post } from "../messages.js";
+import { allowedModels } from "../../core/model-allowlist.js";
+import { modelPolicy } from "../../services/claude-settings.js";
 
 export type ModelGroup = "alias" | "version";
 
@@ -216,8 +218,24 @@ export class ModelResolver {
 
   /** Publish the list, then fill in concrete versions in the background. */
   async broadcast(): Promise<void> {
-    this.post({ type: "models", models: availableModels() });
+    this.post({ type: "models", models: this.permittedModels() });
     void this.resolveVersions();
+  }
+
+  /**
+   * The list after an administrator's `availableModels`.
+   *
+   * The audit's sharpest finding was that LUNO ignored this key, and ignoring
+   * an admin control is overriding it: the workplace said which models may be
+   * used and the picker offered every one anyway. Read fresh on each broadcast
+   * rather than cached — a policy file can change under a running window, and
+   * the wrong direction to be stale in is "still offering what is now
+   * forbidden".
+   */
+  private permittedModels(): ModelInfo[] {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const policy = modelPolicy(root);
+    return allowedModels(availableModels(), policy.availableModels);
   }
 
   /**

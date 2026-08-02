@@ -1,0 +1,361 @@
+// ─────────────────────────────────────────────────────────────
+// Background agents panel. Reads design tokens only.
+//
+// Shares StopAgentsModal's head/foot shape because it is the same
+// kind of surface, but takes the brand accent rather than `--err`:
+// this one reports on work, it does not end it.
+// ─────────────────────────────────────────────────────────────
+
+@use "../../themes/motion" as motion;
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--shadow-color) 30%, transparent);
+}
+
+.panel {
+  position: relative;
+  overflow: hidden;
+  width: 520px;
+  max-width: 92vw;
+  border: 1px solid var(--b2);
+  border-radius: var(--round-lg);
+  background: linear-gradient(to bottom, var(--s2), var(--s1));
+  box-shadow:
+    0 28px 70px color-mix(in srgb, var(--shadow-color) 60%, transparent),
+    0 0 0 1px var(--tint) inset,
+    0 0 40px -16px color-mix(in srgb, var(--accent) 35%, transparent);
+
+  // The panel takes focus on open so the keyboard reading position moves into
+  // the dialog, but it is not a control and cannot be tabbed to — Chrome still
+  // draws its default ring around the whole card, which reads as a selection.
+  // The controls inside keep theirs.
+  &:focus-visible {
+    outline: none;
+  }
+}
+
+.hairline {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 1px;
+  opacity: 0.6;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--accent),
+    transparent
+  );
+}
+
+// ── Head ─────────────────────────────────────────────────────
+
+.head {
+  padding: 20px 20px 16px;
+}
+
+.headRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.iconTile {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--round-lg);
+  background: var(--s3);
+  color: var(--t2);
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+}
+
+.iconTileLive {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.headText {
+  min-width: 0;
+  flex: 1;
+}
+
+.title {
+  margin: 0;
+  color: var(--t1);
+  font-size: 15.5px;
+  font-weight: 700;
+}
+
+.sub {
+  margin: 4px 0 0;
+  color: var(--t3);
+  font-size: 12.5px;
+}
+
+.stats {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.stat {
+  color: var(--t2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.statDot {
+  color: var(--t4);
+  font-size: 12px;
+}
+
+// The one number on this surface nobody measured. It reads dimmer than the two
+// facts beside it on purpose.
+.eta {
+  color: var(--t3);
+}
+
+// ── Progress ─────────────────────────────────────────────────
+
+.barRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.bar {
+  position: relative;
+  overflow: hidden;
+  flex: 1;
+  height: 6px;
+  border-radius: var(--round);
+  background: var(--s3);
+}
+
+.fill {
+  height: 100%;
+  border-radius: var(--round);
+  background: linear-gradient(to right, var(--accent-deep), var(--accent));
+  transition: width var(--motion-expand) var(--ease-out);
+}
+
+.barLabel {
+  flex-shrink: 0;
+  color: var(--t3);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+// ── The list ─────────────────────────────────────────────────
+
+// Scrolls inside itself rather than growing the dialog: a fleet of sixteen
+// agents in two phases is taller than a side panel.
+.body {
+  overflow-y: auto;
+  max-height: min(46vh, 420px);
+  padding: 4px 20px 12px;
+  border-top: 1px solid var(--b1);
+}
+
+.run + .run {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--b1);
+}
+
+.runHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 6px;
+}
+
+.runIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.runName {
+  flex-shrink: 0;
+  color: var(--t1);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.runDesc {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
+  color: var(--t3);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runMeta {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--t3);
+  font-size: 11px;
+}
+
+.note {
+  padding: 2px 0 6px 20px;
+  color: var(--t4);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.phase {
+  padding-left: 20px;
+}
+
+.phaseTitle {
+  padding: 6px 0 3px;
+  color: var(--t3);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.agent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+// Finished rows step back so the eye lands on what is still going — the only
+// thing on this surface anyone is waiting for.
+.agentDone {
+  opacity: 0.62;
+}
+
+.agentLabel {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
+  color: var(--t2);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentMeta {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--t4);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.mark {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  // `--t3`, not `--ok`: SubagentCard draws its finished tick the same muted
+  // way, and a green one here would make the two surfaces disagree about what
+  // "done" looks like.
+  color: var(--t3);
+}
+
+.markFailed {
+  color: var(--err);
+}
+
+.markInterrupted {
+  color: var(--warn);
+}
+
+.spinner {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--accent);
+  border-right-color: transparent;
+  border-radius: 50%;
+
+  @include motion.spin;
+}
+
+// ── Foot ─────────────────────────────────────────────────────
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--b1);
+  background: color-mix(in srgb, var(--s2) 40%, transparent);
+}
+
+.escHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t4);
+  font-size: 11.5px;
+}
+
+// Outlined rather than filled: it opens a confirmation, it does not stop
+// anything. The filled `--err` button is the one on the other side of that.
+.stopAll {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--err) 45%, transparent);
+  border-radius: var(--round-sm);
+  background: transparent;
+  color: var(--err);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    border-color: var(--err);
+    background: var(--err-soft);
+  }
+}
+
+.kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--b2);
+  border-radius: 4px;
+  background: var(--s3);
+  color: var(--t3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+}

@@ -21,6 +21,8 @@ import {
 import { PermissionMode, StreamDelta, TaskType } from "../core/types.js";
 import type { ToolGrant } from "../core/tool-grants.js";
 import { ConventionsFile } from "../services/conventions.js";
+import { ideEditorOps } from "../services/ide/editor.js";
+import { rejectAllPendingDiffs } from "../services/ide/diff-tabs.js";
 import { warn as logWarn } from "../services/logger.js";
 
 export interface ProviderContext {
@@ -45,6 +47,13 @@ export interface ProviderContext {
   /** Standing "always allow" grants, read per decision so one granted from a
    *  card silences the next call of the same turn. */
   getToolGrants?: () => ReadonlyArray<ToolGrant>;
+  /** Settings-shaped argv, present from construction so the bridge and the
+   *  first turn build the same command line. */
+  additionalDirectories?: string[];
+  fallbackModels?: string[];
+  maxBudgetUsd?: number;
+  sessionName?: string;
+  safeMode?: boolean;
   /** Told the CLI's slash-command list when a turn reports one. */
   onSlashCommands?: (names: string[]) => void;
   /** Auth token (OAuth or API key) injected into the CLI's environment. */
@@ -305,6 +314,16 @@ export function createProvider(ctx: ProviderContext): ClaudeCliProvider {
     editorContext: ctx.editorContext,
     getResumeSessionId: ctx.getResumeSessionId,
     getToolGrants: ctx.getToolGrants,
+    // Not on ProviderContext: the `ide` server is one per extension host, not
+    // one per conversation, so there is nothing for a caller to decide and no
+    // reason to thread it through five hops that could each drop it.
+    ideOps: ideEditorOps,
+    onAbortIdeWork: rejectAllPendingDiffs,
+    additionalDirectories: ctx.additionalDirectories,
+    fallbackModels: ctx.fallbackModels,
+    maxBudgetUsd: ctx.maxBudgetUsd,
+    sessionName: ctx.sessionName,
+    safeMode: ctx.safeMode,
     setResumeSessionId: ctx.setResumeSessionId,
     onSlashCommands: ctx.onSlashCommands,
     token: ctx.token,

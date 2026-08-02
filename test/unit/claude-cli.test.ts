@@ -30,6 +30,17 @@ import {
 } from "../../src/providers/claude-cli.js";
 import { SUPPORTED_DIALOG_KINDS } from "../../src/core/types.js";
 
+/** The values after `--allowedTools`, up to the next flag. */
+function allowedTools(args: string[]): string[] {
+  const i = args.indexOf("--allowedTools");
+  if (i === -1) return [];
+  const out: string[] = [];
+  for (let j = i + 1; j < args.length && !args[j].startsWith("--"); j++) {
+    out.push(args[j]);
+  }
+  return out;
+}
+
 describe("claude-cli mapEvent (single event)", () => {
   it("captures session_id from system/init", () => {
     const setResume = vi.fn();
@@ -392,8 +403,12 @@ describe("claude-cli buildArgs", () => {
     expect(toolIdx).toBeGreaterThan(-1);
     expect(args[toolIdx + 1]).toBe("stdio");
     // No blanket pre-allow: that belongs to Agent, and here the CLI is the one
-    // waving edits through.
-    expect(args).not.toContain("--allowedTools");
+    // waving edits through. Asserted on the contents rather than on the flag's
+    // absence — the `ide` server's read-only tools are pre-allowed in every
+    // mode that services approvals, and they are not a blanket.
+    for (const t of allowedTools(args)) {
+      expect(t.startsWith("mcp__luno_ide__")).toBe(true);
+    }
   });
 
   it("keeps the git ask routing in acceptEdits (git is not an edit)", () => {
@@ -418,14 +433,17 @@ describe("claude-cli buildArgs", () => {
     expect(args).toContain("plan");
   });
 
-  it("emits --allowedTools only in auto mode with bash patterns", () => {
+  it("pre-allows a bash pattern only in auto mode", () => {
+    // The allow-list the user maintains is Agent mode's, and nothing else may
+    // spend it. `default` still emits the flag — the `ide` tools ride in it —
+    // so this asserts on what is inside, which is the thing that matters.
     const noAllow = buildArgs("hi", "", {
       binary: "claude",
       cwd: "/tmp",
       permissionMode: "default",
       allowedBashPatterns: ["^npm test$"]
     });
-    expect(noAllow).not.toContain("--allowedTools");
+    expect(allowedTools(noAllow).some((t) => t.includes("Bash"))).toBe(false);
 
     const withAllow = buildArgs("hi", "", {
       binary: "claude",
@@ -434,7 +452,7 @@ describe("claude-cli buildArgs", () => {
       allowedBashPatterns: ["^npm test$"]
     });
     expect(withAllow).toContain("--allowedTools");
-    expect(withAllow.some((a) => a.includes("Bash"))).toBe(true);
+    expect(allowedTools(withAllow).some((t) => t.includes("Bash"))).toBe(true);
   });
 
   it("default mode routes approvals over the stream-json control channel", () => {

@@ -25,6 +25,7 @@ import { promisify } from "node:util";
 import * as vscode from "vscode";
 
 const execFileAsync = promisify(execFile);
+import { IDE_SERVER_NAME } from "../../core/ide-tools.js";
 import { CURATED_CATALOG, CatalogEntry } from "./catalog.js";
 import {
   ConnectionRecord,
@@ -968,7 +969,10 @@ export type CliServerEntry =
       command: string;
       args?: string[];
       env?: Record<string, string>;
-    };
+    }
+  /** In-process: no transport at all. The CLI drives it by sending
+   *  `mcp_message` control requests down the stdin it already holds. */
+  | { type: "sdk"; name: string };
 
 export interface CliMcpConfig {
   /** Absolute path to the JSON config; pass via `--mcp-config`. Undefined when
@@ -1068,14 +1072,19 @@ export async function writeCliMcpConfig(
     ])
   ];
 
-  if (own.length === 0) {
-    // Nothing to write, but managed names may still need pre-allowing.
-    if (serverNames.length === 0) return null;
-    return { serverNames, cleanup: async () => undefined };
-  }
-
   const mcpServers: Record<string, CliServerEntry> = {};
   for (const o of own) mcpServers[o.name] = o.entry;
+  // The editor server is always declared, whether or not the user has a single
+  // connector: these tools are ours, not something they connected. It is
+  // deliberately absent from `serverNames` — those become one blanket
+  // `mcp__<name>` pre-allow, and this one goes in per tool instead. See
+  // `ideAllowedToolPatterns()`.
+  //
+  // Written last so that a user connector sanitizing to the same name loses.
+  // The other order fails worse than it looks: `ideAllowedToolPatterns()` names
+  // this namespace literally, so a foreign server holding it would inherit an
+  // allowlist entry meant for us — a permission bug, not a missing feature.
+  mcpServers[IDE_SERVER_NAME] = { type: "sdk", name: IDE_SERVER_NAME };
 
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "luno-mcp-"));
   const file = path.join(dir, "mcp.json");

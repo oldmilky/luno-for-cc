@@ -172,6 +172,9 @@ const { ConversationRegistry } =
 
 let storage: string;
 
+let claudeHome = "";
+const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
+
 beforeEach(() => {
   spawned.length = 0;
   stream.deltas.length = 0;
@@ -182,10 +185,19 @@ beforeEach(() => {
   // what it starts *with*. Deliberately not a git repository: isolation is a
   // separate concern with its own file.
   folder.root = fs.mkdtempSync(path.join(os.tmpdir(), "luno-settings-ws-"));
+  // A conversation is now born with Claude's own preferences where LUNO has
+  // no explicit one, so without this the answer depends on whatever
+  // `~/.claude/settings.json` says on the machine running the suite — which is
+  // how these three started failing on a laptop with `defaultMode: auto`.
+  claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), "luno-settings-home-"));
+  process.env.CLAUDE_CONFIG_DIR = claudeHome;
 });
 
 afterEach(() => {
+  if (originalConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+  else process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
   fs.rmSync(storage, { recursive: true, force: true });
+  fs.rmSync(claudeHome, { recursive: true, force: true });
   fs.rmSync(folder.root, { recursive: true, force: true });
   folder.root = "";
 });

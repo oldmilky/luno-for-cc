@@ -146,6 +146,52 @@ export function harnessReplies(
       type: "toolGrants",
       grants: [{ tool: "Bash", prefix: "bun run" }, { tool: "Write" }]
     },
+    // One rule per source and one per kind, plus both failure notes — the
+    // combinations that decide how the list reads, which is the only way to
+    // check them without four settings files on the machine running the
+    // harness.
+    requestPermissionRules: {
+      type: "permissionRules",
+      rules: [
+        {
+          source: "managed",
+          kind: "deny",
+          rule: "Bash(curl:*)",
+          file: "C:\\Program Files\\ClaudeCode\\managed-settings.json",
+          line: 4
+        },
+        {
+          source: "project",
+          kind: "ask",
+          rule: "Bash(git push:*)",
+          file: "/work/app/.claude/settings.json",
+          line: 7
+        },
+        {
+          source: "local",
+          kind: "allow",
+          rule: "Bash(bun run lint)",
+          file: "/work/app/.claude/settings.local.json",
+          line: 3
+        },
+        {
+          source: "user",
+          kind: "allow",
+          rule: "mcp__context7__query-docs",
+          file: "/home/rodion/.claude/settings.json"
+        }
+      ],
+      unreadable: [
+        {
+          source: "project",
+          file: "/work/app/.claude/settings.json",
+          reason: "Unexpected token } in JSON at position 118"
+        }
+      ],
+      cannotRead: [
+        "Windows Group Policy (HKLM and HKCU \\SOFTWARE\\Policies\\ClaudeCode)"
+      ]
+    },
     requestTerminals: {
       type: "terminalList",
       id: "",

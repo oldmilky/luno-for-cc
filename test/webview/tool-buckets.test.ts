@@ -44,6 +44,21 @@ describe("classifyTool", () => {
     );
   });
 
+  // Measured against a real install: `mcp__luno_ide__openFile` moved the
+  // user's editor to another file and the timeline said "Read editor.ts",
+  // indistinguishable from a passive read — the generic `open` rule caught it.
+  it("keeps the focus-stealing editor tools out of the read bucket", () => {
+    expect(classifyTool("mcp__luno_ide__openFile")).toBe("editor");
+    expect(classifyTool("mcp__luno_ide__openDiff")).toBe("editor");
+  });
+
+  it("leaves the rest of the editor tools generic rather than calling them reads", () => {
+    expect(classifyTool("mcp__luno_ide__getOpenEditors")).toBe("other");
+    expect(classifyTool("mcp__luno_ide__getDiagnostics")).toBe("other");
+    expect(classifyTool("mcp__luno_ide__saveDocument")).toBe("other");
+    expect(classifyTool("mcp__luno_ide__closeAllDiffTabs")).toBe("other");
+  });
+
   it("treats a bash call with no/unparseable command as a generic run", () => {
     expect(classifyTool("Bash")).toBe("run");
     expect(classifyTool("Bash", "{bad json")).toBe("run");
@@ -65,6 +80,7 @@ describe("bucketMeta", () => {
   it("returns the verb/noun metadata for a bucket", () => {
     expect(bucketMeta("search").verb).toBe("Searched");
     expect(bucketMeta("edit").nounPlural).toBe("files");
+    expect(bucketMeta("editor").verb).toBe("Opened");
   });
 });
 

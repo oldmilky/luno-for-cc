@@ -42,6 +42,10 @@ interface HeaderProps {
   /** Background agents still running with the turn over. The CLI process
    *  outlives its turn, so the panel can be idle while the work is not. */
   agentsRunning: boolean;
+  /** How many of them, for the chip that says so. Same number the composer's
+   *  agents button carries — one count, or the two surfaces disagree. */
+  agentCount: number;
+  onOpenAgents: () => void;
   events: ReadonlyArray<TimelineEvent>;
   streaming: string;
   onOpenHistory: () => void;
@@ -79,6 +83,8 @@ export function Header({
   awaitingApproval,
   errored,
   agentsRunning,
+  agentCount,
+  onOpenAgents,
   events,
   streaming,
   onOpenHistory,
@@ -186,7 +192,7 @@ export function Header({
           />
           <IconButton
             icon="shield"
-            title="Standing permissions"
+            title="Permissions"
             size={28}
             onClick={onOpenPermissions}
           />
@@ -214,21 +220,69 @@ export function Header({
                 mutating in place — the word and its colour move together. */}
             <AnimatePresence mode="wait" initial={false}>
               <motion.span key={status} className={s.sessionStatus} {...SWAP}>
-                <Chip tone={LOOK[status].tone} pulse={status === "working"}>
-                  {LIVE.has(status) ? (
-                    // The rotation is the `spin` mixin's, in the stylesheet —
-                    // see the note there for why framer could not hold it.
-                    <span className={s.chipSpinner} />
-                  ) : (
-                    <Icon name={LOOK[status].icon as IconName} size={10} />
-                  )}
-                  {HEADER_LABEL[status]}
-                </Chip>
+                <StatusChip
+                  status={status}
+                  agentCount={agentCount}
+                  onOpenAgents={onOpenAgents}
+                />
               </motion.span>
             </AnimatePresence>
           </>
         )}
       </div>
     </header>
+  );
+}
+
+/**
+ * The conversation's state, as one chip.
+ *
+ * `agents` is the only one that is also a control. It says the same thing the
+ * composer's agents button says, so it opens the same panel rather than being
+ * a second, dimmer report of it — and it carries the count for the same reason
+ * the button does: "agents" alone leaves the one question people actually have
+ * unanswered.
+ *
+ * That count is why this diverges from `HEADER_LABEL`, which the history list
+ * shares. The list reads stored sessions and has no live number to show; the
+ * header does.
+ */
+function StatusChip({
+  status,
+  agentCount,
+  onOpenAgents
+}: {
+  status: ChatStatus;
+  agentCount: number;
+  onOpenAgents: () => void;
+}) {
+  const isAgents = status === "agents";
+  const chip = (
+    <Chip
+      tone={LOOK[status].tone}
+      pulse={status === "working"}
+      interactive={isAgents || undefined}
+      onClick={isAgents ? onOpenAgents : undefined}
+      aria-label={isAgents ? "Show background agents" : undefined}
+    >
+      {LIVE.has(status) ? (
+        // The rotation is the `spin` mixin's, in the stylesheet — see the note
+        // there for why framer could not hold it.
+        <span className={s.chipSpinner} />
+      ) : (
+        <Icon name={LOOK[status].icon as IconName} size={10} />
+      )}
+      {isAgents
+        ? `${agentCount} ${agentCount === 1 ? "agent" : "agents"}`
+        : HEADER_LABEL[status]}
+    </Chip>
+  );
+
+  return isAgents ? (
+    <Tooltip label="Still working in the background — open the panel">
+      {chip}
+    </Tooltip>
+  ) : (
+    chip
   );
 }

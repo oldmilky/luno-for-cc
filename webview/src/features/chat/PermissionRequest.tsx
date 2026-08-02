@@ -16,13 +16,19 @@
 //   • Always                 — a standing grant, kept until revoked. Only
 //                              offered when the host says one is available:
 //                              never for a destructive or network call.
+//                              Where it is kept is the picker beside it, and
+//                              the two answers differ in kind: LUNO's own
+//                              storage keeps our gate on the path, a settings
+//                              file takes it off — the CLI then stops asking
+//                              us about the call at all.
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ENTER_CARD } from "../../design/motion";
 import { motion } from "framer-motion";
-import type { PermissionRequestView } from "../../lib/rpc";
-import { Tooltip } from "../../design/primitives";
+import type { GrantScope, PermissionRequestView } from "../../lib/rpc";
+import { Dropdown, Tooltip } from "../../design/primitives";
+import { Icon } from "../../design/icons";
 import { extractFileEdits } from "./extract-file-edits";
 import { InlineEditPreview } from "./InlineEditPreview";
 import { QuestionRequest } from "./QuestionRequest";
@@ -42,6 +48,8 @@ interface PermissionRequestProps {
     opts?: {
       restOfTurn?: boolean;
       always?: boolean;
+      /** Where the standing grant goes. Absent means LUNO's own storage. */
+      alwaysScope?: GrantScope;
       /** Replaces the input the tool proposed. Filled for `AskUserQuestion`,
        *  whose answers ARE its input; and for an edited shell command. */
       updatedInput?: Record<string, unknown>;
@@ -161,6 +169,20 @@ export function PermissionRequest({
   // What the user typed to do instead of the call they are refusing.
   const [reason, setReason] = useState("");
 
+  // Where an "Always" would be kept. Defaults to LUNO's own storage — the one
+  // that keeps our destructive/network check on the path — so choosing nothing
+  // is choosing the safer of the two kinds.
+  const [scope, setScope] = useState<GrantScope>("luno");
+  const scopeOptions = useMemo(
+    () =>
+      (request.grantScopes ?? ["luno"]).map((value) => ({
+        value,
+        label: SCOPE_LABEL[value],
+        note: SCOPE_NOTE[value]
+      })),
+    [request.grantScopes]
+  );
+
   const deny = () => {
     // Skipping a question is not refusing an action. Denying said "the user
     // does not want this performed, do not attempt an alternative", and a live
@@ -176,7 +198,11 @@ export function PermissionRequest({
     }
     onRespond("deny", reason.trim() ? { reason } : undefined);
   };
-  const allow = (extra?: { restOfTurn?: boolean; always?: boolean }) =>
+  const allow = (extra?: {
+    restOfTurn?: boolean;
+    always?: boolean;
+    alwaysScope?: GrantScope;
+  }) =>
     onRespond("allow", {
       ...extra,
       ...(commandInput && { updatedInput: commandInput })
@@ -343,17 +369,38 @@ export function PermissionRequest({
             reads. Absent means there is none: a destructive or network call,
             or a command with no single prefix that describes it. */}
         {request.grantLabel && (
-          <Tooltip
-            label={`Never ask about ${request.grantLabel} again, in any project. Revoke from the shield in the header.`}
-          >
-            <button
-              type="button"
-              onClick={() => allow({ always: true })}
-              className={s.allowAlways}
-            >
-              Always
-            </button>
-          </Tooltip>
+          <div className={s.alwaysGroup}>
+            <Tooltip label={alwaysHint(request.grantLabel, scope)}>
+              <button
+                type="button"
+                onClick={() => allow({ always: true, alwaysScope: scope })}
+                className={s.allowAlways}
+              >
+                Always
+              </button>
+            </Tooltip>
+            {/* Only when there is a choice to make. One scope is not a picker,
+                it is a control that cannot be operated. */}
+            {scopeOptions.length > 1 && (
+              <Dropdown
+                options={scopeOptions}
+                value={scope}
+                onSelect={setScope}
+                align="right"
+                placement="above"
+                ariaLabel="Where to store this permission"
+                triggerClassName={s.scopeTrigger}
+                trigger={({ open }) => (
+                  <Icon name={open ? "chevronD" : "chevronU"} size={11} />
+                )}
+              />
+            )}
+          </div>
+        )}
+        {/* Said in words. An option that is simply not in the menu reads as an
+            option nobody thought of, which is the opposite of what happened. */}
+        {request.grantScopeReason && (
+          <span className={s.scopeNote}>{request.grantScopeReason}</span>
         )}
         {!questions && (
           <button
@@ -411,4 +458,30 @@ function stringify(v: unknown): string {
   } catch {
     return String(v);
   }
+}
+
+/** How each storage choice reads in the picker. */
+const SCOPE_LABEL: Record<GrantScope, string> = {
+  luno: "In LUNO only",
+  project: "This project, shared",
+  local: "This project, just me",
+  user: "Every project"
+};
+
+/** What choosing it actually means. The difference between the first and the
+ *  rest is not where a line of JSON lands — it is whether LUNO's own
+ *  destructive/network check still runs on the call. */
+const SCOPE_NOTE: Record<GrantScope, string> = {
+  luno: "LUNO keeps checking every call",
+  project: ".claude/settings.json — committed",
+  local: ".claude/settings.local.json — not committed",
+  user: "~/.claude/settings.json"
+};
+
+/** The tooltip on Always, which has to say where it is about to put this. */
+function alwaysHint(label: string, scope: GrantScope): string {
+  if (scope === "luno") {
+    return `Never ask about ${label} again. Kept in LUNO, which still checks every call for destructive or network access. Revoke from the shield in the header.`;
+  }
+  return `Never ask about ${label} again. Written to ${SCOPE_NOTE[scope]}, which the Claude CLI reads directly — it will stop asking LUNO about this call at all.`;
 }

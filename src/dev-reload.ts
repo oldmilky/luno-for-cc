@@ -5,7 +5,8 @@
 // extension-host code cannot: VS Code loads it once per extension
 // host process and offers no way to unload or re-require a module.
 // The closest thing to HMR is restarting just that process, which
-// is much cheaper than reloading the whole window — editors, the
+// is much cheaper than reloading the whole window
+// — editors, the
 // terminal and the rest of the workbench stay put.
 //
 // So: watch our own bundle, and when `bun run watch` rewrites it,

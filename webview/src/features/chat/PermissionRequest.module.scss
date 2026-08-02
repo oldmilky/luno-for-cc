@@ -12,7 +12,11 @@
 // ─────────────────────────────────────────────────────────────
 
 .card {
-  overflow: hidden;
+  // Deliberately NOT `overflow: hidden`, which is what it used to be. The
+  // scope picker opens upward out of the card, and this box clipped 84px of
+  // its menu — measured in the harness, not guessed. The clipping is now on
+  // the two children that actually reach the rounded corners, so the corners
+  // still read right and an overlay can leave the card.
   border: 1px solid var(--b2);
   // The 3px left edge is the whole risk signal — tone overrides only its color.
   border-left: 3px solid var(--accent);
@@ -263,6 +267,46 @@
   @extend %ghost;
   color: var(--t3);
   font-weight: 500;
+}
+
+// The button and its "where to" sit as one control: choosing a scope and then
+// pressing Always is a single decision, and a gap between them reads as two.
+.alwaysGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.scopeTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--round-sm);
+  background: transparent;
+  color: var(--t4);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
+// Why a settings file is not on offer here. Said in words, in the row, rather
+// than left to be inferred from a picker that did not appear.
+.scopeNote {
+  flex-basis: 100%;
+  order: 99;
+  margin-top: 6px;
+  color: var(--t4);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .allow {

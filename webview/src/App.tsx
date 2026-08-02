@@ -556,6 +556,7 @@ export function App() {
             behavior,
             restOfTurn: opts?.restOfTurn,
             always: opts?.always,
+            alwaysScope: opts?.alwaysScope,
             updatedInput: opts?.updatedInput,
             reason: opts?.reason
           });

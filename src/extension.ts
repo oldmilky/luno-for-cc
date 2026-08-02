@@ -4,6 +4,8 @@ import { generateConventionsCommand } from "./commands/init-conventions.js";
 import { registerDevAutoRestart } from "./dev-reload.js";
 import { registerOutputChannel, showLogs } from "./ui/output-channel.js";
 import { registerTerminalCapture } from "./ui/domains/terminal-capture.js";
+import { registerIdeSelectionTracker } from "./services/ide/editor.js";
+import { registerDiffTabs } from "./services/ide/diff-tabs.js";
 import { promptFromUri } from "./core/open-uri.js";
 
 export function activate(ctx: vscode.ExtensionContext) {
@@ -13,6 +15,14 @@ export function activate(ctx: vscode.ExtensionContext) {
   // Before the panel: a terminal command run during startup is one the user
   // may well be about to ask about.
   ctx.subscriptions.push(registerTerminalCapture());
+  // Likewise early: `getLatestSelection` can only answer about selections made
+  // after this is listening, and the first turn may ask about one made before
+  // the panel was ever opened.
+  ctx.subscriptions.push(registerIdeSelectionTracker());
+  // The proposed-diff scheme and its two title-bar commands. Without this
+  // `openDiff` has nowhere to put the proposal and no way for anyone to answer
+  // it — which is the one failure that parks a turn forever.
+  ctx.subscriptions.push(registerDiffTabs());
 
   const panel = new ChatPanelProvider(ctx);
   ctx.subscriptions.push(
@@ -44,7 +54,22 @@ export function activate(ctx: vscode.ExtensionContext) {
     vscode.commands.registerCommand("luno.openConnectors", () =>
       panel.openConnectors()
     ),
-    vscode.commands.registerCommand("luno.showLogs", () => showLogs())
+    vscode.commands.registerCommand("luno.showLogs", () => showLogs()),
+    // A support switch, next to Show Logs and for the same reason: when
+    // something misbehaves, this is how you tell a broken setup from a broken
+    // extension. Takes effect on the next message rather than immediately —
+    // the flag reaches the CLI at spawn, and replacing a live process would
+    // take any running agent down with it.
+    vscode.commands.registerCommand("luno.toggleSafeMode", async () => {
+      const config = vscode.workspace.getConfiguration("luno");
+      const next = !config.get<boolean>("safeMode", false);
+      await config.update("safeMode", next, true);
+      void vscode.window.showInformationMessage(
+        next
+          ? "LUNO safe mode is ON — the next message runs with CLAUDE.md, skills, hooks and MCP servers all disabled."
+          : "LUNO safe mode is OFF — your customizations are back on the next message."
+      );
+    })
   );
 
   // `vscode://<publisher>.<name>/open?prompt=…` — the integration path other

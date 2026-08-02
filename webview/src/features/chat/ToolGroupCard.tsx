@@ -132,7 +132,7 @@ export function ToolGroupCard({ bucket, items }: ToolGroupCardProps) {
 function shortTarget(item: ToolGroupItem): string {
   try {
     const obj = JSON.parse(item.input) as Record<string, unknown>;
-    const path = obj.path ?? obj.file_path ?? obj.filePath;
+    const path = obj.path ?? obj.file_path ?? obj.filePath ?? obj.new_file_path;
     if (typeof path === "string" && path) return shortenPath(path);
     const cmd = obj.command;
     if (typeof cmd === "string" && cmd)
