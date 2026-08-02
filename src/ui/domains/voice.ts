@@ -10,7 +10,9 @@
 // file to be tested.
 // ─────────────────────────────────────────────────────────────
 
+import * as vscode from "vscode";
 import { noBackendMessage } from "../../core/voice/backends.js";
+import { voiceLanguage } from "../../core/voice/language.js";
 import { resolveOAuthToken } from "../../services/oauth-usage.js";
 import { readSetting } from "../../services/claude-settings.js";
 import {
@@ -35,6 +37,8 @@ export type VoiceMessageOut =
       committed: string;
       interim: string;
       error?: string;
+      /** What it is listening for, so the panel can say so. */
+      language?: string;
     }
   | { type: "voiceLevel"; level: number };
 
@@ -71,14 +75,19 @@ export class VoiceSession {
 
     // Read at the start of each dictation rather than cached: a user who sets
     // their language does not expect to reload the window for it.
-    const language = readSetting("language", this.ctx.workspaceRoot);
+    const language = voiceLanguage({
+      configured: vscode.workspace
+        .getConfiguration("luno")
+        .get<string>("voiceLanguage"),
+      claude: readSetting("language", this.ctx.workspaceRoot)
+    });
 
     this.running = startDictation(
       {
         token,
         source: new SubprocessAudioSource(capture),
         connect: connectVoiceSocket,
-        language: typeof language === "string" ? language : undefined,
+        language,
         keyterms: this.ctx.keyterms
       },
       {
@@ -87,7 +96,8 @@ export class VoiceSession {
             type: "voice",
             phase: "listening",
             committed: state.committed,
-            interim: state.interim
+            interim: state.interim,
+            language
           }),
         onLevel: (level) => this.ctx.post({ type: "voiceLevel", level }),
         onEnd: (outcome) => {
@@ -109,7 +119,8 @@ export class VoiceSession {
       type: "voice",
       phase: "listening",
       committed: "",
-      interim: ""
+      interim: "",
+      language
     });
   }
 

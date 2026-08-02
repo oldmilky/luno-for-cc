@@ -426,6 +426,7 @@ export function App() {
             committed: m.committed,
             interim: m.interim,
             error: m.error,
+            language: m.language,
             // The level keeps its last value across a text update: the two
             // messages are independent and reading zero between them would
             // make the meter stutter at the frame rate of the transcript.

@@ -5,6 +5,8 @@ export interface VoiceState {
   committed: string;
   interim: string;
   error?: string;
+  /** What the host is listening for, e.g. "ru". */
+  language?: string;
   /** 0…1. Zero whenever nothing is listening, so the meter rests flat. */
   level: number;
 }

@@ -829,6 +829,9 @@ export type Inbound =
       interim: string;
       /** Said out loud in the composer. Absent when nothing went wrong. */
       error?: string;
+      /** The code being listened for. Shown in the strip so a transcript in
+       *  the wrong language has a visible cause rather than looking broken. */
+      language?: string;
     }
   /** Its own message because of its rate — twenty a second, and it carries no
    *  state anything else depends on. */

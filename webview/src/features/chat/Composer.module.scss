@@ -164,6 +164,12 @@
   width: 100%;
 }
 
+// Room for the microphone in the corner. Only when there is one: the inline
+// edit composer has no dictation and should not carry the gap.
+.editorAreaMic {
+  padding-right: 30px;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -359,9 +365,23 @@
 }
 
 .micBtn {
-  @extend %toolbar-button;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   border: 0;
+  border-radius: var(--round-sm);
+  background: transparent;
   color: var(--t3);
+  cursor: pointer;
+  transition:
+    color var(--motion-hover) var(--ease-out),
+    background var(--motion-hover) var(--ease-out);
 
   &:hover {
     background: var(--s3);

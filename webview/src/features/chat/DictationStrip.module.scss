@@ -67,3 +67,18 @@
   color: var(--err);
   padding-top: 2px;
 }
+
+// Only rendered when dictation is listening for something other than English:
+// a transcript in the wrong language then has a visible cause instead of
+// looking like the recogniser failing.
+.language {
+  flex: none;
+  align-self: center;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 1px 4px;
+  border-radius: var(--round-sm);
+  background: var(--s3);
+  color: var(--t2);
+}

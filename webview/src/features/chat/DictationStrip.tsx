@@ -21,6 +21,9 @@ export interface DictationStripProps {
   committed: string;
   interim: string;
   error?: string;
+  /** The code being listened for. Shown only when it is not English, because
+   *  a label that never changes is furniture. */
+  language?: string;
   /** 0…1, twenty times a second while a device is open. */
   level: number;
 }
@@ -30,6 +33,7 @@ export function DictationStrip({
   committed,
   interim,
   error,
+  language,
   level
 }: DictationStripProps) {
   const said = committed.trim();
@@ -53,6 +57,9 @@ export function DictationStrip({
       ) : (
         <>
           <Meter level={listening ? level : 0} />
+          {language && language !== "en" && (
+            <span className={s.language}>{language.toUpperCase()}</span>
+          )}
           {said || saying ? (
             <span className={s.text}>
               {said}

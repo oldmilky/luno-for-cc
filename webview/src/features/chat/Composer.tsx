@@ -557,7 +557,7 @@ export function Composer({
       </AnimatePresence>
 
       <div
-        className={s.editorArea}
+        className={`${s.editorArea}${voice && !inline ? ` ${s.editorAreaMic}` : ""}`}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
       >
@@ -581,6 +581,30 @@ export function Composer({
           onImagePaste={addImageAttachments}
         />
       </div>
+      {/* Inside the input, not in the toolbar below it: dictation fills this
+          box, and the control that fills it belongs where the text goes.
+          Listening turns it into a stop — one control, two states, so a
+          recording can never be started twice or left with no way out. */}
+      {voice && !inline && (
+        <Tooltip
+          label={voice.listening ? "Stop dictation" : "Dictate a message"}
+        >
+          <button
+            type="button"
+            className={`${s.micBtn}${
+              voice.listening ? ` ${s.micBtnLive}` : ""
+            }`}
+            onClick={() => {
+              if (voice.error) onDismissVoiceError?.();
+              send({ type: voice.listening ? "voiceStop" : "voiceStart" });
+            }}
+            aria-label={voice.listening ? "Stop dictation" : "Dictate"}
+            aria-pressed={voice.listening}
+          >
+            <Icon name={voice.listening ? "stop" : "mic"} size={14} />
+          </button>
+        </Tooltip>
+      )}
 
       <AnimatePresence>
         {voice && (voice.listening || voice.error) && (
@@ -590,6 +614,7 @@ export function Composer({
               committed={voice.committed}
               interim={voice.interim}
               error={voice.error}
+              language={voice.language}
               level={voice.level}
             />
           </div>
@@ -726,29 +751,6 @@ export function Composer({
                 aria-label="Cancel"
               >
                 <Icon name="stop" size={11} />
-              </button>
-            </Tooltip>
-          )}
-          {/* Left of send, because it is the other way to fill the same box.
-              Listening turns it into a stop: one control, two states, so a
-              recording can never be started twice or left with no way out. */}
-          {voice && (
-            <Tooltip
-              label={voice.listening ? "Stop dictation" : "Dictate a message"}
-            >
-              <button
-                type="button"
-                className={`${s.micBtn}${
-                  voice.listening ? ` ${s.micBtnLive}` : ""
-                }`}
-                onClick={() => {
-                  if (voice.error) onDismissVoiceError?.();
-                  send({ type: voice.listening ? "voiceStop" : "voiceStart" });
-                }}
-                aria-label={voice.listening ? "Stop dictation" : "Dictate"}
-                aria-pressed={voice.listening}
-              >
-                <Icon name={voice.listening ? "stop" : "mic"} size={13} />
               </button>
             </Tooltip>
           )}
