@@ -1,8 +1,8 @@
 {
   "name": "luno-for-cc",
-  "displayName": "LUNO for Claude Code",
+  "displayName": "LUNO for CC",
   "description": "The full Claude Code agent in a native side panel — multi-file edits, a permission gate you control, and plan review. Runs on your Claude subscription: no API key, no per-token billing.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "lunoweb",
   "license": "MIT",
   "icon": "assets/luno-icon-500.png",

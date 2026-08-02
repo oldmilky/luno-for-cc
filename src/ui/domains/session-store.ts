@@ -167,17 +167,23 @@ export class SessionStore {
   scheduleSave(): void {
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
-      void this.history.save({
-        id: this.session.id,
-        title: deriveTitle(this.session.timeline),
-        name: this.name,
-        createdAt: this.session.createdAt,
-        updatedAt: Date.now(),
-        messages: this.session.messages,
-        timeline: this.session.timeline,
-        resumeId: this.resumeId,
-        ...this.settingsFor()
-      });
+      // A debounced write fires with no caller left to reject to. Unhandled, it
+      // reaches the extension host's rejection channel — and under test it lands
+      // after the temp storage is gone, failing a run whose every test passed.
+      // Dropping one costs nothing: the next timeline event schedules another.
+      this.history
+        .save({
+          id: this.session.id,
+          title: deriveTitle(this.session.timeline),
+          name: this.name,
+          createdAt: this.session.createdAt,
+          updatedAt: Date.now(),
+          messages: this.session.messages,
+          timeline: this.session.timeline,
+          resumeId: this.resumeId,
+          ...this.settingsFor()
+        })
+        .catch(() => undefined);
     }, SAVE_DEBOUNCE_MS);
   }
 
