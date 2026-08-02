@@ -58,3 +58,8 @@ docs/WORKFLOW-AGENTS-PANEL.md
 
 # Live probes and throwaway scripts — re-runnable, never shipped.
 scratch/
+
+# Recorders downloaded from a CI run to test a package locally. Built by
+# `.github/workflows/native.yml` for every release and never committed: a
+# binary in git is one nobody can prove came from the source beside it.
+resources/audio/
