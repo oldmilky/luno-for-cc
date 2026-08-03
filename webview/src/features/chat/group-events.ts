@@ -12,8 +12,12 @@ import type { TimelineEvent, SubagentTaskView } from "../../lib/rpc";
 import { ToolGroupItem } from "./ToolGroupCard";
 import { foldQuestions, type AskedQuestionView } from "./question-log";
 import { classifyTool, ToolBucket } from "./tool-buckets";
-import { foldPlanState, looksLikePlanFile } from "../plan";
-import type { PlanRevisionView } from "../plan";
+// Straight at the modules, not through `../plan`: that barrel re-exports
+// components, and one SCSS import anywhere in the chain puts this module out
+// of reach of the node test project — which is the whole reason it was lifted
+// out of ChatScreen.
+import { foldPlanState, looksLikePlanFile } from "../plan/foldPlanState";
+import type { PlanRevisionView } from "../plan/types";
 import {
   TASK_TOOL_NAMES,
   foldSubagents,
