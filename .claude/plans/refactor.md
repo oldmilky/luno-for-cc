@@ -204,12 +204,39 @@ because `package` cannot exercise a spawn.
 
 ---
 
-## Phase 3 — `conversation-host.ts` (pure move, large, harder)
+## Phase 3 — `conversation-host.ts` — PART DONE 2026-08-04, PART RE-CUT
 
-3190 lines. Two things dominate and neither was a candidate for the
-`ui/domains/` pattern that already holds 20 files.
+Landed: `conversation-format.ts` (102) and `prompt-attachments.ts` (96) — the
+pure module-level tail, out of the class it never belonged to. 3189 → 3025.
+Gates unchanged: 1508 / 6, lint exit 0 at 35 warnings, package 1.28 MB.
 
-### 3a. The handler table — ~528 lines, out of the class
+> **3a was NOT done, on this file's own instruction.** The rule below —
+> "if the extracted interface needs more than ~8 members, that is the signal
+> the seam is in the wrong place; stop and re-cut" — was written for 3b and
+> applies here first. Measured before starting: the table touches **32 distinct
+> class members across 128 references**, most of them private. Moving it would
+> mean either publishing 32 members or hand-writing a 32-entry bridge that is
+> the class re-declared. Neither is a seam; both are ceremony with a typo
+> surface.
+>
+> What the table actually is, measured: **75 entries in 527 lines**, of which 37
+> are ≤4 lines and hold 102 lines between them — genuine routing, correct where
+> it is. The bulk sits in **13 entries of 10+ lines holding 246 lines, 47% of
+> the table**: `permissionResponse` 59, `toggleRemoteControl` 28,
+> `setPermissionMode` 27, `requestArtifactState` 17.
+>
+> **So the problem is not that the table is in the class — it is that logic got
+> written inside a routing manifest.** The right move is to push those 13
+> bodies down into `ui/domains/`, which already holds 20 modules taking explicit
+> params (`removeCustomConnector(post, ctx, id)`) rather than a host. That is
+> real work with real judgement per entry, not a mechanical lift, and it is
+> what 3a should have said. Re-scoped rather than performed blind.
+>
+> Also dropped: "`html()` → `src/ui/webview-html.ts`". That module already
+> exists and `html()` is a 7-line delegation to it. The plan asked for work
+> that had been done before the plan was written.
+
+### 3a (as originally written — kept for the reasoning, not the instruction)
 
 Lines 1402–1918. Most entries are three-line adapters that validate `RawMessage`
 fields and delegate to a `ui/domains/` function; 105 `this.` references means

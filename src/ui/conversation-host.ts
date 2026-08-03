@@ -4,14 +4,11 @@ import {
   error as logError
 } from "../services/logger.js";
 import * as vscode from "vscode";
-import * as fs from "node:fs";
 import * as path from "node:path";
-import * as crypto from "node:crypto";
 import { Session } from "../core/session.js";
 import { Orchestrator } from "../core/orchestrator.js";
 import { DeltaQueue } from "../core/delta-queue.js";
 import {
-  CompactionInfo,
   isTerminalTaskStatus,
   isWorkflowTask,
   PermissionMode,
@@ -60,6 +57,16 @@ import {
 import { PlanDecorationService } from "../services/plan-decorations.js";
 import { PlanArtifactManager } from "./plan-artifact-panel.js";
 import { buildWebviewHtml } from "./webview-html.js";
+import {
+  asStringArray,
+  cleanSelection,
+  compactionSummary,
+  forkName,
+  stripUndefined,
+  subagentTitle,
+  worktreeName
+} from "./conversation-format.js";
+import { extractInlineImages } from "./prompt-attachments.js";
 import {
   arr,
   bool,
@@ -2994,176 +3001,6 @@ function defaultSettings(): ConversationSettings {
     // choice per conversation rather than the shape every new one is born in.
     ultracode: false
   };
-}
-
-function worktreeName(sessionId: string): string {
-  return `luno-${sessionId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8)}`;
-}
-
-/**
- * One line explaining what the fold cost.
- *
- * Says which way it was triggered because the two mean different things to the
- * user: one they asked for, the other happened to them and explains why the
- * agent no longer remembers the start of the conversation.
- */
-function compactionSummary(info: CompactionInfo | undefined): string {
-  const how =
-    info?.trigger === "auto"
-      ? "The context filled up, so earlier messages were folded into a summary."
-      : "Earlier messages were folded into a summary.";
-
-  const { preTokens, postTokens } = info ?? {};
-  if (typeof preTokens === "number" && typeof postTokens === "number") {
-    return `${how} ${fmtTokens(preTokens)} → ${fmtTokens(postTokens)} tokens.`;
-  }
-  return how;
-}
-
-/**
- * What the card is called. The agent type is the useful half — "Explore",
- * "code-reviewer" — and it is what the user recognises from `.claude/agents/`.
- *
- * A workflow has no agent type to name, so it is called by its script's
- * `meta.name` instead. Without the branch every workflow rendered as the bare
- * word "Agent", which is both wrong and indistinguishable from the next one.
- */
-function subagentTitle(task: SubagentUpdate): string {
-  if (isWorkflowTask(task.taskType)) {
-    return task.workflowName ? `Workflow: ${task.workflowName}` : "Workflow";
-  }
-  return task.subagentType ? `Agent: ${task.subagentType}` : "Agent";
-}
-
-/**
- * Drop keys whose value is `undefined` so a later phase cannot erase what an
- * earlier one established.
- *
- * Spreading the raw update would: `task_updated` carries neither `toolUseId`
- * nor `description`, and object spread copies an explicit `undefined` over a
- * real value. The card would lose the agent it belongs to halfway through.
- */
-function stripUndefined<T extends object>(value: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(value).filter(([, v]) => v !== undefined)
-  ) as Partial<T>;
-}
-
-function asStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1000)}k`;
-  return String(n);
-}
-
-/**
- * What a rewind's safety copy is called in the history list.
- *
- * Named rather than left to the derived title: the fork and the chat it came
- * from open with the same first prompt, so without this the list shows two rows
- * that read identically and the user has to open both to tell which is which.
- */
-function forkName(
-  current: string | undefined,
-  timeline: ReadonlyArray<{ kind: string }>
-): string {
-  const base = current ?? "Chat";
-  const turns = timeline.filter((e) => e.kind === "user").length;
-  return `${base} — before rewind (${turns} messages)`;
-}
-
-/** Strip stray slash prefixes and trailing whitespace from a captured selection. */
-function cleanSelection(raw: string): string {
-  // Drop a leading line that is purely a slash command (e.g. "/explain").
-  const lines = raw.split(/\r?\n/);
-  if (lines.length && /^\s*\/\S/.test(lines[0]) && !lines[0].includes("//")) {
-    lines.shift();
-  }
-  // Trim trailing blank lines but keep interior whitespace.
-  while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
-  return lines.join("\n");
-}
-
-// ── Prompt attachments ───────────────────────────────────────
-
-const INLINE_DATA_IMAGE_RE =
-  /!\[([^\]]*)\]\(data:image\/([a-zA-Z0-9+.-]+);base64,([A-Za-z0-9+/=]+)\)/g;
-
-/**
- * Strip inline `![name](data:image/...;base64,...)` blobs out of a prompt by
- * writing them to disk under `<workspace>/.luno/attachments/` and replacing
- * the markdown with a relative path reference. Without this, dropping a
- * screenshot into the composer puts a multi-MB base64 string into the prompt
- * text — and the CLI rejects the turn with "Prompt is too long".
- *
- * The rewritten message:
- *   1. Stays small (a relative path instead of base64) so it fits the token
- *      budget and serializes cleanly into the session timeline.
- *   2. Points at a real file in the workspace so the agent's Read tool can
- *      view the image directly.
- *
- * `.luno/` is added to the workspace `.gitignore` on first use so users
- * don't accidentally commit the temp attachments.
- */
-async function extractInlineImages(
-  prompt: string,
-  workspaceRoot: string
-): Promise<string> {
-  if (!INLINE_DATA_IMAGE_RE.test(prompt)) return prompt;
-  INLINE_DATA_IMAGE_RE.lastIndex = 0;
-
-  const attachmentsDir = path.join(workspaceRoot, ".luno", "attachments");
-  await fs.promises.mkdir(attachmentsDir, { recursive: true });
-  await ensureLunoGitignore(workspaceRoot);
-
-  // Walk all matches synchronously, queue the writes, then splice the prompt
-  // in one pass. Doing the writes off the regex iteration keeps replacement
-  // bookkeeping simple.
-  const matches: Array<{
-    full: string;
-    name: string;
-    relPath: string;
-    buffer: Buffer;
-  }> = [];
-  let m: RegExpExecArray | null;
-  while ((m = INLINE_DATA_IMAGE_RE.exec(prompt)) !== null) {
-    const [full, rawName, ext, base64] = m;
-    const buffer = Buffer.from(base64, "base64");
-    const id = crypto.randomBytes(6).toString("hex");
-    const safeExt = ext.toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
-    const fileName = `${id}.${safeExt}`;
-    const absPath = path.join(attachmentsDir, fileName);
-    await fs.promises.writeFile(absPath, buffer);
-    const relPath = path.posix.join(".luno", "attachments", fileName);
-    matches.push({ full, name: rawName || fileName, relPath, buffer });
-  }
-
-  let out = prompt;
-  for (const mt of matches) {
-    out = out.replace(mt.full, `![${mt.name}](${mt.relPath})`);
-  }
-  return out;
-}
-
-async function ensureLunoGitignore(workspaceRoot: string): Promise<void> {
-  const gitignorePath = path.join(workspaceRoot, ".gitignore");
-  try {
-    const existing = await fs.promises.readFile(gitignorePath, "utf8");
-    if (/^\.luno\/?\s*$/m.test(existing)) return;
-    const sep = existing.endsWith("\n") ? "" : "\n";
-    await fs.promises.appendFile(gitignorePath, `${sep}.luno/\n`);
-  } catch {
-    // No .gitignore yet (or read failed) — create one. Best-effort; ignore
-    // write failures (read-only FS, permissions, etc.).
-    try {
-      await fs.promises.writeFile(gitignorePath, ".luno/\n");
-    } catch {
-      /* swallow */
-    }
-  }
 }
 
 /**
