@@ -37,7 +37,7 @@ export function bundledRecorderPath(extensionPath: string): string | null {
   if (!slot) return null;
   return path.join(
     extensionPath,
-    "resources",
+    "external",
     "audio",
     slot,
     recorderFileName(process.platform)

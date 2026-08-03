@@ -60,7 +60,7 @@ export const AUDIO_SLOTS = [
 
 export type AudioSlot = (typeof AUDIO_SLOTS)[number];
 
-/** Where in `resources/audio` this machine's recorder would be, or null when
+/** Where in `external/audio` this machine's recorder would be, or null when
  *  the extension carries none for it. */
 export function audioSlotFor(
   platform: NodeJS.Platform,

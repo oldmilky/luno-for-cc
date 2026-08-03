@@ -27,7 +27,7 @@ export default tseslint.config(
       "**/*.vsix",
       // Throwaway probes and their output. Gitignored, never shipped, and a
       // bundle dropped here would otherwise be linted line by minified line.
-      "scratch/**"
+      "external/scratch/**"
     ]
   },
 

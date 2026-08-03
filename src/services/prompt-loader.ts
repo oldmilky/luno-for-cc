@@ -7,22 +7,22 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import commonMd from "../../prompts/common.md";
-import planModeMd from "../../prompts/plan-mode.md";
-import defaultModeMd from "../../prompts/default-mode.md";
-import autoModeMd from "../../prompts/auto-mode.md";
-import acceptEditsModeMd from "../../prompts/accept-edits-mode.md";
-import bypassModeMd from "../../prompts/bypass-mode.md";
-import backendMd from "../../prompts/task-types/backend.md";
-import frontendMd from "../../prompts/task-types/frontend.md";
-import fullstackMd from "../../prompts/task-types/fullstack.md";
-import devopsMd from "../../prompts/task-types/devops.md";
-import integrationMd from "../../prompts/task-types/integration.md";
-import docsDrivenMd from "../../prompts/task-types/docs-driven.md";
-import refactorMd from "../../prompts/task-types/refactor.md";
-import bugfixMd from "../../prompts/task-types/bugfix.md";
-import migrationMd from "../../prompts/task-types/migration.md";
-import newImplMd from "../../prompts/task-types/new-impl.md";
+import commonMd from "../prompts/common.md";
+import planModeMd from "../prompts/plan-mode.md";
+import defaultModeMd from "../prompts/default-mode.md";
+import autoModeMd from "../prompts/auto-mode.md";
+import acceptEditsModeMd from "../prompts/accept-edits-mode.md";
+import bypassModeMd from "../prompts/bypass-mode.md";
+import backendMd from "../prompts/task-types/backend.md";
+import frontendMd from "../prompts/task-types/frontend.md";
+import fullstackMd from "../prompts/task-types/fullstack.md";
+import devopsMd from "../prompts/task-types/devops.md";
+import integrationMd from "../prompts/task-types/integration.md";
+import docsDrivenMd from "../prompts/task-types/docs-driven.md";
+import refactorMd from "../prompts/task-types/refactor.md";
+import bugfixMd from "../prompts/task-types/bugfix.md";
+import migrationMd from "../prompts/task-types/migration.md";
+import newImplMd from "../prompts/task-types/new-impl.md";
 
 import { PermissionMode, TaskType } from "../core/types.js";
 

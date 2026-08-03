@@ -28,14 +28,14 @@ jobs:
       - uses: actions/checkout@v4
 
       # Every slot under one directory, laid out exactly as the extension
-      # looks for them: resources/audio/<platform>-<arch>/luno-audio.
+      # looks for them: external/audio/<platform>-<arch>/luno-audio.
       - uses: actions/download-artifact@v4
         with:
           pattern: audio-*
-          path: resources/audio
+          path: external/audio
       - name: Name the slots
         run: |
-          cd resources/audio
+          cd external/audio
           for dir in audio-*; do mv "$dir" "${dir#audio-}"; done
           chmod +x */luno-audio 2>/dev/null || true
           ls -laR .

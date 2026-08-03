@@ -13,7 +13,7 @@ on:
   workflow_call:
   push:
     paths:
-      - "native/**"
+      - "external/native/**"
       - ".github/workflows/native.yml"
 
 jobs:
@@ -60,20 +60,20 @@ jobs:
           sudo apt-get install -y libasound2-dev
 
       - name: Build
-        working-directory: native/luno-audio
+        working-directory: external/native/luno-audio
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Collect
         shell: bash
         run: |
-          slot="resources/audio/${{ matrix.slot }}"
+          slot="external/audio/${{ matrix.slot }}"
           mkdir -p "$slot"
-          src="native/luno-audio/target/${{ matrix.target }}/release/luno-audio"
+          src="external/native/luno-audio/target/${{ matrix.target }}/release/luno-audio"
           if [ -f "$src.exe" ]; then cp "$src.exe" "$slot/luno-audio.exe"; else cp "$src" "$slot/luno-audio"; fi
           ls -la "$slot"
 
       - uses: actions/upload-artifact@v4
         with:
           name: audio-${{ matrix.slot }}
-          path: resources/audio/${{ matrix.slot }}/*
+          path: external/audio/${{ matrix.slot }}/*
           if-no-files-found: error

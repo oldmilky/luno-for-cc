@@ -70,14 +70,15 @@ TESTING.md
 # screenshot inside 0.22.2 before this line existed.
 .luno/
 
-# Scratch left in the repo root by probe agents reading the CLI binary. Not
-# gitignored either, and vsce reads this file rather than .gitignore — it
-# swept 14 files and 107 kB of probe output into 0.31.0 before this line.
+# Scratch left in the repo root by probe agents reading the CLI binary. vsce
+# reads this file rather than .gitignore, so the .gitignore entry does not
+# cover it — it swept 14 files and 107 kB of probe output into 0.31.0 before
+# this line.
 .tmp-cli-probe/
 
-# Live probes and throwaway scripts — never shipped.
-scratch/**
-# The Rust source for the microphone recorder. The built binaries under
-# `resources/audio/**` ship; the crate that produced them is dev-only, and
-# `**/*.rs` would not catch Cargo.toml or the lockfile.
-native/**
+# Everything under external/ that is not the recorders themselves. The built
+# binaries in `external/audio/**` ship and are what the panel spawns; the crate
+# that produced them and the throwaway probes beside it are dev-only, and
+# `**/*.rs` would not catch Cargo.toml or the lockfile anyway.
+external/native/**
+external/scratch/**
