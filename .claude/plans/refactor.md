@@ -179,20 +179,24 @@ Splitting test files does not change the test count. **1508 / 6 must hold
 exactly**, and here it is a strong signal rather than a weak one: 5200 lines of
 existing tests are watching the whole move.
 
-### Then, and only then: the control channel
+### Then, and only then: the control channel — NOT DONE, and correctly so
 
-[`handleControlRequest`](../../src/providers/claude-cli.ts#L1052) is 622 lines —
-the largest function in the repository — and it is three unrelated paths behind
-one entry point. The first two already delegate (`request_user_dialog` →
-`raiseUserDialog`, `mcp_message` → `answerMcpMessage`); the remaining ~600 lines
-are the `can_use_tool` path inline.
+This step was planned on a wrong number. `handleControlRequest` was called 622
+lines; **it is 109**, and the audit now carries the correction and the reason
+(a member regex that cannot see `async *stream(`, so two generator methods went
+uncounted and their lines were attributed to the method above them).
 
-Extract that path to its own method first — a mechanical, reviewable step that
-takes the file under 1500 lines on its own. Whether the channel then becomes a
-`ControlChannel` class owning `pendingControls` / `sendControl` /
-`resolveControl` / the id counter and timeouts is a **decision to take after
-seeing the extracted method**, not before. The project map nominates this seam;
-it does not yet know its shape, and neither do I.
+At 109 lines with three clearly separated paths it needs nothing. The step was
+dropped rather than performed, which is the whole value of having written
+"a decision to take after seeing the extracted method" instead of committing to
+the extraction up front.
+
+**What the provider's remaining 2143 lines actually are**, measured with
+generators visible: `stream` 374 · `ensureSession` 258 · `streamInSession` 139.
+The two stream generators are the real seam — and they are the same shape of
+problem as `conversation-host.ts`'s turn loop in Phase 3b: stateful, long, and
+duplicated between a session path and a per-turn path. Worth doing **with** 3b
+rather than before it, so one decision covers both. Not scheduled here.
 
 **Size:** large. **Risk:** low _for its size_ — the seam is proven by the test
 layer. **Evidence:** the three gates, plus a manual turn in the real extension

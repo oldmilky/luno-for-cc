@@ -36,9 +36,27 @@ a factor of 1.4 and holds six things that do not depend on each other.
 Only #3 and #6 are actually a "CLI provider". Roughly **2000 lines are pure
 functions** that need no child process, no VS Code, no filesystem.
 
-**The single largest function in the repository** is
-[`handleControlRequest`](src/providers/claude-cli.ts#L1052) — 622 lines, one
-method, from line 1052 to the next member at 1674. Others worth naming:
+> **CORRECTION, 2026-08-04.** This section originally called
+> `handleControlRequest` "the single largest function in the repository — 622
+> lines". **It is 109 lines.** The 622 came from a grep whose member pattern
+> was `^ {2}(private )?(async )?[a-zA-Z_]`, which cannot match `async *stream(`
+> — the `*`. Both generator methods were therefore invisible, and the
+> measurement ran from `handleControlRequest` straight past them to the next
+> member it could see, swallowing `stream` (374 lines) and `streamInSession`
+> (139) into the total.
+>
+> The real ranking inside the provider, measured with generators visible:
+> `stream` 374 · `ensureSession` 258 · `streamInSession` 139 ·
+> `handleControlRequest` 109. The rest of this file's numbers were re-checked
+> against the same corrected pass and hold — including every figure in the
+> `conversation-host.ts` section below.
+>
+> Kept rather than edited away because the wrong number drove a planned step
+> (extracting the `can_use_tool` path), and because a line-count claim is
+> exactly the kind that reads as measured when it was only greped. A regex over
+> declarations is a sampling method, not a measurement, and it fails silently.
+
+Functions worth naming, corrected:
 [`makeProcessor`](src/providers/claude-cli.ts#L3848) 314 lines,
 [`buildArgs`](src/providers/claude-cli.ts#L2670) 247 lines, and the `CliEvent`
 interface at [3535](src/providers/claude-cli.ts#L3535) — 196 lines of type
