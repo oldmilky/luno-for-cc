@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { Session } from "./session.js";
+import { TimelineEvent } from "./types.js";
 import {
   PlanQuestionEntry,
   PlanQuestionOption,
   PlanRevisionMeta,
   PlanSections,
   PlanTask,
-  PlanTaskFileRef,
-  TimelineEvent
-} from "./types.js";
+  PlanTaskFileRef
+} from "./plan-types.js";
 
 export const PLAN_TOOL_NAMES = new Set([
   "ExitPlanMode",

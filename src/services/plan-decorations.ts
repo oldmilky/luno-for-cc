@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
+import { TimelineEvent } from "../core/types.js";
 import {
-  TimelineEvent,
   PlanCommentMeta,
   PlanRevisionMeta,
   PlanTask
-} from "../core/types.js";
+} from "../core/plan-types.js";
 
 /**
  * Mirrors plan_comment quotes and the active plan step into VS Code editor

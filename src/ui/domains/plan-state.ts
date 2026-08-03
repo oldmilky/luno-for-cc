@@ -13,7 +13,7 @@ import {
   REQUIRED_PLAN_SECTIONS,
   type PlanRevisionMeta,
   type PlanSections
-} from "../../core/types.js";
+} from "../../core/plan-types.js";
 
 /** The shape this module needs from a timeline entry. */
 export interface PlanEvent {

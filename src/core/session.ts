@@ -1,12 +1,10 @@
+import { ContentBlock, Message, TimelineEvent } from "./types.js";
 import {
-  ContentBlock,
-  Message,
   PlanAnswerMeta,
   PlanCommentMeta,
   PlanQuestionMeta,
-  PlanRevisionMeta,
-  TimelineEvent
-} from "./types.js";
+  PlanRevisionMeta
+} from "./plan-types.js";
 import { randomUUID } from "node:crypto";
 
 export type SessionListener = (e: TimelineEvent) => void;

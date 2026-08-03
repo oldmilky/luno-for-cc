@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { PlanRevisionMeta } from "../core/types.js";
+import { PlanRevisionMeta } from "../core/plan-types.js";
 import { buildWebviewHtml } from "./webview-html.js";
 
 /**

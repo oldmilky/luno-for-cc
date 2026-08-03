@@ -5,7 +5,7 @@ import {
   parseBashHeredocWrite
 } from "../../src/core/plan-intercept.js";
 import { Session } from "../../src/core/session.js";
-import { PlanRevisionMeta } from "../../src/core/types.js";
+import { PlanRevisionMeta } from "../../src/core/plan-types.js";
 
 describe("looksLikePlanFile (broadened)", () => {
   it("matches the legacy ~/.claude/plans/ path", () => {

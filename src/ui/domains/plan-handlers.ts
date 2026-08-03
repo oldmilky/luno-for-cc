@@ -18,11 +18,11 @@
 
 import * as vscode from "vscode";
 import type { Session } from "../../core/session.js";
+import type { PermissionMode } from "../../core/types.js";
 import type {
-  PermissionMode,
   PlanQuestionMeta,
   PlanRevisionMeta
-} from "../../core/types.js";
+} from "../../core/plan-types.js";
 import type { PlanArtifactManager } from "../plan-artifact-panel.js";
 import { makeNonce } from "../webview-html.js";
 import {
