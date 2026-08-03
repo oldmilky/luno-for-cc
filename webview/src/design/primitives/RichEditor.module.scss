@@ -1,7 +1,6 @@
 // ─────────────────────────────────────────────────────────────
 // RichEditor — the contenteditable composer surface plus the two
 // atomic pills that flow inside it (code badge, @file mention).
-// Converted from theme.css in Ф2а.
 //
 // The pills are built imperatively (document.createElement) and are
 // also rendered by UserMessage, which imports this same module — so

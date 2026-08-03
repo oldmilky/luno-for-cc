@@ -3,7 +3,6 @@
 // A fixed-position dialog (the caller measures the trigger and
 // passes viewport coordinates), not an anchored menu, so it keeps
 // its own solid surface instead of composing Dropdown.module.scss.
-// Converted from theme.css `.plan-review-*` in Ф2а.
 //
 // The drop shadow was a raw rgba black; it now uses the --shadow-2
 // elevation token shared with every other floating surface.

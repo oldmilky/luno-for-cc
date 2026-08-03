@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════
    LUNO — global layer.
 
-   What is left here after Ф2а, and why it can't be a CSS module:
+   What is left here, and why it can't be a CSS module:
      · document-level resets, scrollbars, reduced-motion
      · the ambient aurora (positioned against the app shell)
      · markdown + syntax-highlight presentation — react-markdown and
@@ -11,7 +11,7 @@
        imperatively rather than through a component's className
 
    Everything else moved into per-component *.module.scss. The palette
-   moved to src/themes/ in Ф1 — see docs/TOKENS.md.
+   moved to src/themes/ — see docs/TOKENS.md.
    ═══════════════════════════════════════════════════════════════ */
 
 /* Geist for body/UI — Vercel's variable sans, purpose-built for technical
@@ -183,8 +183,8 @@ body,
    is unlayered, so it beat Tailwind's `.fixed` utility and flattened any
    full-screen overlay mounted as a direct child of `.app`, which is why
    `.fixed`, `.modal-backdrop` and `header` each had to be excluded by hand as
-   the breakages surfaced. Ф2а dropped the `.fixed` marker class along with
-   Tailwind, so every overlay would have collapsed into normal flow again.
+   the breakages surfaced. The `.fixed` marker class left with Tailwind, so
+   every overlay would have collapsed into normal flow again.
 
    Replacing it with a blanket `.app > * { z-index: 1 }` just moved the problem:
    at (0,3,0) it also outranked the header's own `z-index: 10`, so header and

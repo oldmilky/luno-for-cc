@@ -4,7 +4,6 @@
 // theme.css owns the unlayered `.app > *` rule that lifts the
 // chrome above them while letting fixed overlays opt out, and it
 // has to name `.app-ambient` / `.app-ambient-top` to do so.
-// Converted from Tailwind + theme.css in Ф2а.
 // ─────────────────────────────────────────────────────────────
 
 .shell {
