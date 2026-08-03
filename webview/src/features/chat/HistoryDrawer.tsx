@@ -347,7 +347,7 @@ function HistoryItem({
           <span className={s.itemSnippet}>{session.snippet}</span>
         )}
         <span className={s.itemMeta}>
-          <span>{formatRelativeTime(session.updatedAt)}</span>
+          <span>{formatRelativeShort(session.updatedAt)}</span>
           <span className={s.itemMetaDot}>·</span>
           <span>
             {session.eventCount} {session.eventCount === 1 ? "event" : "events"}
@@ -531,7 +531,10 @@ function groupByBucket(sessions: HistoryEntry[]): Bucket[] {
     .filter((b) => b.items.length > 0);
 }
 
-function formatRelativeTime(ts: number): string {
+// Not `features/plan/summary.ts`'s `formatRelativeTime`, which is exported and
+// says "12 minutes ago" out to 30 days. This one is for a dense list: "12m
+// ago", and a bare date past a week. Same job, two formats, on purpose.
+function formatRelativeShort(ts: number): string {
   const diff = Date.now() - ts;
   const min = 60_000;
   const hour = 60 * min;

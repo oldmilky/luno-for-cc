@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { send, onMessage, MarketplaceSkill } from "../../lib/rpc";
+import { formatCount } from "../../lib/format";
 import { Icon } from "../../design/icons";
 import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
 import { Tooltip } from "../../design/primitives";
@@ -235,10 +236,4 @@ export function SkillDetailModal({
     </motion.div>,
     document.body
   );
-}
-
-function formatCount(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
-  return String(n);
 }

@@ -5,7 +5,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { Icon } from "../../design/icons";
-import { formatDuration } from "./tool-buckets";
+import { formatDuration } from "../../lib/format";
 import s from "./Turn.module.scss";
 
 interface TurnHeaderProps {

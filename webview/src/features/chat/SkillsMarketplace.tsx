@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
 import { AnimatePresence, motion } from "framer-motion";
 import { send, onMessage, MarketplaceSkill } from "../../lib/rpc";
+import { formatCount } from "../../lib/format";
 import { Icon, IconName } from "../../design/icons";
 import { Tooltip } from "../../design/primitives";
 // `mk`, not the usual `s` — this file already binds `s` to a
@@ -628,12 +629,6 @@ function iconFor(name: string): IconName {
   if (/design|ui|ux|frontend/.test(n)) return "edit";
   if (/architect/.test(n)) return "layers";
   return "bolt";
-}
-
-function formatCount(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
-  return String(n);
 }
 
 function truncate(s: string, n: number): string {

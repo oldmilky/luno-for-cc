@@ -15,7 +15,7 @@ import { motion } from "framer-motion";
 import { Icon } from "../../design/icons";
 import { Tooltip } from "../../design/primitives";
 import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
-import { formatDuration, formatTokens } from "./tool-buckets";
+import { formatDuration, formatTokens } from "../../lib/format";
 import { workflowAgentOutcome } from "./subagent-state";
 import type { AgentPanel, AgentRun } from "./subagent-state";
 import type { WorkflowProgressEntry } from "../../lib/rpc";

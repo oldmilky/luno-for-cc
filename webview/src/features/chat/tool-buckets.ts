@@ -132,24 +132,3 @@ function extractBashCommand(input?: string): string {
     return "";
   }
 }
-
-/** Format a token count for a chip: "940" / "19.2k" / "128k" / "1.4M". */
-export function formatTokens(n: number): string {
-  if (n < 1000) return String(Math.round(n));
-  if (n < 1_000_000) {
-    const k = n / 1000;
-    return `${k < 100 ? k.toFixed(1) : Math.round(k)}k`;
-  }
-  return `${(n / 1_000_000).toFixed(1)}M`;
-}
-
-/** Format a turn duration: "2s" / "47s" / "1m 12s" / "4m". */
-export function formatDuration(ms: number): string {
-  if (ms < 1000) return "<1s";
-  const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  if (r === 0) return `${m}m`;
-  return `${m}m ${r}s`;
-}

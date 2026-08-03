@@ -2,8 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   classifyTool,
   bucketSummary,
-  bucketMeta,
-  formatDuration
+  bucketMeta
 } from "../../webview/src/features/chat/tool-buckets.js";
 
 describe("classifyTool", () => {
@@ -81,15 +80,5 @@ describe("bucketMeta", () => {
     expect(bucketMeta("search").verb).toBe("Searched");
     expect(bucketMeta("edit").nounPlural).toBe("files");
     expect(bucketMeta("editor").verb).toBe("Opened");
-  });
-});
-
-describe("formatDuration", () => {
-  it("formats sub-second / seconds / minutes correctly", () => {
-    expect(formatDuration(500)).toBe("<1s");
-    expect(formatDuration(2_000)).toBe("2s");
-    expect(formatDuration(47_000)).toBe("47s");
-    expect(formatDuration(72_000)).toBe("1m 12s");
-    expect(formatDuration(240_000)).toBe("4m");
   });
 });
