@@ -35,6 +35,7 @@ and no telemetry. Built by [lunoweb.com](https://lunoweb.com).
 - 🧩 **Skills marketplace.** Browse and install any skill from [claude-plugins.dev](https://claude-plugins.dev) directly from the panel.
 - 🔌 **MCP connectors.** Browse and connect remote MCP servers — Linear, Notion, Atlassian, Sentry and more — over OAuth, straight from the panel.
 - 🕰 **Checkpoints + rewind.** Every assistant turn snapshots edited files so you can roll back without leaving the chat.
+- 🎙 **Dictation.** A microphone in the composer turns speech into a prompt, with the words appearing as you say them. The recorder ships with the extension for six platform targets — nothing to install — and `luno.voiceLanguage` picks the language it listens for, independently of the one Claude answers in.
 - 📦 **Runs your own CLI.** No bundled copy: LUNO finds the `claude` binary on your
   PATH (or in the standard install locations) and drives that. The VSIX is 605 kB,
   and model aliases resolve against whatever your CLI knows — a self-updating
@@ -208,6 +209,7 @@ Edited files appear as a collapsible card under the assistant turn with line-add
 | `luno.worktree`            | `tabs`                                                            | Whether a chat gets its own git worktree, so parallel chats cannot collide. `off` / `tabs` / `always`.                                                                                                                                                   |
 | `luno.allowedBashPatterns` | `["^git (status\|diff\|log\|branch)$", "^npm (test\|run test)$"]` | Regex allowlist for commands that auto-run in **Agent** mode. Destructive / network commands are **never** auto-run, even if matched.                                                                                                                    |
 | `luno.claudeBinaryPath`    | `""`                                                              | Absolute path to the `claude` binary. Empty → auto-detect from PATH and the standard install locations (`~/.claude/local`, npm global, Homebrew). Set it only to pin a specific install; on Windows point it at `claude.exe`, not the `claude.cmd` shim. |
+| `luno.voiceLanguage`       | `auto`                                                            | The language dictation listens for. `auto` follows the `language` key in your Claude settings — the same one Claude answers in — so set this only when the microphone should differ from that. Read when a dictation starts; no reload.                  |
 
 ### What each turn carries
 
@@ -282,6 +284,7 @@ basis. Two things to know before you send one:
 
 - Your code is sent to Anthropic only when the agent requests a tool that reads it, or when you `@`-mention or paste it. The webview never auto-uploads workspace files.
 - Tokens live in the OS keychain via VS Code's SecretStorage API. Luno does not write credentials to disk under any path it controls.
+- Dictation streams your microphone to Anthropic's speech endpoint under your own Claude credential, and only while the button is lit. Nothing is recorded to disk, and the credential never crosses into the webview.
 - Destructive and network commands always surface an approval prompt before they run in **Ask**, **Agent** and **Plan**. Ask prompts for every edit and command too; Agent auto-applies edits (reversible via checkpoints) but still gates deletes, shell, and network calls. **Bypass** removes the gate — you opt into that explicitly through a confirmation modal, and the toolbar stays red while it lasts.
 
 ---
