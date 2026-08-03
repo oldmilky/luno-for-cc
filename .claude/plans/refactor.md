@@ -54,7 +54,23 @@ one needs `bun run package` before it goes, not just lint and test.
 
 ---
 
-## Phase 1 — the free wins (pure move, tiny)
+## Phase 1 — the free wins (pure move, tiny) — DONE 2026-08-04
+
+Landed as `a2a6ab1` (1a), `b3d0dc3` (1b), `4d85c90` (1c) — three commits rather
+than one, because the parts are independent and a 30-file comment sweep would
+otherwise bury the diff that matters.
+
+> **What this section got wrong, kept because the same mistake is available in
+> Phases 4 and 7.** It called the two `formatRelativeTime` implementations
+> duplicates and planned to collapse them. They are not: one renders "12m ago"
+> and falls back to a bare date after a week, the other renders "12 minutes
+> ago" and holds out to 30 days. Merging them would have moved text on screen
+> in two places. The same was true of the number formatters — measured, six of
+> nine sampled values disagree across `formatTokens` / `formatCompact` /
+> `formatCount`, so only the genuinely byte-identical pair was merged and the
+> rest were moved or left alone. **A shared name is not evidence of a
+> duplicate; only reading both bodies is.** Grep found the candidates and was
+> wrong about three of them.
 
 Three unrelated cleanups, grouped only because each is small enough that doing
 it alone is more ceremony than work. They also serve a purpose: they exercise
@@ -64,12 +80,14 @@ the gate loop at zero risk before Phase 2 spends it on 2000 lines.
 Absorbs the byte-identical `formatCount` from
 [SkillDetailModal.tsx:240](../../webview/src/features/chat/SkillDetailModal.tsx#L240)
 and [SkillsMarketplace.tsx:633](../../webview/src/features/chat/SkillsMarketplace.tsx#L633),
-plus `formatTokens` (tool-buckets), `formatCompact`/`formatNum`/`formatPctUsed`
-(usage-view). The two `formatRelativeTime` implementations
-([HistoryDrawer.tsx:534](../../webview/src/features/chat/HistoryDrawer.tsx#L534),
-[plan/summary.ts:77](../../webview/src/features/plan/summary.ts#L77)) collapse
-onto the second signature — the one that takes an injectable `now`, because it
-is the one that can be tested.
+plus `formatTokens` and `formatDuration` (tool-buckets, whose header says it is
+about bucket categorization and which seven components were importing a
+duration formatter from).
+
+`formatCompact`/`formatNum`/`formatPctUsed` stayed in usage-view — single
+consumer, and moving them would have advertised as shared what is not. Both
+`formatRelativeTime`s stayed too; the private one was renamed
+`formatRelativeShort` so the collision cannot be resolved by accident.
 
 Host-side `fmtTokens` at
 [conversation-host.ts:3058](../../src/ui/conversation-host.ts#L3058) stays where
@@ -82,7 +100,7 @@ webview module across the seam to save six lines is the wrong trade.
 `PlanAnswerMeta` — become `src/core/plan-types.ts`. Self-contained domain; the
 file has 17 importers and most of them want the chat half, not this.
 
-**1c. Delete the 32 `Ф<digit>` phase labels** across `src/`, `webview/src/` and
+**1c. Delete the 35 `Ф<digit>` phase labels** across `src/`, `webview/src/` and
 SCSS. `.claude/rules/comments.md` already classifies them as a known cleanup
 pointing at a phase log that is not in the published repo.
 
