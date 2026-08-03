@@ -296,7 +296,31 @@ by hand.
 
 ---
 
-## Phase 4 — `ChatScreen.tsx`, the logic half (pure move, medium)
+## Phase 4 — `ChatScreen.tsx`, the logic half — DONE 2026-08-04
+
+Landed as `66d83eb` (the move) and `e13ec19` (the coverage it unlocked).
+1360 → **699**. `group-events.ts` 401 · `render-groups.tsx` 237 ·
+`InlineMessageEditor.tsx` 61. Suite 1508 → **1515 / 6** — the rise is the seven
+new `groupEvents` tests and nothing else.
+
+> **Two departures from what this section says, both deliberate.**
+>
+> **The renderers moved as functions, not components.** "They are components
+> written as functions" is true and was still the wrong instruction: both
+> already take everything explicitly and close over nothing, so relocating them
+> changes nothing, while `<GroupView />` and `<TurnBlockView />` would each get
+> their own fiber and their own re-render boundary. That belongs in Phase 6
+> beside the other re-render decisions, measured, not smuggled into a move.
+>
+> **The built CSS changed, and the change is inert — proven, not assumed.**
+> Byte length identical; 1750 rule blocks, same set when sorted, so not one
+> rule added, removed or altered. What moved is the order of module-scoped
+> blocks, because ChatScreen no longer imports the components whose stylesheets
+> it pulled in. Order decides the cascade only between rules that can match the
+> same element: of 1668 top-level rules the 105 with no CSS-modules hash are the
+> only candidates, and **their relative order is unchanged**. Worth writing down
+> because "the CSS is byte-identical" was the Phase 1 proof, and the first time
+> that check fails is the moment to find out whether it was load-bearing.
 
 1360 lines, of which ~500 contain no JSX at all.
 
