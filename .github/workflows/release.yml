@@ -102,7 +102,11 @@ jobs:
           # grep over the raw JSON rather than a node one-liner: the previous
           # version of this check was a quoting hazard that died on its own
           # syntax and failed two releases that had published fine.
-          for i in $(seq 1 10); do
+          # Twenty attempts, not ten: v1.1.0 published at 12:50:09 and this
+          # check gave up at 12:52:45 on a version the registry did serve. The
+          # CDN held its 404 for longer than the 150s the first window allowed,
+          # and the false negative blocked the Marketplace publish behind it.
+          for i in $(seq 1 20); do
             if curl -s -H "Cache-Control: no-cache" \
                  "https://open-vsx.org/api/lunoweb/luno-for-cc/latest?cb=$RANDOM$i" \
                  | grep -q "\"version\":\"${{ env.version }}\""; then
