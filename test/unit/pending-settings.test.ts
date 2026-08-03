@@ -1,9 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  pendingSettings,
-  respawnFingerprint,
-  buildArgs
-} from "../../src/providers/claude-cli.js";
+import { respawnFingerprint, buildArgs } from "../../src/providers/cli/args.js";
+import { pendingSettings } from "../../src/providers/cli/options.js";
 
 // Which of the user's choices a running process cannot be given. Measured
 // against 2.1.219: the CLI takes exactly five settings live — set_cwd,

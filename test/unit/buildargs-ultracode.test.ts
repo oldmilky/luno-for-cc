@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildArgs } from "../../src/providers/claude-cli.js";
+import { buildArgs } from "../../src/providers/cli/args.js";
 
 // Ultracode is a settings key, not a sixth `--effort` level, and the CLI is
 // perfectly happy to accept a settings blob it does not understand — it ignores

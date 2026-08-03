@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  buildArgs,
-  respawnFingerprint
-} from "../../src/providers/claude-cli.js";
+import { buildArgs, respawnFingerprint } from "../../src/providers/cli/args.js";
 
 // Focused on the auto-mode tool pre-allow list. The existing claude-cli.test.ts
 // only checks a simple "^npm test$" pattern's presence; these exercise the

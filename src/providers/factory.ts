@@ -13,11 +13,9 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as vscode from "vscode";
-import {
-  ClaudeCliProvider,
-  EffortLevel,
-  PendingSetting
-} from "./claude-cli.js";
+import { ClaudeCliProvider } from "./claude-cli.js";
+import type { PendingSetting } from "./cli/options.js";
+import type { EffortLevel } from "../core/effort.js";
 import { PermissionMode, StreamDelta, TaskType } from "../core/types.js";
 import type { ToolGrant } from "../core/tool-grants.js";
 import { ConventionsFile } from "../services/conventions.js";

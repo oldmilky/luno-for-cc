@@ -7,7 +7,17 @@ import {
   makeProcessor,
   contextSize,
   contextWindowOf,
+  exitFailure,
+  bridgeStatus
+} from "../../src/providers/cli/events.js";
+import {
   buildArgs,
+  turnPreamble,
+  respawnFingerprint,
+  mcpToolPatterns
+} from "../../src/providers/cli/args.js";
+import { ClaudeCliProvider } from "../../src/providers/claude-cli.js";
+import {
   isDestructiveBash,
   isDestructiveRequest,
   isNetworkBash,
@@ -16,18 +26,12 @@ import {
   decidePermission,
   gitSubcommand,
   isReadOnlyGitCommand,
-  ClaudeCliProvider,
-  createToolStallWatchdog,
-  turnPreamble,
-  respawnFingerprint,
-  exitFailure,
   isReadOnlyShellCommand,
-  bridgeStatus,
-  mcpToolPatterns,
   denialMessage,
   autoModeDenialReason,
   AUTO_MODE_DENIAL_PREFIX
-} from "../../src/providers/claude-cli.js";
+} from "../../src/core/permission-policy.js";
+import { createToolStallWatchdog } from "../../src/providers/cli/watchdog.js";
 import { SUPPORTED_DIALOG_KINDS } from "../../src/core/types.js";
 
 /** The values after `--allowedTools`, up to the next flag. */

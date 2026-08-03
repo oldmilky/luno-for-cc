@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildArgs } from "../../src/providers/claude-cli.js";
+import { buildArgs } from "../../src/providers/cli/args.js";
 import type { ConventionsFile } from "../../src/services/conventions.js";
 
 // Which system-prompt appends go out, and in which order. The prompts

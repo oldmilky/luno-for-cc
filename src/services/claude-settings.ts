@@ -12,7 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { PermissionMode } from "../core/types.js";
-import type { EffortLevel } from "../providers/claude-cli.js";
+import type { EffortLevel } from "../core/effort.js";
 
 /**
  * "Question auto-continue timeout" — how long an `AskUserQuestion` waits

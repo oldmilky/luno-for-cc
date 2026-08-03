@@ -44,11 +44,9 @@ import { permittedModel } from "../core/model-allowlist.js";
 import { raiseNotification } from "./domains/notify.js";
 import { VoiceSession } from "./domains/voice.js";
 import { keytermsFrom } from "../core/voice/protocol.js";
-import type {
-  ClaudeCliProvider,
-  EffortLevel,
-  PendingSetting
-} from "../providers/claude-cli.js";
+import type { ClaudeCliProvider } from "../providers/claude-cli.js";
+import type { PendingSetting } from "../providers/cli/options.js";
+import type { EffortLevel } from "../core/effort.js";
 import {
   CheckpointService,
   checkpointStoreDir

@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { Message, PermissionMode, TimelineEvent } from "../core/types.js";
-import type { EffortLevel } from "../providers/claude-cli.js";
+import type { EffortLevel } from "../core/effort.js";
 
 /**
  * Persists chat sessions under VS Code's per-extension globalStorage.

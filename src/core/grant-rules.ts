@@ -30,7 +30,7 @@ import {
   isConditionallyGatedBash,
   isDestructiveRequest,
   isNetworkRequest
-} from "../providers/claude-cli.js";
+} from "./permission-policy.js";
 import type { ToolGrant } from "./tool-grants.js";
 
 /** Shell metacharacters a prefix must not contain. `grantFor` refuses to build

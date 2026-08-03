@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { makeProcessor, contextSize } from "../../src/providers/claude-cli.js";
-import type { CliEvent } from "../../src/providers/claude-cli.js";
+import { makeProcessor, contextSize } from "../../src/providers/cli/events.js";
+import type { CliEvent } from "../../src/providers/cli/events.js";
 
 // The numbers are from `test/fixtures/workflow-stream.jsonl`, a real capture.
 // Two requests in one turn, then the result that sums them — which is the bug

@@ -8,7 +8,7 @@ import {
   isCliControlMarker,
   takeEcho,
   type CliEvent
-} from "../../src/providers/claude-cli.js";
+} from "../../src/providers/cli/events.js";
 import type { ChatProvider } from "../../src/providers/base.js";
 
 /** A provider that would fail the test if a remote turn ever wrote to it: the

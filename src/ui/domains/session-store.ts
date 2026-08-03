@@ -17,7 +17,7 @@
 
 import { Session } from "../../core/session.js";
 import type { PermissionMode } from "../../core/types.js";
-import type { EffortLevel } from "../../providers/claude-cli.js";
+import type { EffortLevel } from "../../core/effort.js";
 import type { CheckpointService } from "../../services/checkpoint.js";
 import {
   deriveTitle,
