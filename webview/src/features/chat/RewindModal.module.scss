@@ -10,17 +10,9 @@
 
 @use "../../themes/motion" as motion;
 
-.backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  // No scrim on purpose: the chat behind stays fully readable so the user
-  // can see the point being rewound to while deciding.
-  background: transparent;
-}
+// The backdrop is `Overlay`'s — portal, fixed, centring and layer. It carries
+// no scrim, which is what this modal wanted: the chat behind stays fully
+// readable so the user can see the point being rewound to while deciding.
 
 .panel {
   position: relative;

@@ -510,20 +510,19 @@ export function ChatScreen({
         </AnimatePresence>
       </div>
 
-      <AnimatePresence>
-        {pendingRewind && (
-          <RewindModal
-            key="rewind-modal"
-            messagesAfter={pendingRewind.messagesAfter}
-            agents={running}
-            onCancel={() => setPendingRewind(null)}
-            onConfirm={() => {
-              send({ type: "rewindTo", turnId: pendingRewind.turnId });
-              setPendingRewind(null);
-            }}
-          />
-        )}
+      <RewindModal
+        pending={pendingRewind}
+        agents={running}
+        onCancel={() => setPendingRewind(null)}
+        onConfirm={() => {
+          if (pendingRewind) {
+            send({ type: "rewindTo", turnId: pendingRewind.turnId });
+          }
+          setPendingRewind(null);
+        }}
+      />
 
+      <AnimatePresence>
         {pendingEdit && (
           <EditConfirmModal
             key="edit-modal"

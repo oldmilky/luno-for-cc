@@ -1,13 +1,14 @@
-import { useEffect, type ReactNode } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useState, type ReactNode } from "react";
 import { Icon } from "../../design/icons";
-import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
+import { Overlay } from "../../design/primitives";
 import { formatDuration } from "../../lib/format";
 import type { LiveAgents } from "./subagent-state";
 import s from "./RewindModal.module.scss";
 
 interface RewindModalProps {
-  messagesAfter: number;
+  /** What the rewind would remove, or null when closed. Null *is* the closed
+   *  state — the component stays mounted so it can animate out. */
+  pending: { messagesAfter: number } | null;
   /** What rewinding will also destroy. Rewinding interrupts the turn *and*
    *  releases the CLI process, so a background agent does not merely stop —
    *  the run it belonged to is gone. */
@@ -17,127 +18,129 @@ interface RewindModalProps {
 }
 
 export function RewindModal({
-  messagesAfter,
+  pending,
   agents,
   onCancel,
   onConfirm
 }: RewindModalProps) {
+  const open = pending !== null;
+  // Held across the dismissal so the exit animation does not play over a panel
+  // whose numbers the parent has already cleared.
+  const [shown, setShown] = useState(pending);
+  if (pending && pending !== shown) setShown(pending);
+
+  // Escape is `Overlay`'s; Enter stays here and on `window`, so confirming does
+  // not depend on where the focus landed.
   useEffect(() => {
+    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-      else if (e.key === "Enter") onConfirm();
+      if (e.key === "Enter") onConfirm();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel, onConfirm]);
+  }, [open, onConfirm]);
 
+  if (!shown) return null;
+  const messagesAfter = shown.messagesAfter;
   const plural = messagesAfter !== 1 ? "s" : "";
 
   return (
-    <motion.div
-      className={s.backdrop}
-      onClick={onCancel}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Rewind conversation"
-      {...BACKDROP}
+    <Overlay
+      open={open}
+      onClose={onCancel}
+      label="Rewind conversation"
+      className={s.panel}
     >
-      <motion.div
-        className={s.panel}
-        onClick={(e) => e.stopPropagation()}
-        {...OVERLAY_PANEL}
-      >
-        {/* Top accent hairline */}
-        <div className={s.hairline} />
+      {/* Top accent hairline */}
+      <div className={s.hairline} />
 
-        <div className={s.head}>
-          <div className={s.headRow}>
-            {/* Icon tile with breathing halo */}
-            <div className={s.iconWrap}>
-              <span className={s.halo} aria-hidden />
-              <div className={s.iconTile}>
-                <Icon name="history" size={22} />
-              </div>
-            </div>
-
-            <div className={s.headText}>
-              <h2 className={s.title}>Rewind to this point?</h2>
-              <p className={s.sub}>
-                Jump the conversation back here. This can&rsquo;t be undone.
-              </p>
+      <div className={s.head}>
+        <div className={s.headRow}>
+          {/* Icon tile with breathing halo */}
+          <div className={s.iconWrap}>
+            <span className={s.halo} aria-hidden />
+            <div className={s.iconTile}>
+              <Icon name="history" size={22} />
             </div>
           </div>
 
-          {/* What will happen */}
-          <div className={s.details}>
-            {messagesAfter > 0 && (
-              <DetailRow
-                icon="layers"
-                tone="warn"
-                text={
-                  <>
-                    <strong className={s.strong}>
-                      {messagesAfter} message{plural}
-                    </strong>{" "}
-                    after this point will be removed
-                  </>
-                }
-              />
-            )}
+          <div className={s.headText}>
+            <h2 className={s.title}>Rewind to this point?</h2>
+            <p className={s.sub}>
+              Jump the conversation back here. This can&rsquo;t be undone.
+            </p>
+          </div>
+        </div>
+
+        {/* What will happen */}
+        <div className={s.details}>
+          {messagesAfter > 0 && (
             <DetailRow
-              icon="refresh"
-              tone="accent"
+              icon="layers"
+              tone="warn"
               text={
                 <>
-                  Files changed since then will be{" "}
-                  <strong className={s.strong}>restored</strong>
+                  <strong className={s.strong}>
+                    {messagesAfter} message{plural}
+                  </strong>{" "}
+                  after this point will be removed
                 </>
               }
             />
-            {agents.count > 0 && (
-              <DetailRow
-                icon="layers"
-                tone="warn"
-                text={
-                  <>
-                    <strong className={s.strong}>
-                      {agents.count} agent{agents.count !== 1 ? "s" : ""}
-                    </strong>{" "}
-                    still working will be stopped
-                    {agents.longestMs > 0 && (
-                      <> — the longest at {formatDuration(agents.longestMs)}</>
-                    )}
-                  </>
-                }
-              />
-            )}
-          </div>
+          )}
+          <DetailRow
+            icon="refresh"
+            tone="accent"
+            text={
+              <>
+                Files changed since then will be{" "}
+                <strong className={s.strong}>restored</strong>
+              </>
+            }
+          />
+          {agents.count > 0 && (
+            <DetailRow
+              icon="layers"
+              tone="warn"
+              text={
+                <>
+                  <strong className={s.strong}>
+                    {agents.count} agent{agents.count !== 1 ? "s" : ""}
+                  </strong>{" "}
+                  still working will be stopped
+                  {agents.longestMs > 0 && (
+                    <> — the longest at {formatDuration(agents.longestMs)}</>
+                  )}
+                </>
+              }
+            />
+          )}
         </div>
+      </div>
 
-        {/* Footer */}
-        <div className={s.foot}>
-          <div className={s.escHint}>
-            <kbd className={s.kbd}>Esc</kbd>
-            <span>to cancel</span>
-          </div>
-          <div className={s.actions}>
-            <button type="button" className={s.cancel} onClick={onCancel}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className={s.confirm}
-              onClick={onConfirm}
-              autoFocus
-            >
-              <Icon name="history" size={12} />
-              Rewind
-              <kbd className={s.confirmKbd}>↵</kbd>
-            </button>
-          </div>
+      {/* Footer */}
+      <div className={s.foot}>
+        <div className={s.escHint}>
+          <kbd className={s.kbd}>Esc</kbd>
+          <span>to cancel</span>
         </div>
-      </motion.div>
-    </motion.div>
+        <div className={s.actions}>
+          <button type="button" className={s.cancel} onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={s.confirm}
+            onClick={onConfirm}
+            data-autofocus
+          >
+            <Icon name="history" size={12} />
+            Rewind
+            <kbd className={s.confirmKbd}>↵</kbd>
+          </button>
+        </div>
+      </div>
+    </Overlay>
   );
 }
 
