@@ -61,8 +61,9 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
 
   // Escape backs out one step at a time: a rename in progress is what the user
   // is looking at, so closing the whole drawer would answer a question they did
-  // not ask. That is why `Overlay`'s own Escape is turned off below rather than
-  // this being deleted — the primitive has no idea a rename is open.
+  // not ask. Handed to `Overlay` as `onEscape` rather than listened for here —
+  // focus sits on the backdrop, and a handler on the panel below it never
+  // receives the key.
   const escapeBacksOut = () => {
     if (renamingId) setRenamingId(null);
     else onClose();
@@ -108,9 +109,9 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
       // the primitive hands it back whole rather than wrapping it in a centred
       // sheet. Portal, backdrop, focus trap, restore and scroll lock stay.
       wrapPanel={false}
-      // Escape is this drawer's, because it means "back out one step" here and
-      // the primitive cannot know a rename is open.
-      dismissOnEscape={false}
+      // Escape means "back out one step" here, which the primitive cannot know.
+      // It still owns the listener — see `onEscape`.
+      onEscape={escapeBacksOut}
       // This scrim also blurs the chat behind it, which BACKDROP has no field
       // for. Folded into the preset's own states so the blur and the fade stay
       // on one timing instead of drifting apart.
@@ -122,9 +123,6 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
     >
       <motion.aside
         key="drawer-panel"
-        onKeyDown={(e) => {
-          if (e.key === "Escape") escapeBacksOut();
-        }}
         {...DRAWER}
         // DRAWER owns the slide and the exit. The panel also settles a hair
         // of scale — not part of the preset, so it is folded into its states

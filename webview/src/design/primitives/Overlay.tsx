@@ -63,8 +63,20 @@ interface OverlayBaseProps {
   /** Whether a click on the backdrop dismisses. Off for a modal whose choice
    *  has to be made rather than escaped. */
   dismissOnBackdrop?: boolean;
-  /** Whether Escape dismisses. Same reasoning as the backdrop. */
+  /** Whether Escape dismisses. Same reasoning as the backdrop. Off means the
+   *  primitive ignores the key entirely — only correct when something ABOVE the
+   *  overlay handles it, such as a `window` listener. A handler on a child
+   *  cannot see it: focus is on the backdrop and keydown does not travel down. */
   dismissOnEscape?: boolean;
+  /**
+   * What Escape does, when it is not simply "close".
+   *
+   * A drawer with a rename in progress backs out one step; only the caller
+   * knows that. Provided here rather than left to the caller's own listener
+   * because the primitive already listens where the focus is, and a handler
+   * further down the tree never receives the event.
+   */
+  onEscape?: () => void;
   /** Overrides spread over `OVERLAY_PANEL`, for a dialog whose motion genuinely
    *  differs — not a licence to hand-write one. Build the override out of the
    *  preset's own values so timing and curve stay shared. */
@@ -103,6 +115,7 @@ export function Overlay({
   backdropClassName,
   dismissOnBackdrop = true,
   dismissOnEscape = true,
+  onEscape,
   panelMotion,
   backdropMotion,
   wrapPanel = true
@@ -162,7 +175,7 @@ export function Overlay({
       // `window`, so anything else watching Escape saw it too. Swallowing it
       // here would be a behaviour change smuggled into a structural move.
       if (e.key === "Escape" && dismissOnEscape) {
-        onClose();
+        (onEscape ?? onClose)();
         return;
       }
       if (e.key !== "Tab") return;
@@ -179,7 +192,7 @@ export function Overlay({
         (e.shiftKey ? stops[stops.length - 1] : stops[0]).focus();
       }
     },
-    [dismissOnEscape, onClose]
+    [dismissOnEscape, onEscape, onClose]
   );
 
   return createPortal(
