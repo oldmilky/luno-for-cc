@@ -532,6 +532,60 @@ adjectives. Repeat in at least two themes.
 
 ---
 
+## Phase 6 — webview state — MEASURED 2026-08-04, and the answer is mostly "no"
+
+> This section said "6b does not start without the measurement from 6a's
+> session", and allowed that writing down "prop drilling is cheaper" would be a
+> successful outcome rather than a failed one. That is what happened. It also
+> turns out **6a's own premise is false**, which the section could not have
+> known.
+>
+> **6a is built on "the ~14 `on*` callbacks are stable references".** They are
+> not. All fourteen are inline arrow functions at
+> [App.tsx:537–609](../../webview/src/App.tsx#L537) — `onDismissVoiceError`,
+> `onSubmit`, `onCancel`, `onPermissionRespond` and the rest — recreated on
+> every `App` render, and `App` re-renders per token because `streaming` is its
+> own state. Lifting them into a Context as they stand would publish a new
+> context value on every token to every consumer, which is the exact failure
+> 6b was written to avoid. Making them stable first is a prerequisite nobody
+> costed, and it is most of the work.
+>
+> **The measurement 6b required, taken in the harness.** 40 tokens streamed at
+> 12ms apart, every DOM mutation under `document.body` recorded and grouped:
+>
+> |                 | with 40 tokens | control, 0 tokens, same duration |
+> | --------------- | -------------- | -------------------------------- |
+> | `attributes`    | 35 829         | **34 768**                       |
+> | `characterData` | 41             | 0                                |
+> | `childList`     | 37             | 0                                |
+>
+> The control is the finding. **Streaming costs 41 + 37 mutations for 40
+> tokens — about two per token.** Everything else is `DotGlobe`: roughly 200
+> `<circle>` elements re-writing `fill`, `cx`, `cy`, `r` and `opacity` every
+> frame, ~34 700 mutations in a 680ms window, running identically when nothing
+> is streaming at all. The panel's DOM cost during a turn is an animated globe,
+> not the state architecture.
+>
+> **So 6b does not land.** There is no re-render problem to solve; splitting
+> `ChatScreenProps` by change frequency would be restructuring against a cost
+> that measurement cannot find.
+>
+> **The limit of this measurement, stated rather than glossed.** It counts DOM
+> output, not React work. `__REACT_DEVTOOLS_GLOBAL_HOOK__` is absent in the
+> harness, so components that re-render and produce no DOM change were not
+> counted, and that cost is real and unmeasured. What can be said is that
+> whatever React is doing per token, it results in two DOM mutations — so it is
+> not producing visible churn.
+>
+> **What survives, and is worth doing on its own merits:** the half of 6a that
+> was never about Context. `onSubmit` rewrites pinned files into `@`-mentions
+> and `onCancel` decides whether running agents need a confirmation, both
+> written inline in JSX where no test can reach them. Those belong in named
+> functions in a module. That is a small, safe extraction with a real gain and
+> no re-render implications, and it does not need `ActionsContext` to happen.
+
+### Original text
+
 ## Phase 6 — webview state (⚠ behaviour change, decision required)
 
 `ChatScreenProps` declares **42 fields** and [App.tsx:517](../../webview/src/App.tsx#L517)
