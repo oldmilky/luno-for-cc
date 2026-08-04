@@ -28,6 +28,7 @@ import { Spinner, type CodeInsert } from "./design/primitives";
 import { ChatScreen } from "./features/chat";
 import { WelcomeScreen } from "./features/auth/WelcomeScreen";
 import { FALLBACK_MODELS } from "./features/chat/constants";
+import { withPinnedMentions } from "./features/chat/compose-prompt";
 import {
   liveAgents,
   subagentOutcome,
@@ -556,17 +557,7 @@ export function App() {
         onClearPins={() => setPins([])}
         onInput={setInput}
         onSubmit={(text) => {
-          // Auto-prepend pinned-file mentions so the agent reliably has
-          // them in scope. We use the @-mention syntax the agent already
-          // resolves, separated by spaces, then a blank line before the
-          // user's text. Skip pins that the user has already mentioned.
-          const lowered = text.toLowerCase();
-          const auto = pins
-            .filter((p) => !lowered.includes(`@${p.label.toLowerCase()}`))
-            .map((p) => `@${p.label}`)
-            .join(" ");
-          const finalText = auto ? `${auto}\n\n${text}` : text;
-          send({ type: "prompt", text: finalText });
+          send({ type: "prompt", text: withPinnedMentions(text, pins) });
           setInput("");
         }}
         onCancel={() => {
