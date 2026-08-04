@@ -573,21 +573,17 @@ export function ChatScreen({
 
       <KeyboardHints open={hintsOpen} onClose={() => setHintsOpen(false)} />
 
-      <AnimatePresence>
-        {paletteOpen && (
-          <CommandPalette
-            open={paletteOpen}
-            onClose={() => setPaletteOpen(false)}
-            models={models}
-            skills={skills}
-            permissionMode={permissionMode}
-            disabledModes={disabledModes}
-            onLoadSession={(id) => send({ type: "loadSession", id })}
-            onOpenKeyboardHints={() => setHintsOpen(true)}
-            onOpenHistory={() => setHistoryOpen(true)}
-          />
-        )}
-      </AnimatePresence>
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        models={models}
+        skills={skills}
+        permissionMode={permissionMode}
+        disabledModes={disabledModes}
+        onLoadSession={(id) => send({ type: "loadSession", id })}
+        onOpenKeyboardHints={() => setHintsOpen(true)}
+        onOpenHistory={() => setHistoryOpen(true)}
+      />
 
       <BackgroundAgentsModal
         open={agentsOpen}

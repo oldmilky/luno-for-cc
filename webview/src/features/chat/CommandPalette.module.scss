@@ -3,10 +3,11 @@
 // search row, grouped result rows, footer legend.
 // ─────────────────────────────────────────────────────────────
 
+// Fixed, inset, layer and the portal are `Overlay`'s. The palette is anchored
+// near the top rather than centred, so `display: flex; align-items: flex-start`
+// replaces the primitive's centring grid — written out rather than left to win
+// by cascade order.
 .overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
   display: flex;
   align-items: flex-start;
   justify-content: center;

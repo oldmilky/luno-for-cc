@@ -9,9 +9,9 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { motion } from "framer-motion";
 import { Icon, IconName } from "../../design/icons";
-import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
+import { Overlay } from "../../design/primitives";
+import { BACKDROP } from "../../design/motion";
 import {
   send,
   onMessage,
@@ -231,90 +231,91 @@ export function CommandPalette({
     }
   }, [active]);
 
-  if (!open) return null;
-
   return (
-    <motion.div
-      className={s.overlay}
-      {...BACKDROP}
+    <Overlay
+      open={open}
+      onClose={onClose}
+      label="Command palette"
+      className={s.panel}
+      backdropClassName={s.overlay}
+      // Escape stays in the key handler above, beside the arrows and Enter:
+      // they are one keyboard contract and splitting Escape out of it would
+      // leave two places to look when the palette stops responding.
+      dismissOnEscape={false}
       // This scrim also blurs what sits behind it, and BACKDROP only carries
       // opacity. Each preset state is re-stated with the blur folded in — the
       // preset's duration and curve are left untouched.
-      initial={{ ...BACKDROP.initial, backdropFilter: "blur(0px)" }}
-      animate={{ ...BACKDROP.animate, backdropFilter: "blur(6px)" }}
-      exit={{ ...BACKDROP.exit, backdropFilter: "blur(0px)" }}
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Command palette"
+      backdropMotion={{
+        initial: { ...BACKDROP.initial, backdropFilter: "blur(0px)" },
+        animate: { ...BACKDROP.animate, backdropFilter: "blur(6px)" },
+        exit: { ...BACKDROP.exit, backdropFilter: "blur(0px)" }
+      }}
     >
-      <motion.div
-        {...OVERLAY_PANEL}
-        className={s.panel}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Search input */}
-        <div className={s.search}>
-          <span className={s.searchIcon}>
-            <Icon name="search" size={14} />
-          </span>
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setActive(0);
-            }}
-            placeholder="Type a command, session, skill, or model…"
-            className={s.input}
-            autoFocus
-          />
-          <kbd className={s.escKey}>Esc</kbd>
-        </div>
+      {/* Search input */}
+      <div className={s.search}>
+        <span className={s.searchIcon}>
+          <Icon name="search" size={14} />
+        </span>
+        <input
+          ref={inputRef}
+          // Nominated so `Overlay` focuses the search box rather than the panel
+          // — a palette that opens without a caret is a palette you have to
+          // click before you can type.
+          data-autofocus
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setActive(0);
+          }}
+          placeholder="Type a command, session, skill, or model…"
+          className={s.input}
+          autoFocus
+        />
+        <kbd className={s.escKey}>Esc</kbd>
+      </div>
 
-        {/* Results */}
-        <div ref={listRef} className={s.results}>
-          {total === 0 ? (
-            <div className={s.empty}>
-              <div className={s.emptyText}>
-                {query
-                  ? `No matches for "${query}"`
-                  : "Start typing to find anything."}
-              </div>
+      {/* Results */}
+      <div ref={listRef} className={s.results}>
+        {total === 0 ? (
+          <div className={s.empty}>
+            <div className={s.emptyText}>
+              {query
+                ? `No matches for "${query}"`
+                : "Start typing to find anything."}
             </div>
-          ) : (
-            grouped.map((bucket) => (
-              <div key={bucket.group} className={s.group}>
-                <div className={s.groupLabel}>{bucket.group}</div>
-                {bucket.items.map((r) => (
-                  <PaletteRow
-                    key={r.item.id}
-                    item={r.item}
-                    idx={r.idx}
-                    active={r.idx === active}
-                    onHover={() => setActive(r.idx)}
-                  />
-                ))}
-              </div>
-            ))
-          )}
-        </div>
+          </div>
+        ) : (
+          grouped.map((bucket) => (
+            <div key={bucket.group} className={s.group}>
+              <div className={s.groupLabel}>{bucket.group}</div>
+              {bucket.items.map((r) => (
+                <PaletteRow
+                  key={r.item.id}
+                  item={r.item}
+                  idx={r.idx}
+                  active={r.idx === active}
+                  onHover={() => setActive(r.idx)}
+                />
+              ))}
+            </div>
+          ))
+        )}
+      </div>
 
-        {/* Footer */}
-        <div className={s.footer}>
-          <span className={s.footerNav}>
-            <kbd className={s.key}>↑</kbd>
-            <kbd className={s.key}>↓</kbd>
-            to navigate
-          </span>
-          <span className={s.footerSelect}>
-            <kbd className={s.key}>↵</kbd>
-            to select
-          </span>
-        </div>
-      </motion.div>
-    </motion.div>
+      {/* Footer */}
+      <div className={s.footer}>
+        <span className={s.footerNav}>
+          <kbd className={s.key}>↑</kbd>
+          <kbd className={s.key}>↓</kbd>
+          to navigate
+        </span>
+        <span className={s.footerSelect}>
+          <kbd className={s.key}>↵</kbd>
+          to select
+        </span>
+      </div>
+    </Overlay>
   );
 }
 
