@@ -409,7 +409,66 @@ a result.
 
 ---
 
-## Phase 5 — the overlay primitive (⚠ behaviour change, high value)
+## Phase 5 — the overlay primitive — DONE 2026-08-04
+
+Landed as `ac0bb67` (primitive + StopAgents), `db92b90`, `4c5cb19`, `1e9b1da`,
+`8067163` (two), `eb32256`, `5c84f66`, `6f11e37` (three), `f1f95ab`. Gates held
+at **1544 / 6**, lint exit 0 at 35 warnings, package 1.28 MB throughout.
+
+> **The count was 13; it was 14, then 12, and the difference is the finding.**
+> Sixteen SCSS modules hand-write a fixed backdrop. Two — `Tooltip` and
+> `SkillDetailModal` — already portal themselves, leaving 14 rather than 13; one
+> had been added since the plan was written. Two of those 14 turned out not to
+> be overlays at all, so **12 migrated**.
+>
+> **The mechanism is worse than "the overlay clips".** Measured in the harness:
+> an identical `position: fixed; inset: 0` under an ancestor carrying
+> `transform: translateZ(0)` computes to **917×0 at top 902** against a 917×902
+> viewport. It does not clip at an edge — it collapses to nothing and leaves the
+> screen. framer writes `transform` inline on every `motion.*`, so any overlay
+> inside an animated subtree is one refactor away from this. The note in
+> `ChatScreen.module.scss` is the round of debugging it already cost.
+>
+> **`EditConfirmModal` was the proof it was already costing something.** Its SCSS
+> carried `position: fixed !important; z-index: 1000 !important`, forced past a
+> `.app > *:not(…)` selector scoring 0-5-1 that would otherwise have dropped the
+> backdrop into normal flow and scrolled the whole sidebar. Rendering into
+> `document.body` puts the element outside `.app`; both `!important`s are gone.
+>
+> **The primitive grew four props, each found by a migration rather than
+> designed up front** — `panelMotion`, `backdropMotion`, `labelledBy`, and
+> `wrapPanel`. The last is the one that matters: it hands the panel back whole
+> for a drawer, a palette or a sheet whose panel is genuinely its own. That is
+> the honest division — the portal is why the primitive exists; a centred sheet
+> on a shared preset is a convenience for the common case.
+>
+> **One default was wrong and a migration caught it.** Focus fell through to the
+> first focusable control. `EditConfirmModal` binds Enter to Revert, and a
+> focused button activates on Enter — so both would have run, and not in the
+> order the key means. Focus lands on the panel now unless a control asks with
+> `data-autofocus`.
+>
+> **Not migrated, and it is not laziness:** `PlanReviewDropdown` and
+> `SelectionCommentLayer`. Both are `position: fixed` anchored to coordinates
+> from a `DOMRect`, not full-viewport backdrops — a popover, not a dialog.
+> `Overlay` would give them `aria-modal`, a focus trap and a scroll lock, none of
+> which belongs on a popover pinned to a text selection. **They carry the same
+> latent bug**: a transformed ancestor re-anchors their coordinates just as it
+> does a backdrop. What they need is a bare portal — which `Tooltip` already
+> implements privately, positioning from a rect. Extracting that is the next
+> piece of this work and it is a different primitive, not this one.
+>
+> **What was NOT verified, throughout.** The harness window stopped compositing
+> partway through the session — `requestAnimationFrame` fell to 1–2 ticks per
+> 300ms — so framer had nothing to drive and no enter/exit curve could be
+> sampled after the first two migrations. StopAgents was measured at 208ms over
+> 50 frames and Rewind at 206ms while it still painted. Everything else here is
+> rAF-independent: portal parentage, computed layout, geometry, focus, scroll
+> lock, and the built CSS. Escape was proven through the scroll lock releasing,
+> which only happens when the effect cleanup runs. **The animations are owed a
+> pass on a window that paints.**
+
+### Original text
 
 The first phase that is _not_ a pure move, and the one with the best ratio of
 lines removed to risk taken.
