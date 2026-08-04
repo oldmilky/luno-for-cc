@@ -12,12 +12,16 @@
 
 @use "../../themes/motion" as motion;
 
+// Fixed, inset, layer and the portal are `Overlay`'s. The rest is reset on
+// purpose: the primitive centres a sheet in a padded grid, and a drawer has to
+// reach the screen edges instead — `padding: 0` and `align-items: stretch`
+// undo the two properties `place-items: center` and the 16px gutter would
+// otherwise impose. Written out rather than left to win by cascade order.
 .backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 900;
   display: flex;
+  align-items: stretch;
   justify-content: flex-end;
+  padding: 0;
   // Scrim only. Motion owns opacity + backdrop-filter on this element,
   // so declaring either here would fight the animation.
   // Mixed from --shadow-color, not --s0: a scrim must darken on every

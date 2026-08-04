@@ -10,9 +10,9 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { Icon } from "../../design/icons";
-import { Tooltip } from "../../design/primitives";
+import { Overlay, Tooltip } from "../../design/primitives";
 import {
   BACKDROP,
   DRAWER,
@@ -59,19 +59,14 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
     send({ type: "requestHistory" });
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      // Escape backs out one step at a time: a rename in progress is what the
-      // user is looking at, so closing the whole drawer would answer a question
-      // they did not ask.
-      if (renamingId) setRenamingId(null);
-      else onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose, renamingId]);
+  // Escape backs out one step at a time: a rename in progress is what the user
+  // is looking at, so closing the whole drawer would answer a question they did
+  // not ask. That is why `Overlay`'s own Escape is turned off below rather than
+  // this being deleted — the primitive has no idea a rename is open.
+  const escapeBacksOut = () => {
+    if (renamingId) setRenamingId(null);
+    else onClose();
+  };
 
   const filtered = useMemo(() => {
     if (!sessions) return null;
@@ -104,161 +99,164 @@ export function HistoryDrawer({ open, onClose, onSelect }: HistoryDrawerProps) {
   };
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          key="drawer-backdrop"
-          className={s.backdrop}
-          {...BACKDROP}
-          // This scrim also blurs the chat behind it, which BACKDROP has no
-          // field for. Folded into the preset's own states so the blur and the
-          // fade stay on one timing instead of drifting apart.
-          initial={{ ...BACKDROP.initial, backdropFilter: "blur(0px)" }}
-          animate={{ ...BACKDROP.animate, backdropFilter: "blur(4px)" }}
-          exit={{ ...BACKDROP.exit, backdropFilter: "blur(0px)" }}
-          onClick={onClose}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Chat history"
-        >
-          <motion.aside
-            key="drawer-panel"
-            {...DRAWER}
-            // DRAWER owns the slide and the exit. The panel also settles a hair
-            // of scale — not part of the preset, so it is folded into its states
-            // rather than given a transition of its own. `transform-origin` in
-            // the module anchors that scale to the screen edge.
-            initial={{ ...DRAWER.initial, scale: 0.985 }}
-            animate={{ ...DRAWER.animate, scale: 1 }}
-            exit={{ ...DRAWER.exit, scale: 0.99 }}
-            className={s.panel}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <header className={s.head}>
-              <div className={s.headLeft}>
-                <motion.span
-                  className={s.headIcon}
-                  initial={{ scale: 0.85, rotate: -12 }}
-                  animate={{ scale: 1, rotate: 0 }}
-                  // A mark rather than a row, so it keeps its bit of character:
-                  // SPRING_POP. The delay is a stagger step, not a literal — it
-                  // only has to land after the panel, not at a precise moment.
-                  transition={{ ...SPRING_POP, delay: stagger(2) }}
-                >
-                  <Icon name="history" size={13} />
-                </motion.span>
-                <h2 className={s.headTitle}>Chat history</h2>
-              </div>
-              <Tooltip label="Close (Esc)">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  aria-label="Close (Esc)"
-                  className={s.close}
-                >
-                  <Icon name="x" size={13} />
-                </button>
-              </Tooltip>
-            </header>
+    <Overlay
+      open={open}
+      onClose={onClose}
+      label="Chat history"
+      backdropClassName={s.backdrop}
+      // The panel is an `<aside>` pinned to an edge on the `DRAWER` preset, so
+      // the primitive hands it back whole rather than wrapping it in a centred
+      // sheet. Portal, backdrop, focus trap, restore and scroll lock stay.
+      wrapPanel={false}
+      // Escape is this drawer's, because it means "back out one step" here and
+      // the primitive cannot know a rename is open.
+      dismissOnEscape={false}
+      // This scrim also blurs the chat behind it, which BACKDROP has no field
+      // for. Folded into the preset's own states so the blur and the fade stay
+      // on one timing instead of drifting apart.
+      backdropMotion={{
+        initial: { ...BACKDROP.initial, backdropFilter: "blur(0px)" },
+        animate: { ...BACKDROP.animate, backdropFilter: "blur(4px)" },
+        exit: { ...BACKDROP.exit, backdropFilter: "blur(0px)" }
+      }}
+    >
+      <motion.aside
+        key="drawer-panel"
+        onKeyDown={(e) => {
+          if (e.key === "Escape") escapeBacksOut();
+        }}
+        {...DRAWER}
+        // DRAWER owns the slide and the exit. The panel also settles a hair
+        // of scale — not part of the preset, so it is folded into its states
+        // rather than given a transition of its own. `transform-origin` in
+        // the module anchors that scale to the screen edge.
+        initial={{ ...DRAWER.initial, scale: 0.985 }}
+        animate={{ ...DRAWER.animate, scale: 1 }}
+        exit={{ ...DRAWER.exit, scale: 0.99 }}
+        className={s.panel}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <header className={s.head}>
+          <div className={s.headLeft}>
+            <motion.span
+              className={s.headIcon}
+              initial={{ scale: 0.85, rotate: -12 }}
+              animate={{ scale: 1, rotate: 0 }}
+              // A mark rather than a row, so it keeps its bit of character:
+              // SPRING_POP. The delay is a stagger step, not a literal — it
+              // only has to land after the panel, not at a precise moment.
+              transition={{ ...SPRING_POP, delay: stagger(2) }}
+            >
+              <Icon name="history" size={13} />
+            </motion.span>
+            <h2 className={s.headTitle}>Chat history</h2>
+          </div>
+          <Tooltip label="Close (Esc)">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close (Esc)"
+              className={s.close}
+            >
+              <Icon name="x" size={13} />
+            </button>
+          </Tooltip>
+        </header>
 
-            {/* Search */}
-            <div className={s.search}>
-              <div className={s.searchField}>
-                <span className={s.searchIcon}>
-                  <Icon name="search" size={12} />
-                </span>
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search chats…"
-                  className={s.searchInput}
-                />
-                {query && (
-                  <button
-                    type="button"
-                    onClick={() => setQuery("")}
-                    className={s.searchClear}
-                    aria-label="Clear search"
+        {/* Search */}
+        <div className={s.search}>
+          <div className={s.searchField}>
+            <span className={s.searchIcon}>
+              <Icon name="search" size={12} />
+            </span>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search chats…"
+              className={s.searchInput}
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                className={s.searchClear}
+                aria-label="Clear search"
+              >
+                <Icon name="x" size={10} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className={s.body}>
+          {sessions === null && <LoadingState />}
+          {sessions !== null && sessions.length === 0 && (
+            <EmptyState
+              title="No previous chats yet"
+              sub="Start a conversation — it'll appear here."
+            />
+          )}
+          {sessions !== null && sessions.length > 0 && grouped.length === 0 && (
+            <EmptyState
+              title="No matches"
+              sub={`Nothing matched "${query}". Try a different keyword.`}
+            />
+          )}
+
+          {grouped.map((group, gi) => (
+            <motion.section
+              key={group.label}
+              {...enterAt(gi)}
+              className={s.group}
+            >
+              <div className={s.groupLabel}>{group.label}</div>
+              <ul className={s.list}>
+                {group.items.map((session, i) => (
+                  <motion.li
+                    key={session.id}
+                    // Rows come in from the left, so they cannot take ENTER
+                    // whole — same duration and curve, TRAVEL.sm turned
+                    // sideways. The delay still compounds group and row.
+                    initial={{ opacity: 0, x: -TRAVEL.sm }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{
+                      ...ENTER.transition,
+                      delay: stagger(gi) + stagger(i)
+                    }}
                   >
-                    <Icon name="x" size={10} />
-                  </button>
-                )}
-              </div>
-            </div>
+                    <HistoryItem
+                      session={session}
+                      onSelect={() => onSelect(session.id)}
+                      onDelete={() => handleDelete(session.id)}
+                      confirming={confirmId === session.id}
+                      renaming={renamingId === session.id}
+                      onStartRename={() => setRenamingId(session.id)}
+                      onRename={(name) => handleRename(session.id, name)}
+                      onCancelRename={() => setRenamingId(null)}
+                    />
+                  </motion.li>
+                ))}
+              </ul>
+            </motion.section>
+          ))}
+        </div>
 
-            {/* Body */}
-            <div className={s.body}>
-              {sessions === null && <LoadingState />}
-              {sessions !== null && sessions.length === 0 && (
-                <EmptyState
-                  title="No previous chats yet"
-                  sub="Start a conversation — it'll appear here."
-                />
-              )}
-              {sessions !== null &&
-                sessions.length > 0 &&
-                grouped.length === 0 && (
-                  <EmptyState
-                    title="No matches"
-                    sub={`Nothing matched "${query}". Try a different keyword.`}
-                  />
-                )}
-
-              {grouped.map((group, gi) => (
-                <motion.section
-                  key={group.label}
-                  {...enterAt(gi)}
-                  className={s.group}
-                >
-                  <div className={s.groupLabel}>{group.label}</div>
-                  <ul className={s.list}>
-                    {group.items.map((session, i) => (
-                      <motion.li
-                        key={session.id}
-                        // Rows come in from the left, so they cannot take ENTER
-                        // whole — same duration and curve, TRAVEL.sm turned
-                        // sideways. The delay still compounds group and row.
-                        initial={{ opacity: 0, x: -TRAVEL.sm }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{
-                          ...ENTER.transition,
-                          delay: stagger(gi) + stagger(i)
-                        }}
-                      >
-                        <HistoryItem
-                          session={session}
-                          onSelect={() => onSelect(session.id)}
-                          onDelete={() => handleDelete(session.id)}
-                          confirming={confirmId === session.id}
-                          renaming={renamingId === session.id}
-                          onStartRename={() => setRenamingId(session.id)}
-                          onRename={(name) => handleRename(session.id, name)}
-                          onCancelRename={() => setRenamingId(null)}
-                        />
-                      </motion.li>
-                    ))}
-                  </ul>
-                </motion.section>
-              ))}
-            </div>
-
-            {/* Footer */}
-            <div className={s.foot}>
-              <span>
-                {sessions ? sessions.length : 0}{" "}
-                {sessions && sessions.length === 1 ? "chat" : "chats"} total
-              </span>
-              <span>
-                <kbd className={s.kbd}>Esc</kbd>
-                <span className={s.footHint}>to close</span>
-              </span>
-            </div>
-          </motion.aside>
-        </motion.div>
-      )}
-    </AnimatePresence>
+        {/* Footer */}
+        <div className={s.foot}>
+          <span>
+            {sessions ? sessions.length : 0}{" "}
+            {sessions && sessions.length === 1 ? "chat" : "chats"} total
+          </span>
+          <span>
+            <kbd className={s.kbd}>Esc</kbd>
+            <span className={s.footHint}>to close</span>
+          </span>
+        </div>
+      </motion.aside>
+    </Overlay>
   );
 }
 

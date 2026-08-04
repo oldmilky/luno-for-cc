@@ -73,6 +73,22 @@ interface OverlayBaseProps {
    *  only, so a scrim that also blurs has to re-state each state with the blur
    *  folded in — declaring the blur in CSS instead would fight the tween. */
   backdropMotion?: Pick<MotionProps, "initial" | "animate" | "exit">;
+  /**
+   * Whether the primitive draws the panel around `children`.
+   *
+   * On by default, because a centred sheet on `OVERLAY_PANEL` is the common
+   * case and repeating it fourteen times is what this exists to stop. Off for
+   * an overlay whose panel is genuinely its own — a drawer pinned to an edge
+   * on the `DRAWER` preset, a palette anchored to the top, a full-height
+   * sheet. Those need their own element, their own motion and their own
+   * layout, and the honest thing is to hand the whole panel back rather than
+   * grow a prop for each difference.
+   *
+   * What the primitive still owns either way, and the reason to use it at all:
+   * the portal, the backdrop, Escape, the focus trap and its restore, the
+   * scroll lock, and the exit.
+   */
+  wrapPanel?: boolean;
 }
 
 export type OverlayProps = OverlayBaseProps & OverlayName;
@@ -88,9 +104,12 @@ export function Overlay({
   dismissOnBackdrop = true,
   dismissOnEscape = true,
   panelMotion,
-  backdropMotion
+  backdropMotion,
+  wrapPanel = true
 }: OverlayProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
+  // Focus is trapped inside the backdrop, which contains the panel in either
+  // mode — so the same root serves the wrapped and unwrapped shapes.
+  const focusRoot = useRef<HTMLDivElement>(null);
   const restoreTo = useRef<HTMLElement | null>(null);
   // A drag that starts on the panel and ends on the backdrop fires `click` on
   // their common ancestor, which is the backdrop — selecting text in a dialog
@@ -132,9 +151,9 @@ export function Overlay({
   // key means. Nominating is explicit; falling into it is not.
   useEffect(() => {
     if (!open) return;
-    const panel = panelRef.current;
-    if (!panel) return;
-    (panel.querySelector<HTMLElement>("[data-autofocus]") ?? panel).focus();
+    const root = focusRoot.current;
+    if (!root) return;
+    (root.querySelector<HTMLElement>("[data-autofocus]") ?? root).focus();
   }, [open]);
 
   const onKeyDown = useCallback(
@@ -147,9 +166,9 @@ export function Overlay({
         return;
       }
       if (e.key !== "Tab") return;
-      const panel = panelRef.current;
-      if (!panel) return;
-      const stops = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
+      const root = focusRoot.current;
+      if (!root) return;
+      const stops = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
       if (stops.length === 0) return;
       const edge = e.shiftKey ? stops[0] : stops[stops.length - 1];
       // Wrapping by hand rather than trusting the browser: the panel is in
@@ -186,18 +205,26 @@ export function Overlay({
               onClose();
             }
           }}
+          ref={focusRoot}
+          // Focusable so the dialog can take focus itself when nothing inside
+          // nominates a control — see the effect above for why that is the
+          // default rather than the first button.
+          tabIndex={-1}
           {...BACKDROP}
           {...backdropMotion}
         >
-          <motion.div
-            ref={panelRef}
-            className={className ? `${s.panel} ${className}` : s.panel}
-            tabIndex={-1}
-            {...OVERLAY_PANEL}
-            {...panelMotion}
-          >
-            {children}
-          </motion.div>
+          {wrapPanel ? (
+            <motion.div
+              className={className ? `${s.panel} ${className}` : s.panel}
+              tabIndex={-1}
+              {...OVERLAY_PANEL}
+              {...panelMotion}
+            >
+              {children}
+            </motion.div>
+          ) : (
+            children
+          )}
         </motion.div>
       )}
     </AnimatePresence>,
