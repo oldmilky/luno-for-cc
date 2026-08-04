@@ -10,7 +10,7 @@
 // popover round-trips only because file search has to hit the disk.
 // ─────────────────────────────────────────────────────────────
 
-import type { SlashCommand } from "../../lib/rpc";
+import type { SlashCommand } from "../../../lib/rpc";
 
 /**
  * What has been typed after a leading `/`, or null when the prompt is not a

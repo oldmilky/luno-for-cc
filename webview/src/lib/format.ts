@@ -6,7 +6,7 @@
 //
 // The three number formats in this app are NOT interchangeable, which is why
 // only two of them live here and `formatCompact` / `formatNum` /
-// `formatPctUsed` stay in `features/chat/usage-view.ts` with the token meter
+// `formatPctUsed` stay in `features/chat/usage/usage-view.ts` with the token meter
 // that is their only consumer. Measured, same input through each:
 //
 //        input     formatTokens  formatCompact  formatCount

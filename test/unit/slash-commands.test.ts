@@ -11,7 +11,7 @@ import {
 import {
   filterCommands,
   slashQuery
-} from "../../webview/src/features/chat/slash-filter";
+} from "../../webview/src/features/chat/composer/slash-filter";
 
 let root: string;
 

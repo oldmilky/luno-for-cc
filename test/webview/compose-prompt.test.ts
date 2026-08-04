@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { withPinnedMentions } from "../../webview/src/features/chat/compose-prompt.js";
-import type { PinnedFile } from "../../webview/src/features/chat/PinnedContext.js";
+import { withPinnedMentions } from "../../webview/src/features/chat/composer/compose-prompt.js";
+import type { PinnedFile } from "../../webview/src/features/chat/composer/PinnedContext.js";
 
 // What the composer sends is not what was typed: pins are folded in as
 // `@`-mentions on the way out. That rewrite lived in a closure inside a JSX

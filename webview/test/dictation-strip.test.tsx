@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { render } from "./render";
-import { DictationStrip } from "../src/features/chat/DictationStrip";
+import { DictationStrip } from "../src/features/chat/composer/DictationStrip";
 
 describe("the dictation strip", () => {
   it("says it is listening before a word comes back", () => {

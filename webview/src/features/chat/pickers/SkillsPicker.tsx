@@ -10,14 +10,14 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { POPOVER_ABOVE } from "../../design/motion";
+import { POPOVER_ABOVE } from "../../../design/motion";
 import { AnimatePresence, motion } from "framer-motion";
-import { Icon, IconName } from "../../design/icons";
-import { Tooltip } from "../../design/primitives";
-import { send, SkillInfo } from "../../lib/rpc";
-import { SkillsMarketplace } from "./modals/SkillsMarketplace";
-import d from "../../design/primitives/Dropdown.module.scss";
-import { PendingDot } from "./timeline/PendingDot";
+import { Icon, IconName } from "../../../design/icons";
+import { Tooltip } from "../../../design/primitives";
+import { send, SkillInfo } from "../../../lib/rpc";
+import { SkillsMarketplace } from "../modals/SkillsMarketplace";
+import d from "../../../design/primitives/Dropdown.module.scss";
+import { PendingDot } from "../timeline/PendingDot";
 import s from "./SkillsPicker.module.scss";
 
 export interface SkillsPickerProps {

@@ -6,11 +6,11 @@
 // ─────────────────────────────────────────────────────────────
 
 import { motion, AnimatePresence } from "framer-motion";
-import { ENTER, EXPAND, TRAVEL } from "../../design/motion";
-import { Icon } from "../../design/icons";
-import { Tooltip } from "../../design/primitives";
-import { send } from "../../lib/rpc";
-import bits from "./ChatBits.module.scss";
+import { ENTER, EXPAND, TRAVEL } from "../../../design/motion";
+import { Icon } from "../../../design/icons";
+import { Tooltip } from "../../../design/primitives";
+import { send } from "../../../lib/rpc";
+import bits from "../ChatBits.module.scss";
 
 export interface PinnedFile {
   path: string;

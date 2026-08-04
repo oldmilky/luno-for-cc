@@ -134,7 +134,7 @@ export function harnessReplies(
         { path: "src/ui/domains/", name: "domains", kind: "folder" },
         { path: "src/ui/panel.ts", name: "panel.ts", kind: "file" },
         {
-          path: "webview/src/features/chat/Composer.tsx",
+          path: "webview/src/features/chat/composer/Composer.tsx",
           name: "Composer.tsx",
           kind: "file"
         }

@@ -10,8 +10,8 @@
 // ─────────────────────────────────────────────────────────────
 
 import { motion } from "framer-motion";
-import { Icon } from "../../design/icons";
-import { DURATION, EASE_OUT, ENTER } from "../../design/motion";
+import { Icon } from "../../../design/icons";
+import { DURATION, EASE_OUT, ENTER } from "../../../design/motion";
 import s from "./DictationStrip.module.scss";
 
 const BARS = 5;

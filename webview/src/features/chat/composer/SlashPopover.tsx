@@ -16,10 +16,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { SlashCommand } from "../../lib/rpc";
+import type { SlashCommand } from "../../../lib/rpc";
 import { filterCommands } from "./slash-filter";
-import { Icon } from "../../design/icons";
-import { OVERLAY_PANEL } from "../../design/motion";
+import { Icon } from "../../../design/icons";
+import { OVERLAY_PANEL } from "../../../design/motion";
 import s from "./MentionPopover.module.scss";
 
 export interface SlashPopoverProps {

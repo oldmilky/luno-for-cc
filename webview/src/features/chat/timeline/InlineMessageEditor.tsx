@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import type { PermissionMode, ModelInfo, SkillInfo } from "../../../lib/rpc";
-import { Composer } from "../Composer";
+import { Composer } from "../composer/Composer";
 import s from "../ChatScreen.module.scss";
 
 // ── Inline message editor ───────────────────────────────────

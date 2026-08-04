@@ -13,7 +13,7 @@
 // component so they can be tested without a DOM.
 // ─────────────────────────────────────────────────────────────
 
-import type { UtilizationLimit } from "../../lib/rpc";
+import type { UtilizationLimit } from "../../../lib/rpc";
 
 /** Which `.tone*` class paints a chip or a bar. The colors live in the module. */
 export type ToneKey = "ok" | "warn" | "err" | "accent";

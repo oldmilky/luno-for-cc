@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { Icon } from "../../design/icons";
+import { Icon } from "../../../design/icons";
 import {
   Dropdown,
   RichEditor,
@@ -16,7 +16,7 @@ import {
   makeMentionBadge,
   type CodeInsert,
   type RichEditorHandle
-} from "../../design/primitives";
+} from "../../../design/primitives";
 import {
   send,
   newId,
@@ -27,9 +27,9 @@ import {
   SkillInfo,
   SlashCommand,
   PendingSetting
-} from "../../lib/rpc";
-import { useWebviewSettings } from "../../lib/settings";
-import { MODES, findMode } from "./constants";
+} from "../../../lib/rpc";
+import { useWebviewSettings } from "../../../lib/settings";
+import { MODES, findMode } from "../constants";
 import {
   MentionPopover,
   TERMINAL_PREFIX,
@@ -37,12 +37,12 @@ import {
 } from "./MentionPopover";
 import { SlashPopover } from "./SlashPopover";
 import { slashQuery } from "./slash-filter";
-import { SkillsPicker } from "./SkillsPicker";
-import { ModelPicker } from "./ModelPicker";
-import { EffortPicker } from "./EffortPicker";
-import { PendingDot } from "./timeline/PendingDot";
-import { ImageLightbox } from "./modals/ImageLightbox";
-import type { AgentPanel } from "./timeline/subagent-state";
+import { SkillsPicker } from "../pickers/SkillsPicker";
+import { ModelPicker } from "../pickers/ModelPicker";
+import { EffortPicker } from "../pickers/EffortPicker";
+import { PendingDot } from "../timeline/PendingDot";
+import { ImageLightbox } from "../modals/ImageLightbox";
+import type { AgentPanel } from "../timeline/subagent-state";
 import type { VoiceState } from "./voice-state";
 import { DictationStrip } from "./DictationStrip";
 import s from "./Composer.module.scss";

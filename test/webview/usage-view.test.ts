@@ -6,7 +6,7 @@ import {
   toneForLimit,
   toneForPct,
   pctOf
-} from "../../webview/src/features/chat/usage-view";
+} from "../../webview/src/features/chat/usage/usage-view";
 import type { UtilizationLimit } from "../../webview/src/lib/rpc";
 
 const limit = (over: Partial<UtilizationLimit>): UtilizationLimit => ({

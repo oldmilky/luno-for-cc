@@ -13,14 +13,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { POPOVER_ABOVE } from "../../design/motion";
-import { Icon } from "../../design/icons";
-import { Tooltip } from "../../design/primitives";
-import { onMessage } from "../../lib/rpc";
-import type { EffortLevel, ModelInfo } from "../../lib/rpc";
-import { EFFORT_LEVELS, ULTRACODE_OPTION, findEffort } from "./constants";
-import d from "../../design/primitives/Dropdown.module.scss";
-import { PendingDot } from "./timeline/PendingDot";
+import { POPOVER_ABOVE } from "../../../design/motion";
+import { Icon } from "../../../design/icons";
+import { Tooltip } from "../../../design/primitives";
+import { onMessage } from "../../../lib/rpc";
+import type { EffortLevel, ModelInfo } from "../../../lib/rpc";
+import { EFFORT_LEVELS, ULTRACODE_OPTION, findEffort } from "../constants";
+import d from "../../../design/primitives/Dropdown.module.scss";
+import { PendingDot } from "../timeline/PendingDot";
 import s from "./EffortPicker.module.scss";
 
 interface EffortPickerProps {

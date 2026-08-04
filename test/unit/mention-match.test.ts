@@ -14,8 +14,8 @@ const file = (path: string): MentionEntry => ({
 });
 
 const TREE = [
-  "webview/src/features/chat/Composer.tsx",
-  "webview/src/features/chat/MentionPopover.tsx",
+  "webview/src/features/chat/composer/Composer.tsx",
+  "webview/src/features/chat/composer/MentionPopover.tsx",
   "webview/src/features/chat/ChatScreen.tsx",
   "src/ui/domains/files.ts",
   "src/ui/panel.ts",
@@ -40,12 +40,20 @@ describe("mention ranking", () => {
 
   it("finds a file by a subsequence of its name", () => {
     const hits = rankMentions(TREE, "mpop", 12).map((e) => e.path);
-    expect(hits).toContain("webview/src/features/chat/MentionPopover.tsx");
+    expect(hits).toContain(
+      "webview/src/features/chat/composer/MentionPopover.tsx"
+    );
   });
 
-  it("finds a file by a fragment of its path", () => {
+  // A directory fragment answers with everything under it, in filename order —
+  // `chat/comp` names the folder, not one file in it. The fixture used to hold
+  // both components flat in `chat/`, where the same query reached exactly one.
+  it("finds files by a fragment of their path", () => {
     const hits = rankMentions(TREE, "chat/comp", 12).map((e) => e.path);
-    expect(hits).toEqual(["webview/src/features/chat/Composer.tsx"]);
+    expect(hits).toEqual([
+      "webview/src/features/chat/composer/Composer.tsx",
+      "webview/src/features/chat/composer/MentionPopover.tsx"
+    ]);
   });
 
   // One and two characters subsequence-match nearly every path in a

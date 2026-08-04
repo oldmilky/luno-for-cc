@@ -1,10 +1,10 @@
 import { motion } from "framer-motion";
-import { ENTER } from "../../design/motion";
-import { Icon } from "../../design/icons";
-import { Tooltip } from "../../design/primitives";
-import { send } from "../../lib/rpc";
-import type { EditorContext } from "../../lib/rpc";
-import bits from "./ChatBits.module.scss";
+import { ENTER } from "../../../design/motion";
+import { Icon } from "../../../design/icons";
+import { Tooltip } from "../../../design/primitives";
+import { send } from "../../../lib/rpc";
+import type { EditorContext } from "../../../lib/rpc";
+import bits from "../ChatBits.module.scss";
 
 interface ContextStripProps {
   context: EditorContext | null;

@@ -25,15 +25,15 @@ import {
   useTransform
 } from "framer-motion";
 import type { MotionValue } from "framer-motion";
-import { Icon } from "../../design/icons";
-import { Tooltip } from "../../design/primitives";
+import { Icon } from "../../../design/icons";
+import { Tooltip } from "../../../design/primitives";
 import {
   PRESS,
   OVERLAY_PANEL,
   TRAVEL,
   SPRING_PRESS
-} from "../../design/motion";
-import { onMessage, send } from "../../lib/rpc";
+} from "../../../design/motion";
+import { onMessage, send } from "../../../lib/rpc";
 import type {
   TimelineEvent,
   UsageTotals,
@@ -41,7 +41,7 @@ import type {
   RateLimitStatus,
   UsageUtilization,
   UtilizationLimit
-} from "../../lib/rpc";
+} from "../../../lib/rpc";
 import {
   serverRows,
   chipView,

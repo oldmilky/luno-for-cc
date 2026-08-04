@@ -23,7 +23,7 @@ import {
 } from "../../design/motion";
 import { send, ChatStatus, TimelineEvent } from "../../lib/rpc";
 import { HEADER_LABEL, headerStatus } from "./chat-status";
-import { TokenMeter } from "./TokenMeter";
+import { TokenMeter } from "./usage/TokenMeter";
 import { RemoteControlPill } from "./RemoteControlPill";
 import { ThemePicker } from "../theme/ThemePicker";
 import type { RemoteControlStatus } from "../../lib/rpc";

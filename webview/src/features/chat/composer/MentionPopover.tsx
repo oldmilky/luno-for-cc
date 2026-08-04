@@ -17,9 +17,9 @@ import {
   newId,
   FileSearchResult,
   TerminalRunView
-} from "../../lib/rpc";
-import { Icon } from "../../design/icons";
-import { OVERLAY_PANEL } from "../../design/motion";
+} from "../../../lib/rpc";
+import { Icon } from "../../../design/icons";
+import { OVERLAY_PANEL } from "../../../design/motion";
 import s from "./MentionPopover.module.scss";
 
 /** The prefix that turns the file list into the terminal list. */

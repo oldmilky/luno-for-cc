@@ -14,14 +14,14 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
-import { POPOVER_ABOVE, SWAP } from "../../design/motion";
+import { POPOVER_ABOVE, SWAP } from "../../../design/motion";
 import { AnimatePresence, motion } from "framer-motion";
-import { Icon } from "../../design/icons";
-import { send, onMessage } from "../../lib/rpc";
-import type { ModelInfo, EffortLevel } from "../../lib/rpc";
-import { ULTRACODE_OPTION, clampEffort } from "./constants";
-import { Tooltip } from "../../design/primitives";
-import d from "../../design/primitives/Dropdown.module.scss";
+import { Icon } from "../../../design/icons";
+import { send, onMessage } from "../../../lib/rpc";
+import type { ModelInfo, EffortLevel } from "../../../lib/rpc";
+import { ULTRACODE_OPTION, clampEffort } from "../constants";
+import { Tooltip } from "../../../design/primitives";
+import d from "../../../design/primitives/Dropdown.module.scss";
 import s from "./ModelPicker.module.scss";
 
 export interface ModelPickerProps {

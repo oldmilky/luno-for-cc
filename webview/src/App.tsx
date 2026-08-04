@@ -28,13 +28,13 @@ import { Spinner, type CodeInsert } from "./design/primitives";
 import { ChatScreen } from "./features/chat";
 import { WelcomeScreen } from "./features/auth/WelcomeScreen";
 import { FALLBACK_MODELS } from "./features/chat/constants";
-import { withPinnedMentions } from "./features/chat/compose-prompt";
+import { withPinnedMentions } from "./features/chat/composer/compose-prompt";
 import {
   liveAgents,
   subagentOutcome,
   type LiveAgents
 } from "./features/chat/timeline/subagent-state";
-import { IDLE_VOICE, type VoiceState } from "./features/chat/voice-state";
+import { IDLE_VOICE, type VoiceState } from "./features/chat/composer/voice-state";
 import { StopAgentsModal } from "./features/chat/modals/StopAgentsModal";
 import s from "./App.module.scss";
 
