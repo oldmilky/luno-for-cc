@@ -489,6 +489,41 @@ at **1544 / 6**, lint exit 0 at 35 warnings, package 1.28 MB throughout.
 > lock, and the built CSS. Escape was proven through the scroll lock releasing,
 > which only happens when the effect cleanup runs. **The animations are owed a
 > pass on a window that paints.**
+>
+> **The debt was paid 2026-08-04, and it found a bug.** A window opened fresh in
+> the foreground composites at 73 rAF ticks per 300ms; navigating an existing
+> tab does not, which is what had been happening. Nine of the twelve measured at
+> 50 frames each:
+>
+> | overlay                                           | unmount | panel opacity at ¼ |
+> | ------------------------------------------------- | ------- | ------------------ |
+> | history drawer · command palette · keyboard hints | 208ms   | 0.917–0.919        |
+> | permissions · background agents · stop agents     | 208ms   | 0.917–0.920        |
+> | connectors                                        | 211ms   | 0.923              |
+> | rewind (Phase 5)                                  | 206ms   | —                  |
+>
+> Declared: a 200ms panel exit on `DURATION.overlay`. **The quarter-way figure is
+> the one that mattered** — the note on `EASE_SOFT` records that the old
+> `EASE_OUT` left a dismissed panel at 0.47 there, invisible by halfway, which is
+> why they read as "closing with no animation". At 0.92 these are symmetric.
+>
+> **And Escape did not close the history drawer at all.** It is the only overlay
+> on `wrapPanel={false}`, so its panel is its own element inside the backdrop —
+> and it kept its Escape handler on that panel while turning the primitive's off.
+> Focus lands on the backdrop and keydown travels up, so the handler never saw
+> the key. Fixed by giving the primitive an `onEscape` that replaces what the key
+> DOES while it keeps owning WHERE it listens. **No amount of static review would
+> have caught this; only pressing the key does.**
+>
+> **Three remain unmeasured, and the reason is the harness rather than the
+> work.** `SkillsMarketplace` needs a catalog response `harness-host.ts` does not
+> serve; `FileDiffModal`, `EditConfirmModal` and `ImageLightbox` need timeline
+> content it does not produce — seeding a `tool_call` by hand did not reconstruct
+> the shape `extract-file-edits` reads. `FileDiffModal` is the one that matters,
+> since it carries the only bespoke `panelMotion` in the set. **Teaching the fake
+> host to serve a file edit and a catalog page is the prerequisite**, and it is a
+> harness gap worth closing on its own account: those surfaces cannot be checked
+> at all today.
 
 ### Original text
 
