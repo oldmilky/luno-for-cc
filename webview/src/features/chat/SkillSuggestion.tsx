@@ -8,7 +8,7 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ENTER_CARD } from "../../design/motion";
 import { send } from "../../lib/rpc";
-import { SkillDetailModal } from "./SkillDetailModal";
+import { SkillDetailModal } from "./modals/SkillDetailModal";
 import bits from "./ChatBits.module.scss";
 
 interface SkillSuggestionProps {

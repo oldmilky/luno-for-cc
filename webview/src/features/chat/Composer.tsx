@@ -41,7 +41,7 @@ import { SkillsPicker } from "./SkillsPicker";
 import { ModelPicker } from "./ModelPicker";
 import { EffortPicker } from "./EffortPicker";
 import { PendingDot } from "./PendingDot";
-import { ImageLightbox } from "./ImageLightbox";
+import { ImageLightbox } from "./modals/ImageLightbox";
 import type { AgentPanel } from "./subagent-state";
 import type { VoiceState } from "./voice-state";
 import { DictationStrip } from "./DictationStrip";

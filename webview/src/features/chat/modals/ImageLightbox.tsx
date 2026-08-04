@@ -13,8 +13,8 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useState } from "react";
-import { Overlay } from "../../design/primitives";
-import { Icon } from "../../design/icons";
+import { Overlay } from "../../../design/primitives";
+import { Icon } from "../../../design/icons";
 import s from "./ImageLightbox.module.scss";
 
 export interface ImageLightboxProps {

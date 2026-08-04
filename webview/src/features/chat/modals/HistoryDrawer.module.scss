@@ -10,7 +10,7 @@
 // in Framer Motion; only the resting look lives here.
 // ─────────────────────────────────────────────────────────────
 
-@use "../../themes/motion" as motion;
+@use "../../../themes/motion" as motion;
 
 // Fixed, inset, layer and the portal are `Overlay`'s. The rest is reset on
 // purpose: the primitive centres a sheet in a padded grid, and a drawer has to

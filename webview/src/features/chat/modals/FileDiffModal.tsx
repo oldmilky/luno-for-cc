@@ -16,16 +16,16 @@
 
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Icon } from "../../design/icons";
-import { Overlay, Tooltip } from "../../design/primitives";
+import { Icon } from "../../../design/icons";
+import { Overlay, Tooltip } from "../../../design/primitives";
 import {
   EXPAND,
   OVERLAY_PANEL,
   SPRING_POP,
   enterAt,
   stagger
-} from "../../design/motion";
-import { send } from "../../lib/rpc";
+} from "../../../design/motion";
+import { send } from "../../../lib/rpc";
 import s from "./FileDiffModal.module.scss";
 
 export type FileChange =

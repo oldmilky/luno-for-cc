@@ -11,8 +11,8 @@
 
 import { useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { ENTER_CARD } from "../../design/motion";
-import { send, type UserDialogView } from "../../lib/rpc";
+import { ENTER_CARD } from "../../../design/motion";
+import { send, type UserDialogView } from "../../../lib/rpc";
 import s from "./FableOverageDialog.module.scss";
 
 const BUY_CREDITS = "https://claude.ai/settings/usage";

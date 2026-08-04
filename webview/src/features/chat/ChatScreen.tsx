@@ -23,7 +23,7 @@ import {
   UserDialogView
 } from "../../lib/rpc";
 import { ConnectorsModal } from "../mcp";
-import { PermissionsModal } from "./PermissionsModal";
+import { PermissionsModal } from "./modals/PermissionsModal";
 import {
   ENTER_CARD,
   PRESS,
@@ -38,20 +38,20 @@ import { Composer } from "./Composer";
 import { ContextStrip } from "./ContextStrip";
 import { EmptyState } from "./EmptyState";
 import { ErrorBanner } from "./ErrorBanner";
-import { RewindModal } from "./RewindModal";
-import { FableOverageDialog } from "./FableOverageDialog";
-import { EditConfirmModal } from "./EditConfirmModal";
+import { RewindModal } from "./modals/RewindModal";
+import { FableOverageDialog } from "./modals/FableOverageDialog";
+import { EditConfirmModal } from "./modals/EditConfirmModal";
 import { PermissionRequest } from "./PermissionRequest";
-import { HistoryDrawer } from "./HistoryDrawer";
+import { HistoryDrawer } from "./modals/HistoryDrawer";
 import { AssistantMessage } from "./AssistantMessage";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { ConventionsBanner } from "./ConventionsBanner";
 import { SkillSuggestion } from "./SkillSuggestion";
 import { liveAgents, agentPanel, mergeTaskState } from "./subagent-state";
 import type { VoiceState } from "./voice-state";
-import { BackgroundAgentsModal } from "./BackgroundAgentsModal";
-import { CommandPalette } from "./CommandPalette";
-import { KeyboardHints } from "./KeyboardHints";
+import { BackgroundAgentsModal } from "./modals/BackgroundAgentsModal";
+import { CommandPalette } from "./modals/CommandPalette";
+import { KeyboardHints } from "./modals/KeyboardHints";
 import { PinnedContext, PinnedFile } from "./PinnedContext";
 import { groupEvents, type RenderCtx } from "./group-events";
 import { renderGroup } from "./render-groups";
@@ -347,7 +347,7 @@ export function ChatScreen({
   // Diff-line comment: append a structured note to the composer so the next
   // prompt naturally carries the file/line context. Keeps everything else
   // the user has typed intact — just slots the note in below.
-  const handleAddDiffNote = (note: import("./FileDiffModal").DiffLineNote) => {
+  const handleAddDiffNote = (note: import("./modals/FileDiffModal").DiffLineNote) => {
     const fileName = note.path.split("/").pop() ?? note.path;
     const chunk = `On \`${fileName}:${note.lineNo}\` (\`${note.context.trim().slice(0, 80)}\`): ${note.text}`;
     const prefix = input.trim() ? input.trimEnd() + "\n\n" : "";

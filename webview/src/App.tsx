@@ -35,7 +35,7 @@ import {
   type LiveAgents
 } from "./features/chat/subagent-state";
 import { IDLE_VOICE, type VoiceState } from "./features/chat/voice-state";
-import { StopAgentsModal } from "./features/chat/StopAgentsModal";
+import { StopAgentsModal } from "./features/chat/modals/StopAgentsModal";
 import s from "./App.module.scss";
 
 // ── Auth state ───────────────────────────────────────────────

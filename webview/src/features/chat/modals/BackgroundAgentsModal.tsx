@@ -11,12 +11,12 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useId, useState } from "react";
-import { Icon } from "../../design/icons";
-import { Overlay, Tooltip } from "../../design/primitives";
-import { formatDuration, formatTokens } from "../../lib/format";
-import { workflowAgentOutcome } from "./subagent-state";
-import type { AgentPanel, AgentRun } from "./subagent-state";
-import type { WorkflowProgressEntry } from "../../lib/rpc";
+import { Icon } from "../../../design/icons";
+import { Overlay, Tooltip } from "../../../design/primitives";
+import { formatDuration, formatTokens } from "../../../lib/format";
+import { workflowAgentOutcome } from "../subagent-state";
+import type { AgentPanel, AgentRun } from "../subagent-state";
+import type { WorkflowProgressEntry } from "../../../lib/rpc";
 import s from "./BackgroundAgentsModal.module.scss";
 
 interface BackgroundAgentsModalProps {

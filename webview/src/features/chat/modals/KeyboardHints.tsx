@@ -10,10 +10,10 @@
 
 import { useEffect } from "react";
 import { motion } from "framer-motion";
-import { Icon } from "../../design/icons";
-import { Overlay, Tooltip } from "../../design/primitives";
-import { BACKDROP, enterAt } from "../../design/motion";
-import { useWebviewSettings } from "../../lib/settings";
+import { Icon } from "../../../design/icons";
+import { Overlay, Tooltip } from "../../../design/primitives";
+import { BACKDROP, enterAt } from "../../../design/motion";
+import { useWebviewSettings } from "../../../lib/settings";
 import s from "./KeyboardHints.module.scss";
 
 interface Group {

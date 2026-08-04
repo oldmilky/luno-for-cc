@@ -11,8 +11,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Icon } from "../../design/icons";
-import { Overlay, Tooltip } from "../../design/primitives";
+import { Icon } from "../../../design/icons";
+import { Overlay, Tooltip } from "../../../design/primitives";
 import {
   BACKDROP,
   DRAWER,
@@ -21,9 +21,9 @@ import {
   TRAVEL,
   enterAt,
   stagger
-} from "../../design/motion";
-import { send, onMessage, ChatStatus, HistoryEntry } from "../../lib/rpc";
-import { STATUS_LABEL } from "./chat-status";
+} from "../../../design/motion";
+import { send, onMessage, ChatStatus, HistoryEntry } from "../../../lib/rpc";
+import { STATUS_LABEL } from "../chat-status";
 import s from "./HistoryDrawer.module.scss";
 
 interface HistoryDrawerProps {

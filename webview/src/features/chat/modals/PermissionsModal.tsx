@@ -21,10 +21,10 @@ import {
   type PermissionRuleView,
   type ToolGrantView,
   type UnreadableSourceView
-} from "../../lib/rpc";
-import { Icon } from "../../design/icons";
-import { Overlay, Tooltip } from "../../design/primitives";
-import { enterAt } from "../../design/motion";
+} from "../../../lib/rpc";
+import { Icon } from "../../../design/icons";
+import { Overlay, Tooltip } from "../../../design/primitives";
+import { enterAt } from "../../../design/motion";
 import s from "./PermissionsModal.module.scss";
 
 interface PermissionsModalProps {

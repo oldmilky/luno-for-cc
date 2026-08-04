@@ -41,7 +41,7 @@ export function renderGroup(
   toggleTurn: (turnId: string, currentlyCollapsed: boolean) => void,
   isLatestTurn: boolean,
   onContinue: (text: string) => void,
-  onAddDiffNote: (note: import("./FileDiffModal").DiffLineNote) => void
+  onAddDiffNote: (note: import("./modals/FileDiffModal").DiffLineNote) => void
 ) {
   if (g.kind === "user") {
     const messagesAfter = all.length - idx - 1;

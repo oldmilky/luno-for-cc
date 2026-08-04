@@ -12,14 +12,14 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { send, onMessage, MarketplaceSkill } from "../../lib/rpc";
-import { formatCount } from "../../lib/format";
-import { Icon, IconName } from "../../design/icons";
-import { Overlay, Tooltip } from "../../design/primitives";
+import { send, onMessage, MarketplaceSkill } from "../../../lib/rpc";
+import { formatCount } from "../../../lib/format";
+import { Icon, IconName } from "../../../design/icons";
+import { Overlay, Tooltip } from "../../../design/primitives";
 // `mk`, not the usual `s` — this file already binds `s` to a
 // MarketplaceSkill in several callbacks.
 import mk from "./SkillsMarketplace.module.scss";
-import dd from "../../design/primitives/Dropdown.module.scss";
+import dd from "../../../design/primitives/Dropdown.module.scss";
 
 const PAGE_SIZE = 24;
 

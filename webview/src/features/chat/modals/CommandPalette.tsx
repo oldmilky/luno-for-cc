@@ -9,9 +9,9 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Icon, IconName } from "../../design/icons";
-import { Overlay } from "../../design/primitives";
-import { BACKDROP } from "../../design/motion";
+import { Icon, IconName } from "../../../design/icons";
+import { Overlay } from "../../../design/primitives";
+import { BACKDROP } from "../../../design/motion";
 import {
   send,
   onMessage,
@@ -19,8 +19,8 @@ import {
   ModelInfo,
   SkillInfo,
   PermissionMode
-} from "../../lib/rpc";
-import { MODES } from "./constants";
+} from "../../../lib/rpc";
+import { MODES } from "../constants";
 import s from "./CommandPalette.module.scss";
 
 export interface CommandPaletteProps {

@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Icon } from "../../design/icons";
-import { Overlay } from "../../design/primitives";
-import { formatDuration } from "../../lib/format";
-import type { LiveAgents } from "./subagent-state";
+import { Icon } from "../../../design/icons";
+import { Overlay } from "../../../design/primitives";
+import { formatDuration } from "../../../lib/format";
+import type { LiveAgents } from "../subagent-state";
 import s from "./RewindModal.module.scss";
 
 interface RewindModalProps {

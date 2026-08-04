@@ -8,7 +8,7 @@
 // nothing here was ported from it.
 // ─────────────────────────────────────────────────────────────
 
-@use "../../themes/motion" as motion;
+@use "../../../themes/motion" as motion;
 
 // The backdrop is `Overlay`'s — portal, fixed, centring and layer. It carries
 // no scrim, which is what this modal wanted: the chat behind stays fully

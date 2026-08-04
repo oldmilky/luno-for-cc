@@ -6,7 +6,7 @@
 // this one reports on work, it does not end it.
 // ─────────────────────────────────────────────────────────────
 
-@use "../../themes/motion" as motion;
+@use "../../../themes/motion" as motion;
 
 // Fixed, inset, centring, layer and gutter are `Overlay`'s; only the scrim is
 // this panel's own.

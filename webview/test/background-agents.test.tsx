@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { act } from "react";
 import { Composer } from "../src/features/chat/Composer";
 import { Header } from "../src/features/chat/Header";
-import { BackgroundAgentsModal } from "../src/features/chat/BackgroundAgentsModal";
+import { BackgroundAgentsModal } from "../src/features/chat/modals/BackgroundAgentsModal";
 import { render } from "./render";
 import type { AgentPanel } from "../src/features/chat/subagent-state";
 

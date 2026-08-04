@@ -31,7 +31,7 @@ import { Icon } from "../../design/icons";
 import { Tooltip } from "../../design/primitives";
 import { MarkdownBody } from "./markdown";
 import { newId, onMessage, send } from "../../lib/rpc";
-import { ImageLightbox } from "./ImageLightbox";
+import { ImageLightbox } from "./modals/ImageLightbox";
 import s from "./UserMessage.module.scss";
 // The sent message shows the very same pill the composer rendered.
 import re from "../../design/primitives/RichEditor.module.scss";
