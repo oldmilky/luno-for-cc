@@ -1,0 +1,32 @@
+// Structure only. Every visual decision — the scrim, the panel's chrome, its
+// width — stays with the modal, passed in through `backdropClassName` and
+// `className`. That is what lets a modal migrate to this primitive without its
+// appearance moving, which is the only way fourteen of them can be converted
+// one commit at a time and each one checked.
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  // Reliable here and nowhere else: this element is a child of `document.body`,
+  // so no ancestor `transform` or `filter` can turn it into the containing
+  // block a fixed child would then be positioned against.
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  // No scrim by default. A modal that wants one brings it, because the fourteen
+  // being migrated use seven different values and picking one here would move
+  // thirteen of them.
+  background: transparent;
+}
+
+.panel {
+  // The panel takes focus on open so the dialog reads before the page behind
+  // it, and a focus ring on a whole sheet is noise — the ring belongs on the
+  // control the first Tab reaches.
+  outline: none;
+  // A dialog taller than the viewport must not push its own controls off the
+  // bottom where nothing can scroll to them.
+  max-height: 100%;
+  max-width: 100%;
+}

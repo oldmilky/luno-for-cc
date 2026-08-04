@@ -7,17 +7,9 @@
 // than the brand accent: the confirm button here ends something.
 // ─────────────────────────────────────────────────────────────
 
-.backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  // No scrim, matching RewindModal: the cards being stopped stay readable
-  // behind the dialog while the user decides.
-  background: transparent;
-}
+// The backdrop is `Overlay`'s now — portal, fixed, centring and layer. It
+// carries no scrim by default, which is what this modal wanted anyway: the
+// cards being stopped stay readable behind the dialog while the user decides.
 
 .panel {
   position: relative;

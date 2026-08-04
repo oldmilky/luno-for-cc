@@ -6,7 +6,6 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useReducer, useState } from "react";
-import { AnimatePresence } from "framer-motion";
 import {
   send,
   onMessage,
@@ -606,19 +605,14 @@ export function App() {
           setPendingDialogs((q) => q.slice(1));
         }}
       />
-      <AnimatePresence>
-        {stopWithAgents && (
-          <StopAgentsModal
-            key="stop-agents-modal"
-            agents={stopWithAgents}
-            onCancel={() => setStopWithAgents(null)}
-            onConfirm={() => {
-              send({ type: "cancel" });
-              setStopWithAgents(null);
-            }}
-          />
-        )}
-      </AnimatePresence>
+      <StopAgentsModal
+        agents={stopWithAgents}
+        onCancel={() => setStopWithAgents(null)}
+        onConfirm={() => {
+          send({ type: "cancel" });
+          setStopWithAgents(null);
+        }}
+      />
     </div>
   );
 }
