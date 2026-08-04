@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   answerText,
   foldQuestions
-} from "../../webview/src/features/chat/question-log.js";
+} from "../../webview/src/features/chat/timeline/question-log.js";
 
 // question-log.ts is React-free, so it runs in the node environment.
 // It is the transcript's only account of an AskUserQuestion: the card that

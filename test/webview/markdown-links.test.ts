@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveMarkdownHref } from "../../webview/src/features/chat/markdown-links.js";
+import { resolveMarkdownHref } from "../../webview/src/features/chat/timeline/markdown-links.js";
 
 // markdown-links.ts is React-free, so it runs in the node environment.
 // A webview swallows `target="_blank"` and `window.open`, so every link in a

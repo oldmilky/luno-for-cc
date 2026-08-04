@@ -19,8 +19,8 @@
 
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { DURATION, EASE_SOFT, ENTER_CARD } from "../../design/motion";
-import { FileEditEntry } from "./modals/FileDiffModal";
+import { DURATION, EASE_SOFT, ENTER_CARD } from "../../../design/motion";
+import { FileEditEntry } from "../modals/FileDiffModal";
 import { FileBadge } from "./FileBadge";
 import s from "./InlineEditPreview.module.scss";
 

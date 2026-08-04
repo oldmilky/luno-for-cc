@@ -17,7 +17,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "../../../design/icons";
 import { Overlay } from "../../../design/primitives";
 import { formatDuration } from "../../../lib/format";
-import type { LiveAgents } from "../subagent-state";
+import type { LiveAgents } from "../timeline/subagent-state";
 import s from "./StopAgentsModal.module.scss";
 
 interface StopAgentsModalProps {

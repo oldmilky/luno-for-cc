@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import { OVERLAY_PANEL } from "../../../design/motion";
 import { Overlay } from "../../../design/primitives";
 import { formatDuration } from "../../../lib/format";
-import type { LiveAgents } from "../subagent-state";
+import type { LiveAgents } from "../timeline/subagent-state";
 import s from "./EditConfirmModal.module.scss";
 
 interface EditConfirmModalProps {

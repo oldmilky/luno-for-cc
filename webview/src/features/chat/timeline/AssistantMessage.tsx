@@ -1,8 +1,8 @@
 import { motion } from "framer-motion";
 import { useState } from "react";
-import { EASE_SOFT, ENTER, SPRING_PRESS } from "../../design/motion";
-import { Icon } from "../../design/icons";
-import { Tooltip } from "../../design/primitives";
+import { EASE_SOFT, ENTER, SPRING_PRESS } from "../../../design/motion";
+import { Icon } from "../../../design/icons";
+import { Tooltip } from "../../../design/primitives";
 import { MarkdownBody } from "./markdown";
 import s from "./AssistantMessage.module.scss";
 

@@ -7,7 +7,7 @@
 // as a card competing with the plan.
 // ─────────────────────────────────────────────────────────────
 
-import { Icon } from "../../design/icons";
+import { Icon } from "../../../design/icons";
 import { answerText, type AskedQuestionView } from "./question-log";
 import s from "./AnsweredQuestion.module.scss";
 

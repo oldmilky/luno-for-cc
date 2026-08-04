@@ -8,9 +8,9 @@
 
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import { ENTER } from "../../design/motion";
-import { DotGlobe } from "../../design/primitives";
-import bits from "./ChatBits.module.scss";
+import { ENTER } from "../../../design/motion";
+import { DotGlobe } from "../../../design/primitives";
+import bits from "../ChatBits.module.scss";
 
 /** Larger than the 15px sparkle it replaced. The globe is the part that says
  *  "still working", and at 15px its parallels land under a dot each and stop

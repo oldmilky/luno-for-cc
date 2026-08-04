@@ -7,7 +7,7 @@
 // --s0 instead of a flat black wash, so both follow the palette.
 // ─────────────────────────────────────────────────────────────
 
-@use "../../themes/motion" as motion;
+@use "../../../themes/motion" as motion;
 
 // The CSS twin of the framer ENTER preset — same opacity + --travel-sm rise,
 // same timing. The row is a plain div, so it can't spread ENTER directly.

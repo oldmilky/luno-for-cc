@@ -19,11 +19,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { send, onMessage } from "../../lib/rpc";
-import { Icon } from "../../design/icons";
-import { Tooltip } from "../../design/primitives";
-import { ENTER_CARD, EXPAND, TRAVEL, enterAt } from "../../design/motion";
-import { FileDiffModal, FileEditEntry, DiffLineNote } from "./modals/FileDiffModal";
+import { send, onMessage } from "../../../lib/rpc";
+import { Icon } from "../../../design/icons";
+import { Tooltip } from "../../../design/primitives";
+import { ENTER_CARD, EXPAND, TRAVEL, enterAt } from "../../../design/motion";
+import { FileDiffModal, FileEditEntry, DiffLineNote } from "../modals/FileDiffModal";
 import { FileBadge } from "./FileBadge";
 import tool from "./ToolCard.module.scss";
 import s from "./EditedFilesCard.module.scss";

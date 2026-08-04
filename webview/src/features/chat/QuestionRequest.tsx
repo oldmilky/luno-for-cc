@@ -10,14 +10,14 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useState, type ReactNode } from "react";
-import { MarkdownBody } from "./markdown";
+import { MarkdownBody } from "./timeline/markdown";
 import {
   OTHER,
   emptyDrafts,
   isAnswered,
   type QuestionDraft,
   type WireQuestion
-} from "./question-answers";
+} from "./timeline/question-answers";
 import s from "./QuestionRequest.module.scss";
 
 interface Props {

@@ -14,19 +14,19 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ENTER, EXPAND, DURATION, EASE_SOFT } from "../../design/motion";
-import { Icon } from "../../design/icons";
+import { ENTER, EXPAND, DURATION, EASE_SOFT } from "../../../design/motion";
+import { Icon } from "../../../design/icons";
 import { MarkdownBody } from "./markdown";
-import { formatDuration } from "../../lib/format";
-import { send } from "../../lib/rpc";
-import type { SubagentTaskView } from "../../lib/rpc";
+import { formatDuration } from "../../../lib/format";
+import { send } from "../../../lib/rpc";
+import type { SubagentTaskView } from "../../../lib/rpc";
 import {
   groupWorkflowProgress,
   workflowAgentOutcome,
   subagentOutcome
 } from "./subagent-state";
 import type { WorkflowPhaseGroup } from "./subagent-state";
-import type { WorkflowProgressEntry } from "../../lib/rpc";
+import type { WorkflowProgressEntry } from "../../../lib/rpc";
 import s from "./SubagentCard.module.scss";
 
 interface SubagentCardProps {

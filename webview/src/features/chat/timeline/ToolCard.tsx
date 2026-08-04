@@ -6,8 +6,8 @@
 
 import { ReactNode, MouseEvent, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { EXPAND, DURATION, EASE_SOFT } from "../../design/motion";
-import { Icon, IconName } from "../../design/icons";
+import { EXPAND, DURATION, EASE_SOFT } from "../../../design/motion";
+import { Icon, IconName } from "../../../design/icons";
 import s from "./ToolCard.module.scss";
 
 export interface ToolCardProps {

@@ -11,7 +11,7 @@ import type {
   SubagentTaskView,
   TimelineEvent,
   WorkflowProgressEntry
-} from "../../lib/rpc";
+} from "../../../lib/rpc";
 
 /**
  * Tool names whose call registers a background task, and so renders as a card

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupEvents } from "../../webview/src/features/chat/group-events.js";
+import { groupEvents } from "../../webview/src/features/chat/timeline/group-events.js";
 import type { TimelineEvent } from "../../webview/src/lib/rpc.js";
 
 // The fold from a flat event list into the turns the chat draws. It had no

@@ -29,16 +29,16 @@ import { motion } from "framer-motion";
 import type { GrantScope, PermissionRequestView } from "../../lib/rpc";
 import { Dropdown, Tooltip } from "../../design/primitives";
 import { Icon } from "../../design/icons";
-import { extractFileEdits } from "./extract-file-edits";
-import { InlineEditPreview } from "./InlineEditPreview";
+import { extractFileEdits } from "./timeline/extract-file-edits";
+import { InlineEditPreview } from "./timeline/InlineEditPreview";
 import { QuestionRequest } from "./QuestionRequest";
 import {
   allAnswered,
   buildUpdatedInput,
   readQuestions,
   type QuestionDraft
-} from "./question-answers";
-import type { ToolGroupItem } from "./ToolGroupCard";
+} from "./timeline/question-answers";
+import type { ToolGroupItem } from "./timeline/ToolGroupCard";
 import s from "./PermissionRequest.module.scss";
 
 interface PermissionRequestProps {

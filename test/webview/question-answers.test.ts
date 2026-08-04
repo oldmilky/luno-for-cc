@@ -7,7 +7,7 @@ import {
   emptyDrafts,
   isAnswered,
   readQuestions
-} from "../../webview/src/features/chat/question-answers.js";
+} from "../../webview/src/features/chat/timeline/question-answers.js";
 
 // question-answers.ts is React-free on purpose, so it runs in the node
 // environment with no DOM. What it builds is the whole answer channel:

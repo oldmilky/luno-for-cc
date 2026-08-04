@@ -2,7 +2,7 @@
 // timeline so consecutive same-bucket calls collapse into one chip
 // ("Read 3 files", "Searched 2 patterns") instead of N rows of noise.
 
-import type { IconName } from "../../design/icons";
+import type { IconName } from "../../../design/icons";
 
 /** Lowercased, because `classifyTool` folds the name before matching. */
 const IDE_TOOL_PREFIX = "mcp__luno_ide__";

@@ -4,7 +4,7 @@ import { Composer } from "../src/features/chat/Composer";
 import { Header } from "../src/features/chat/Header";
 import { BackgroundAgentsModal } from "../src/features/chat/modals/BackgroundAgentsModal";
 import { render } from "./render";
-import type { AgentPanel } from "../src/features/chat/subagent-state";
+import type { AgentPanel } from "../src/features/chat/timeline/subagent-state";
 
 // The surface that replaces `/workflows`. What is asserted here is what a
 // screenshot cannot check on its own: that the button is absent before any

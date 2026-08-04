@@ -6,11 +6,11 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { EXPAND } from "../../design/motion";
-import { Icon } from "../../design/icons";
-import { formatDuration } from "../../lib/format";
+import { EXPAND } from "../../../design/motion";
+import { Icon } from "../../../design/icons";
+import { formatDuration } from "../../../lib/format";
 import { MarkdownBody } from "./markdown";
-import s from "./Turn.module.scss";
+import s from "../Turn.module.scss";
 
 interface ThoughtBlockProps {
   text: string;

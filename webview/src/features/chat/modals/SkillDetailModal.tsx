@@ -14,7 +14,7 @@ import { formatCount } from "../../../lib/format";
 import { Icon } from "../../../design/icons";
 import { BACKDROP, OVERLAY_PANEL } from "../../../design/motion";
 import { Tooltip } from "../../../design/primitives";
-import { MarkdownBody } from "../markdown";
+import { MarkdownBody } from "../timeline/markdown";
 import s from "./SkillDetailModal.module.scss";
 // The loading ring is the marketplace's, not ToolCard's — same modal family.
 import mk from "./SkillsMarketplace.module.scss";

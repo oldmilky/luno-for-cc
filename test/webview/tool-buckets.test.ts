@@ -3,7 +3,7 @@ import {
   classifyTool,
   bucketSummary,
   bucketMeta
-} from "../../webview/src/features/chat/tool-buckets.js";
+} from "../../webview/src/features/chat/timeline/tool-buckets.js";
 
 describe("classifyTool", () => {
   it("maps core tool names to buckets", () => {

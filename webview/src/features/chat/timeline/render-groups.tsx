@@ -9,8 +9,8 @@
 // measuring, not one to smuggle into a move.
 // ─────────────────────────────────────────────────────────────
 
-import { Icon } from "../../design/icons";
-import type { SubagentTaskView } from "../../lib/rpc";
+import { Icon } from "../../../design/icons";
+import type { SubagentTaskView } from "../../../lib/rpc";
 import { UserMessage } from "./UserMessage";
 import { AssistantMessage } from "./AssistantMessage";
 import { ToolGroupCard, ToolGroupItem } from "./ToolGroupCard";
@@ -22,9 +22,9 @@ import { EditedFilesCard } from "./EditedFilesCard";
 import { InlineEditPreview } from "./InlineEditPreview";
 import { extractFileEdits } from "./extract-file-edits";
 import { MarkdownBody } from "./markdown";
-import { PlanCard } from "../plan";
+import { PlanCard } from "../../plan";
 import type { Group, RenderCtx, TurnBlock } from "./group-events";
-import s from "./ChatScreen.module.scss";
+import s from "../ChatScreen.module.scss";
 
 export function renderGroup(
   g: Group,
@@ -41,7 +41,7 @@ export function renderGroup(
   toggleTurn: (turnId: string, currentlyCollapsed: boolean) => void,
   isLatestTurn: boolean,
   onContinue: (text: string) => void,
-  onAddDiffNote: (note: import("./modals/FileDiffModal").DiffLineNote) => void
+  onAddDiffNote: (note: import("../modals/FileDiffModal").DiffLineNote) => void
 ) {
   if (g.kind === "user") {
     const messagesAfter = all.length - idx - 1;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractFileEdits } from "../../webview/src/features/chat/extract-file-edits.js";
+import { extractFileEdits } from "../../webview/src/features/chat/timeline/extract-file-edits.js";
 
 // extract-file-edits.ts only uses `import type` for its imports, so it runs
 // in the node vitest environment with no React/DOM dependency.

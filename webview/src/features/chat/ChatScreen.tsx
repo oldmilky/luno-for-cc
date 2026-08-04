@@ -43,19 +43,19 @@ import { FableOverageDialog } from "./modals/FableOverageDialog";
 import { EditConfirmModal } from "./modals/EditConfirmModal";
 import { PermissionRequest } from "./PermissionRequest";
 import { HistoryDrawer } from "./modals/HistoryDrawer";
-import { AssistantMessage } from "./AssistantMessage";
-import { ThinkingIndicator } from "./ThinkingIndicator";
+import { AssistantMessage } from "./timeline/AssistantMessage";
+import { ThinkingIndicator } from "./timeline/ThinkingIndicator";
 import { ConventionsBanner } from "./ConventionsBanner";
 import { SkillSuggestion } from "./SkillSuggestion";
-import { liveAgents, agentPanel, mergeTaskState } from "./subagent-state";
+import { liveAgents, agentPanel, mergeTaskState } from "./timeline/subagent-state";
 import type { VoiceState } from "./voice-state";
 import { BackgroundAgentsModal } from "./modals/BackgroundAgentsModal";
 import { CommandPalette } from "./modals/CommandPalette";
 import { KeyboardHints } from "./modals/KeyboardHints";
 import { PinnedContext, PinnedFile } from "./PinnedContext";
-import { groupEvents, type RenderCtx } from "./group-events";
-import { renderGroup } from "./render-groups";
-import { InlineMessageEditor } from "./InlineMessageEditor";
+import { groupEvents, type RenderCtx } from "./timeline/group-events";
+import { renderGroup } from "./timeline/render-groups";
+import { InlineMessageEditor } from "./timeline/InlineMessageEditor";
 import s from "./ChatScreen.module.scss";
 
 export interface ChatScreenProps {

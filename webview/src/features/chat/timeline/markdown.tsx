@@ -15,8 +15,8 @@ import { ReactNode, memo, useMemo, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import hljs from "highlight.js/lib/common";
-import { Icon } from "../../design/icons";
-import { send } from "../../lib/rpc";
+import { Icon } from "../../../design/icons";
+import { send } from "../../../lib/rpc";
 import { resolveMarkdownHref } from "./markdown-links";
 
 // Hoisted so react-markdown sees one stable plugin list and keeps its

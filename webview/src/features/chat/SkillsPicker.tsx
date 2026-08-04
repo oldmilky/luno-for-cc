@@ -17,7 +17,7 @@ import { Tooltip } from "../../design/primitives";
 import { send, SkillInfo } from "../../lib/rpc";
 import { SkillsMarketplace } from "./modals/SkillsMarketplace";
 import d from "../../design/primitives/Dropdown.module.scss";
-import { PendingDot } from "./PendingDot";
+import { PendingDot } from "./timeline/PendingDot";
 import s from "./SkillsPicker.module.scss";
 
 export interface SkillsPickerProps {

@@ -4,7 +4,7 @@
 // docs/TOKENS.md.
 // ─────────────────────────────────────────────────────────────
 
-@use "../../themes/motion" as motion;
+@use "../../../themes/motion" as motion;
 
 // The streaming heartbeat. `--motion-ambient` is the activity period: it runs
 // for as long as the model is talking, which is why the halo here takes it and

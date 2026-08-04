@@ -2,7 +2,7 @@
 // Pending marker for a composer chip. Reads design tokens only.
 // ─────────────────────────────────────────────────────────────
 
-@use "../../themes/motion" as motion;
+@use "../../../themes/motion" as motion;
 
 .dot {
   display: inline-block;

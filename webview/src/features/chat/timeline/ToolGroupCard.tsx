@@ -7,11 +7,11 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ENTER, EXPAND, DURATION, EASE_SOFT } from "../../design/motion";
-import { Icon } from "../../design/icons";
+import { ENTER, EXPAND, DURATION, EASE_SOFT } from "../../../design/motion";
+import { Icon } from "../../../design/icons";
 import { ToolCard } from "./ToolCard";
 import { ToolBucket, bucketMeta, bucketSummary } from "./tool-buckets";
-import s from "./Turn.module.scss";
+import s from "../Turn.module.scss";
 import tool from "./ToolCard.module.scss";
 
 export interface ToolGroupItem {

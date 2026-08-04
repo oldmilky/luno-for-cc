@@ -9,7 +9,7 @@ import {
   mergeTaskState,
   runningUnits,
   TASK_TOOL_NAMES
-} from "../../webview/src/features/chat/subagent-state";
+} from "../../webview/src/features/chat/timeline/subagent-state";
 import type {
   TimelineEvent,
   WorkflowProgressEntry

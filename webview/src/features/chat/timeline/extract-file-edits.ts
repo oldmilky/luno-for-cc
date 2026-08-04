@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import type { ToolGroupItem } from "./ToolGroupCard";
-import type { FileChange, FileEditEntry } from "./modals/FileDiffModal";
+import type { FileChange, FileEditEntry } from "../modals/FileDiffModal";
 
 const WRITE_NAMES = /^(write|create|fs_write|str_replace_editor)/i;
 const EDIT_NAMES = /^(edit|multiedit|update|patch|replace)/i;

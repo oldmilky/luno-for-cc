@@ -8,7 +8,7 @@
 // `subagent-state`, the folds it builds on.
 // ─────────────────────────────────────────────────────────────
 
-import type { TimelineEvent, SubagentTaskView } from "../../lib/rpc";
+import type { TimelineEvent, SubagentTaskView } from "../../../lib/rpc";
 import { ToolGroupItem } from "./ToolGroupCard";
 import { foldQuestions, type AskedQuestionView } from "./question-log";
 import { classifyTool, ToolBucket } from "./tool-buckets";
@@ -16,8 +16,8 @@ import { classifyTool, ToolBucket } from "./tool-buckets";
 // components, and one SCSS import anywhere in the chain puts this module out
 // of reach of the node test project — which is the whole reason it was lifted
 // out of ChatScreen.
-import { foldPlanState, looksLikePlanFile } from "../plan/foldPlanState";
-import type { PlanRevisionView } from "../plan/types";
+import { foldPlanState, looksLikePlanFile } from "../../plan/foldPlanState";
+import type { PlanRevisionView } from "../../plan/types";
 import {
   TASK_TOOL_NAMES,
   foldSubagents,

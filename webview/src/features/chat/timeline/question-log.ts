@@ -21,7 +21,7 @@ import type {
   PlanQuestionEntry,
   PlanQuestionMeta,
   TimelineEvent
-} from "../../lib/rpc";
+} from "../../../lib/rpc";
 
 export interface AskedQuestionView {
   questionId: string;

@@ -23,7 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../design/icons";
 import { Chip, IconButton, Tooltip } from "../../design/primitives";
-import { MarkdownBody } from "../chat/markdown";
+import { MarkdownBody } from "../chat/timeline/markdown";
 import { send } from "../../lib/rpc";
 import { AnimatePresence, motion } from "framer-motion";
 import { ENTER, ENTER_CARD, EXPAND, SWAP, enterAt } from "../../design/motion";

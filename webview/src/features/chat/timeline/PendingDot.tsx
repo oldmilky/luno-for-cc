@@ -8,7 +8,7 @@
 // be lying about the session says so instead.
 // ─────────────────────────────────────────────────────────────
 
-import { Tooltip } from "../../design/primitives";
+import { Tooltip } from "../../../design/primitives";
 import s from "./PendingDot.module.scss";
 
 export function PendingDot() {

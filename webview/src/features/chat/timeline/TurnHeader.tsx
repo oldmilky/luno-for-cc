@@ -4,9 +4,9 @@
 // turn body.
 // ─────────────────────────────────────────────────────────────
 
-import { Icon } from "../../design/icons";
-import { formatDuration } from "../../lib/format";
-import s from "./Turn.module.scss";
+import { Icon } from "../../../design/icons";
+import { formatDuration } from "../../../lib/format";
+import s from "../Turn.module.scss";
 
 interface TurnHeaderProps {
   workedMs?: number;
