@@ -21,6 +21,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { coveredByGrants, type ToolGrant } from "./tool-grants.js";
+import type { PermissionBehavior } from "./types.js";
 
 /** Tools that are surfaced through their own dedicated UI by the orchestrator's
  *  PlanInterceptor (plan cards, question cards). When the CLI routes a
@@ -41,6 +42,38 @@ const PERMISSION_AUTO_ALLOW = new Set(["ExitPlanMode", "TodoWrite"]);
  *  below would otherwise answer it on the user's behalf. A question is not a
  *  permission: no mode may supply input the person was asked for. */
 export const INTERACTIVE_TOOLS = new Set(["AskUserQuestion"]);
+
+/**
+ * The choices an approval carries back, when it is answering a question.
+ *
+ * The far side of the round-trip `INTERACTIVE_TOOLS` describes: the answers
+ * reach the model as the tool's own input, so an approved request is the only
+ * place they exist. Nothing on the timeline has them, and once the card closes
+ * there is no trace of the question having been asked — which is what the
+ * caller uses this to repair.
+ *
+ * Every condition has to hold, because each failing one means a different shape
+ * entirely: a denial carries no answers at all, a non-interactive tool's
+ * `updatedInput` is unrelated tool data, and `answers` arriving as an array is
+ * a schema we would be misreading rather than one we can use.
+ *
+ * Keyed off `INTERACTIVE_TOOLS` rather than the tool's name, so a second
+ * interactive tool cannot be added to that set and silently have its answers
+ * dropped here.
+ */
+export function answersFromApproval(
+  behavior: PermissionBehavior,
+  toolName: string | undefined,
+  updatedInput: Record<string, unknown> | undefined
+): Record<string, string> | undefined {
+  if (behavior !== "allow" || !updatedInput) return undefined;
+  if (!toolName || !INTERACTIVE_TOOLS.has(toolName)) return undefined;
+  const answers = updatedInput.answers;
+  if (!answers || typeof answers !== "object" || Array.isArray(answers)) {
+    return undefined;
+  }
+  return answers as Record<string, string>;
+}
 
 /** Reversible file-mutation tools. "Allow edits for this turn" auto-approves
  *  ONLY these — never Bash, deletes, or network — so the destructive/network

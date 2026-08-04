@@ -35,6 +35,7 @@ import {
   writeAllowRule
 } from "../services/permission-writer.js";
 import { grantFileEligibility, grantToCliRule } from "../core/grant-rules.js";
+import { answersFromApproval } from "../core/permission-policy.js";
 import type { NotifyTrigger } from "../core/notify.js";
 import { additionalDirectories } from "../core/workspace-dirs.js";
 import { permittedModel } from "../core/model-allowlist.js";
@@ -84,7 +85,8 @@ import {
   SessionStore,
   type ConversationSettings
 } from "./domains/session-store.js";
-import { confirmBypassMode } from "./domains/permission-modes.js";
+import { applyPermissionMode } from "./domains/permission-modes.js";
+import { toggleRemoteControl } from "./domains/remote-control.js";
 import { nextCycleMode } from "../core/permission-cycle.js";
 import { AuthManager } from "./domains/auth.js";
 import { PlanHandlers } from "./domains/plan-handlers.js";
@@ -114,7 +116,11 @@ import {
   broadcastSlashCommands,
   rememberCliCommands
 } from "./domains/slash-commands.js";
-import { broadcastHistory, type LiveState } from "./domains/history.js";
+import {
+  broadcastHistory,
+  deleteHistoryEntry,
+  type LiveState
+} from "./domains/history.js";
 import { ModelResolver } from "./domains/models.js";
 import {
   broadcastSkills,
@@ -1454,24 +1460,14 @@ export class ConversationHost {
           ...(reason && { reason })
         }
       );
-      // The answers went to the model as the tool's own input. Nothing on the
-      // timeline has them yet, and after the card closes there would be no
-      // trace of the question ever having been asked.
-      if (behavior === "allow" && updatedInput) {
-        const asked = this.askedPermissions.get(requestId);
-        const answers = updatedInput.answers;
-        if (
-          asked?.toolName === "AskUserQuestion" &&
-          answers &&
-          typeof answers === "object" &&
-          !Array.isArray(answers)
-        ) {
-          this.plan.recordAnswerFromTool(
-            asked.toolUseId ?? "",
-            answers as Record<string, string>
-          );
-        }
-      }
+      const asked = this.askedPermissions.get(requestId);
+      const answers = answersFromApproval(
+        behavior as PermissionBehavior,
+        asked?.toolName,
+        updatedInput
+      );
+      if (answers)
+        this.plan.recordAnswerFromTool(asked?.toolUseId ?? "", answers);
     },
     userDialogResponse: async (m) => {
       const requestId = str(m, "requestId");
@@ -1522,29 +1518,12 @@ export class ConversationHost {
     setPermissionMode: async (m) => {
       const mode = str(m, "mode");
       if (!mode) return;
-      // The confirmation lives host-side rather than in the webview so no path
-      // into the mode can skip it — not the picker, not a command, not a future
-      // caller that has not been written yet.
-      // A policy that forbids a mode has to be enforced where the mode is
-      // applied, not only where it is drawn. The picker already hides these,
-      // but a stale webview, a command, or a keybinding all arrive here too.
-      if (disabledPermissionModes().includes(mode)) {
-        logInfo(`[luno] permission mode ${mode} is disabled by settings.json`);
-        await this.auth.broadcast();
-        return;
-      }
-      if (mode === "bypass" && !(await confirmBypassMode())) {
-        // Re-publish so the picker snaps back off Bypass rather than showing a
-        // mode that was never applied.
-        await this.auth.broadcast();
-        return;
-      }
-      await this.applySetting("permissionMode", mode as PermissionMode);
-      // The picker is the only place the mode changes, and a turn started on
-      // the phone rebuilds no argv to carry it — it would keep running under
-      // the mode the process was spawned with, which for Bypass means no
-      // approval card anywhere while the composer reads Default.
-      void this.sessionProvider?.setLivePermissionMode(mode as PermissionMode);
+      await applyPermissionMode(mode, {
+        apply: (next) => this.applySetting("permissionMode", next),
+        republish: () => this.auth.broadcast(),
+        pushLive: (next) =>
+          void this.sessionProvider?.setLivePermissionMode(next)
+      });
     },
     setEffort: async (m) => {
       const effort = str(m, "effort");
@@ -1568,30 +1547,12 @@ export class ConversationHost {
       }
     },
     toggleRemoteControl: async (m) => {
-      const enabled = bool(m, "enabled") ?? false;
-      if (!enabled) {
-        await this.sessionProvider?.disableRemoteControl();
-        this.publishRemoteControl({ state: "off" });
-        return;
-      }
-      // Say so before the round-trip: enabling reaches the Anthropic API and
-      // can take a moment, and a control that does nothing visible for two
-      // seconds reads as broken. `connecting`, not `ready` — the latter is a
-      // bridge standing up and waiting, and offers a link that at this point
-      // does not exist. The reply, up to 30s away, is what makes it `ready`.
-      this.publishRemoteControl({ state: "connecting" });
-      try {
-        const provider = await this.ensureSessionProvider();
-        const status = await provider.enableRemoteControl(
-          this.session.title || undefined
-        );
-        this.publishRemoteControl(status);
-      } catch (err) {
-        this.publishRemoteControl({
-          state: "error",
-          error: err instanceof Error ? err.message : String(err)
-        });
-      }
+      await toggleRemoteControl(bool(m, "enabled") ?? false, {
+        liveProvider: () => this.sessionProvider,
+        ensureProvider: () => this.ensureSessionProvider(),
+        publish: (status) => this.publishRemoteControl(status),
+        title: this.session.title
+      });
     },
 
     // ── Editor + files ─────────────────────────────────────────
@@ -1727,16 +1688,10 @@ export class ConversationHost {
     deleteHistoryEntry: async (m) => {
       const id = str(m, "id");
       if (!id) return;
-      // Before the file, not after: a conversation still holding this session
-      // would rewrite it on its next debounced save.
-      this.shared.discardConversation(id);
-      await this.history.delete(id);
-      // The snapshots outlive the chat otherwise: they are keyed by session id
-      // and nothing else would ever collect them.
-      await CheckpointService.forget(
-        checkpointStoreDir(this.ctx.globalStorageUri.fsPath),
-        id
-      );
+      await deleteHistoryEntry(this.history, id, {
+        discard: (sessionId) => this.shared.discardConversation(sessionId),
+        checkpointStore: checkpointStoreDir(this.ctx.globalStorageUri.fsPath)
+      });
       await this.publishHistory();
     },
     renameSession: async (m) => {

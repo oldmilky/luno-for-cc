@@ -10,6 +10,7 @@
 // exists to remove. It belongs with session lifecycle when that is extracted.
 // ─────────────────────────────────────────────────────────────
 
+import { CheckpointService } from "../../services/checkpoint.js";
 import type { HistoryService, LiveStatus } from "../../services/history.js";
 import type { Post } from "../messages.js";
 
@@ -42,4 +43,30 @@ export async function broadcastHistory(
       })
     : stored;
   post({ type: "historyList", sessions });
+}
+
+/**
+ * Forget a session — the stored file and everything keyed to its id.
+ *
+ * @param discard drops any open conversation still holding the session. Called
+ *   *before* the file is unlinked, not after: a conversation that still has it
+ *   would write the session back out on its next debounced save.
+ * @param checkpointStore where snapshots live. They are keyed by session id and
+ *   nothing else would ever collect them, so a delete that skips this leaves
+ *   them behind for the lifetime of the install.
+ */
+export async function deleteHistoryEntry(
+  history: HistoryService,
+  id: string,
+  {
+    discard,
+    checkpointStore
+  }: {
+    discard: (id: string) => void;
+    checkpointStore: string;
+  }
+): Promise<void> {
+  discard(id);
+  await history.delete(id);
+  await CheckpointService.forget(checkpointStore, id);
 }
