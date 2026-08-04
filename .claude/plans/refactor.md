@@ -658,6 +658,59 @@ not land.
 
 ---
 
+## Phase 7 — the tidy-up — DONE 2026-08-04
+
+> Landed as `27f877a` (modals), `238aa2c` (timeline), `c9de966` (composer,
+> pickers, usage) and `646eb4f` (the MCP split). Gates held at **1549 / 6**,
+> lint exit 0 at 35 warnings, package 1.28 MB throughout.
+>
+> **`features/chat/` went from 100 files flat to five folders and 21 files.**
+> `timeline/` (23) · `modals/` (13) · `composer/` (9) · `pickers/` (3) ·
+> `usage/` (2). What stayed at the top is `ChatScreen`, the header, the banners
+> and the request cards — the things that are neither a timeline row nor an
+> overlay.
+>
+> **The proof for a pure move had to change shape here.** CSS-modules hashes are
+> derived from the file path, so moving a file renames every class in it and a
+> byte comparison of the built CSS is worthless. Normalising the hashes away:
+> **1750 rule blocks before, 1750 after, same set and same order**, across all
+> four commits. Not one rule added, removed, altered or reordered — a stronger
+> result than Phase 4, where the order did move.
+>
+> **Two things the gates caught that nothing else would have.** The first suite
+> run came back 1529 rather than 1549, because the import rewrite swept
+> `webview/src` and neither test tree — a whole test file had failed to load,
+> which reads as a lower count rather than a failure, and is exactly the shape
+> the "this many or better" rule exists to catch. The second was a genuine
+> assertion change: the rewrite also touched string literals in
+> `mention-match.test.ts`, whose fixture is a picture of this repo's own tree.
+> The fixture became correct and the assertion built on it did not —
+> `chat/comp` used to reach one file and now reaches both under `composer/`.
+> Ranking behaving correctly on a changed tree, not a regression.
+>
+> **The MCP half of this section was wrong, which makes three.** It called
+> `services/mcp/index.ts` "several transports in one module" with "a natural
+> seam per transport". The file contains **zero** transport references —
+> `client.ts` and `stdio-client.ts` have held them all along. What 1131 lines
+> actually held was the connector registry plus one unrelated module pasted at
+> the bottom: 189 lines under their own header banner, a CLI bridge writing
+> connected servers to a temp file for `--mcp-config`. That was the seam, and it
+> is now `cli-bridge.ts`, with the one thing both halves need —
+> `resolveConfig` — in `config-resolve.ts`. 1131 → 912.
+>
+> A coupling the line survey missed and only the compiler found: the bridge read
+> `cliStatusCache`, a module-level mutable variable the registry writes. It asks
+> through `cliConnectedServerNames()` now, which is better than what was there
+> rather than merely equivalent.
+>
+> **`ConnectorsModal` is NOT part of this**, and the reason is recorded above:
+> the section predicted it would "largely dissolve once Phase 5 exists", and it
+> went 963 → 945 with its SCSS 786 → 782. Eighteen lines. Its bulk is the
+> connector flows, not overlay chrome, so splitting it is a separate piece of
+> work on its own merits — not a leftover.
+
+### Original text
+
 ## Phase 7 — the tidy-up (pure move, mechanical)
 
 Last on purpose: it organises the _final_ shape rather than moving files that
