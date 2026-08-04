@@ -5,13 +5,9 @@
 // two read as one family rather than as two people's modals.
 // ─────────────────────────────────────────────────────────────
 
+// Fixed, inset, centring and layer are `Overlay`'s; the gutter and the scrim
+// are this modal's.
 .scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 20px;
   background: color-mix(in srgb, var(--s0) 55%, transparent);
 }

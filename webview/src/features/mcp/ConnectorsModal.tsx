@@ -14,7 +14,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
 import { AnimatePresence, motion } from "framer-motion";
 import { Icon, IconName } from "../../design/icons";
-import { Tooltip } from "../../design/primitives";
+import { Overlay, Tooltip } from "../../design/primitives";
 import {
   send,
   onMessage,
@@ -88,16 +88,6 @@ export function ConnectorsModal({ open, onClose }: ConnectorsModalProps) {
     });
   }, [open]);
 
-  // Close on Esc.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return connectors.filter((c) => {
@@ -127,220 +117,212 @@ export function ConnectorsModal({ open, onClose }: ConnectorsModalProps) {
   }, [connectors]);
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div className={s.backdrop} onMouseDown={onClose} {...BACKDROP}>
-          <motion.div
-            className={`${s.modal} ${s.market}`}
-            {...OVERLAY_PANEL}
-            role="dialog"
-            aria-label="Connectors"
-            onMouseDown={(e) => e.stopPropagation()}
+    <Overlay
+      open={open}
+      onClose={onClose}
+      label="Connectors"
+      className={`${s.modal} ${s.market}`}
+      backdropClassName={s.backdrop}
+    >
+      <header className={s.head}>
+        <div className={s.headTitles}>
+          <h2 className={s.title}>Connectors</h2>
+          <p className={s.sub}>
+            Browse and connect to remote MCP servers. Authentication uses OAuth
+            — your browser will open to authorize.
+          </p>
+        </div>
+        <button
+          type="button"
+          className={s.close}
+          onClick={onClose}
+          aria-label="Close"
+        >
+          <Icon name="x" size={14} />
+        </button>
+      </header>
+
+      <div className={s.toolbar}>
+        <div className={s.search}>
+          <Icon name="search" size={13} />
+          <input
+            type="text"
+            placeholder="Search connectors…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+            spellCheck={false}
+          />
+        </div>
+        <div className={s.tabs} role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "all"}
+            className={`${s.tab}${tab === "all" ? ` ${s.tabActive}` : ""}`}
+            onClick={() => setTab("all")}
           >
-            <header className={s.head}>
-              <div className={s.headTitles}>
-                <h2 className={s.title}>Connectors</h2>
-                <p className={s.sub}>
-                  Browse and connect to remote MCP servers. Authentication uses
-                  OAuth — your browser will open to authorize.
-                </p>
-              </div>
-              <button
-                type="button"
-                className={s.close}
-                onClick={onClose}
-                aria-label="Close"
-              >
-                <Icon name="x" size={14} />
-              </button>
-            </header>
+            All
+            <span className={s.tabCount}>{connectors.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "connected"}
+            className={`${s.tab}${tab === "connected" ? ` ${s.tabActive}` : ""}`}
+            onClick={() => setTab("connected")}
+            disabled={counts.connected === 0}
+          >
+            Connected
+            {counts.connected > 0 && (
+              <span className={s.tabCount}>{counts.connected}</span>
+            )}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "custom"}
+            className={`${s.tab}${tab === "custom" ? ` ${s.tabActive}` : ""}`}
+            onClick={() => setTab("custom")}
+            disabled={counts.custom === 0}
+          >
+            Custom
+            {counts.custom > 0 && (
+              <span className={s.tabCount}>{counts.custom}</span>
+            )}
+          </button>
+          <button
+            type="button"
+            className={`${s.btn} ${s.primary} ${s.addBtn}`}
+            onClick={() => setAddOpen(true)}
+          >
+            <Icon name="plus" size={11} />
+            Add custom
+          </button>
+        </div>
+      </div>
 
-            <div className={s.toolbar}>
-              <div className={s.search}>
-                <Icon name="search" size={13} />
-                <input
-                  type="text"
-                  placeholder="Search connectors…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  autoFocus
-                  spellCheck={false}
-                />
-              </div>
-              <div className={s.tabs} role="tablist">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === "all"}
-                  className={`${s.tab}${tab === "all" ? ` ${s.tabActive}` : ""}`}
-                  onClick={() => setTab("all")}
-                >
-                  All
-                  <span className={s.tabCount}>{connectors.length}</span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === "connected"}
-                  className={`${s.tab}${tab === "connected" ? ` ${s.tabActive}` : ""}`}
-                  onClick={() => setTab("connected")}
-                  disabled={counts.connected === 0}
-                >
-                  Connected
-                  {counts.connected > 0 && (
-                    <span className={s.tabCount}>{counts.connected}</span>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === "custom"}
-                  className={`${s.tab}${tab === "custom" ? ` ${s.tabActive}` : ""}`}
-                  onClick={() => setTab("custom")}
-                  disabled={counts.custom === 0}
-                >
-                  Custom
-                  {counts.custom > 0 && (
-                    <span className={s.tabCount}>{counts.custom}</span>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className={`${s.btn} ${s.primary} ${s.addBtn}`}
-                  onClick={() => setAddOpen(true)}
-                >
-                  <Icon name="plus" size={11} />
-                  Add custom
-                </button>
-              </div>
-            </div>
-
-            <div className={s.grid}>
-              {filtered.length === 0 ? (
-                <div className={s.empty}>
-                  <Icon name="search" size={20} />
-                  <span>
-                    {connectors.length === 0
-                      ? "Loading connectors…"
-                      : query
-                        ? `No connectors match "${query}".`
-                        : "No connectors in this tab yet."}
-                  </span>
+      <div className={s.grid}>
+        {filtered.length === 0 ? (
+          <div className={s.empty}>
+            <Icon name="search" size={20} />
+            <span>
+              {connectors.length === 0
+                ? "Loading connectors…"
+                : query
+                  ? `No connectors match "${query}".`
+                  : "No connectors in this tab yet."}
+            </span>
+          </div>
+        ) : (
+          groups.map((g) => (
+            <Fragment key={g.label}>
+              {headings && (
+                <div className={s.groupHead}>
+                  <span className={s.groupBadge}>{g.label}</span>
+                  <span className={s.groupCount}>{g.items.length}</span>
+                  <div className={s.groupLine} />
                 </div>
-              ) : (
-                groups.map((g) => (
-                  <Fragment key={g.label}>
-                    {headings && (
-                      <div className={s.groupHead}>
-                        <span className={s.groupBadge}>{g.label}</span>
-                        <span className={s.groupCount}>{g.items.length}</span>
-                        <div className={s.groupLine} />
-                      </div>
-                    )}
-                    {g.items.map((c) => (
-                      <ConnectorCard
-                        key={c.id}
-                        connector={c}
-                        busy={busyId === c.id}
-                        onConnect={() => {
-                          // Local API-token presets (e.g. Figma) prompt for the token
-                          // first, then connect via connectorConnectWithApiKey.
-                          if (c.apiKeyEnv) {
-                            setApiKeyPrompt({
-                              id: c.id,
-                              name: c.name,
-                              ...c.apiKeyEnv
-                            });
-                            return;
-                          }
-                          setBusyId(c.id);
-                          send({ type: "connectorConnect", id: c.id });
-                        }}
-                        onCancelConnect={() => {
-                          // Optimistic: drop the spinner now; the host echoes back
-                          // a "cancel" result that confirms the abort.
-                          send({ type: "connectorCancelConnect", id: c.id });
-                          setBusyId(null);
-                        }}
-                        onDisconnect={() => {
-                          setBusyId(c.id);
-                          send({ type: "connectorDisconnect", id: c.id });
-                        }}
-                        onRemove={() => {
-                          setBusyId(c.id);
-                          send({ type: "connectorRemoveCustom", id: c.id });
-                        }}
-                        onSetupViaClaudeCode={() => {
-                          send({
-                            type: "connectorSetupViaClaudeCode",
-                            id: c.id
-                          });
-                          setToast({
-                            ok: true,
-                            text: "Opening Claude Code — finish in the /mcp menu."
-                          });
-                          window.setTimeout(() => setToast(null), 5000);
-                        }}
-                      />
-                    ))}
-                  </Fragment>
-                ))
               )}
-            </div>
+              {g.items.map((c) => (
+                <ConnectorCard
+                  key={c.id}
+                  connector={c}
+                  busy={busyId === c.id}
+                  onConnect={() => {
+                    // Local API-token presets (e.g. Figma) prompt for the token
+                    // first, then connect via connectorConnectWithApiKey.
+                    if (c.apiKeyEnv) {
+                      setApiKeyPrompt({
+                        id: c.id,
+                        name: c.name,
+                        ...c.apiKeyEnv
+                      });
+                      return;
+                    }
+                    setBusyId(c.id);
+                    send({ type: "connectorConnect", id: c.id });
+                  }}
+                  onCancelConnect={() => {
+                    // Optimistic: drop the spinner now; the host echoes back
+                    // a "cancel" result that confirms the abort.
+                    send({ type: "connectorCancelConnect", id: c.id });
+                    setBusyId(null);
+                  }}
+                  onDisconnect={() => {
+                    setBusyId(c.id);
+                    send({ type: "connectorDisconnect", id: c.id });
+                  }}
+                  onRemove={() => {
+                    setBusyId(c.id);
+                    send({ type: "connectorRemoveCustom", id: c.id });
+                  }}
+                  onSetupViaClaudeCode={() => {
+                    send({
+                      type: "connectorSetupViaClaudeCode",
+                      id: c.id
+                    });
+                    setToast({
+                      ok: true,
+                      text: "Opening Claude Code — finish in the /mcp menu."
+                    });
+                    window.setTimeout(() => setToast(null), 5000);
+                  }}
+                />
+              ))}
+            </Fragment>
+          ))
+        )}
+      </div>
 
-            {/* Both nested dialogs need their own AnimatePresence: this one is
+      {/* Both nested dialogs need their own AnimatePresence: this one is
                 already inside the parent's, but that instance only tracks the
                 modal itself. A child that mounts and unmounts underneath it is
                 invisible to it. */}
-            <AnimatePresence>
-              {addOpen && (
-                <AddCustomForm
-                  onCancel={() => setAddOpen(false)}
-                  onSubmit={(draft) => {
-                    setBusyId("__add__");
-                    send({ type: "connectorAddCustom", draft });
-                  }}
-                />
-              )}
+      <AnimatePresence>
+        {addOpen && (
+          <AddCustomForm
+            onCancel={() => setAddOpen(false)}
+            onSubmit={(draft) => {
+              setBusyId("__add__");
+              send({ type: "connectorAddCustom", draft });
+            }}
+          />
+        )}
 
-              {apiKeyPrompt && (
-                <ApiKeyPrompt
-                  name={apiKeyPrompt.name}
-                  label={apiKeyPrompt.label}
-                  hint={apiKeyPrompt.hint}
-                  onCancel={() => setApiKeyPrompt(null)}
-                  onSubmit={(apiKey) => {
-                    setBusyId(apiKeyPrompt.id);
-                    send({
-                      type: "connectorConnectWithApiKey",
-                      id: apiKeyPrompt.id,
-                      apiKey
-                    });
-                    setApiKeyPrompt(null);
-                  }}
-                />
-              )}
-            </AnimatePresence>
+        {apiKeyPrompt && (
+          <ApiKeyPrompt
+            name={apiKeyPrompt.name}
+            label={apiKeyPrompt.label}
+            hint={apiKeyPrompt.hint}
+            onCancel={() => setApiKeyPrompt(null)}
+            onSubmit={(apiKey) => {
+              setBusyId(apiKeyPrompt.id);
+              send({
+                type: "connectorConnectWithApiKey",
+                id: apiKeyPrompt.id,
+                apiKey
+              });
+              setApiKeyPrompt(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
 
-            {toast && (
-              <div
-                className={`${s.toast} ${toast.ok ? s.toastOk : s.toastErr}`}
-              >
-                <Icon name={toast.ok ? "check" : "x"} size={11} />
-                <span>{toast.text}</span>
-              </div>
-            )}
-
-            <footer className={s.foot}>
-              <span>
-                Connectors authenticate via OAuth. Tokens are stored in VS
-                Code's SecretStorage.
-              </span>
-            </footer>
-          </motion.div>
-        </motion.div>
+      {toast && (
+        <div className={`${s.toast} ${toast.ok ? s.toastOk : s.toastErr}`}>
+          <Icon name={toast.ok ? "check" : "x"} size={11} />
+          <span>{toast.text}</span>
+        </div>
       )}
-    </AnimatePresence>
+
+      <footer className={s.foot}>
+        <span>
+          Connectors authenticate via OAuth. Tokens are stored in VS Code's
+          SecretStorage.
+        </span>
+      </footer>
+    </Overlay>
   );
 }
 

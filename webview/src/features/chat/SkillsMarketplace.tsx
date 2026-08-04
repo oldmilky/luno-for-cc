@@ -12,12 +12,10 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
-import { AnimatePresence, motion } from "framer-motion";
 import { send, onMessage, MarketplaceSkill } from "../../lib/rpc";
 import { formatCount } from "../../lib/format";
 import { Icon, IconName } from "../../design/icons";
-import { Tooltip } from "../../design/primitives";
+import { Overlay, Tooltip } from "../../design/primitives";
 // `mk`, not the usual `s` — this file already binds `s` to a
 // MarketplaceSkill in several callbacks.
 import mk from "./SkillsMarketplace.module.scss";
@@ -137,16 +135,6 @@ export function SkillsMarketplace({
     };
   }, [open, query]);
 
-  // Lock Esc + click-outside while open.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
   const loadMore = () => {
     setState((s) => ({ ...s, status: "loadingMore" }));
     send({
@@ -208,190 +196,180 @@ export function SkillsMarketplace({
   const hasMore = tab === "all" && state.skills.length < state.total;
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div className={mk.backdrop} onMouseDown={onClose} {...BACKDROP}>
-          <motion.div
-            className={mk.modal}
-            {...OVERLAY_PANEL}
-            role="dialog"
-            aria-label="Skills marketplace"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <header className={mk.head}>
-              <div className={mk.headTitles}>
-                <span className={mk.eyebrow}>Marketplace</span>
-                <h2 className={mk.title}>Claude Code Skills</h2>
-                <p className={mk.sub}>
-                  Browse and install skills from{" "}
-                  <span className={mk.link}>claude-plugins.dev</span>.
-                </p>
-              </div>
-              <button
-                type="button"
-                className={mk.close}
-                onClick={onClose}
-                aria-label="Close"
-              >
-                <Icon name="x" size={14} />
-              </button>
-            </header>
+    <Overlay
+      open={open}
+      onClose={onClose}
+      label="Skills marketplace"
+      className={mk.modal}
+      backdropClassName={mk.backdrop}
+    >
+      <header className={mk.head}>
+        <div className={mk.headTitles}>
+          <span className={mk.eyebrow}>Marketplace</span>
+          <h2 className={mk.title}>Claude Code Skills</h2>
+          <p className={mk.sub}>
+            Browse and install skills from{" "}
+            <span className={mk.link}>claude-plugins.dev</span>.
+          </p>
+        </div>
+        <button
+          type="button"
+          className={mk.close}
+          onClick={onClose}
+          aria-label="Close"
+        >
+          <Icon name="x" size={14} />
+        </button>
+      </header>
 
-            <div className={mk.toolbar}>
-              <div className={mk.search}>
-                <Icon name="search" size={13} />
-                <input
-                  type="text"
-                  placeholder="Search skills…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  autoFocus
-                  spellCheck={false}
-                />
-                {isSearching ? (
-                  <span className={mk.searchSpinner} aria-label="Searching" />
-                ) : state.total > 0 && state.status === "ready" ? (
-                  <span className={mk.searchCount}>
-                    {state.skills.length} of {state.total.toLocaleString()}
-                  </span>
-                ) : null}
-              </div>
-              <div className={mk.tabs} role="tablist">
+      <div className={mk.toolbar}>
+        <div className={mk.search}>
+          <Icon name="search" size={13} />
+          <input
+            type="text"
+            placeholder="Search skills…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+            spellCheck={false}
+          />
+          {isSearching ? (
+            <span className={mk.searchSpinner} aria-label="Searching" />
+          ) : state.total > 0 && state.status === "ready" ? (
+            <span className={mk.searchCount}>
+              {state.skills.length} of {state.total.toLocaleString()}
+            </span>
+          ) : null}
+        </div>
+        <div className={mk.tabs} role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "all"}
+            className={`${mk.tab}${tab === "all" ? ` ${mk.tabActive}` : ""}`}
+            onClick={() => setTab("all")}
+          >
+            All
+          </button>
+          <Tooltip
+            label={
+              installed.size === 0
+                ? "No skills installed yet"
+                : `${installed.size} installed`
+            }
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "installed"}
+              className={`${mk.tab}${tab === "installed" ? ` ${mk.tabActive}` : ""}`}
+              onClick={() => setTab("installed")}
+              disabled={installed.size === 0}
+            >
+              Installed
+              {installed.size > 0 && (
+                <span className={mk.tabCount}>{installed.size}</span>
+              )}
+            </button>
+          </Tooltip>
+        </div>
+      </div>
+
+      <div
+        className={`${mk.grid}${isSearching && tab === "all" ? ` ${mk.gridSearching}` : ""}`}
+        aria-busy={state.status === "loading"}
+      >
+        {tab === "installed" ? (
+          installedEntries.length === 0 ? (
+            <div className={mk.empty}>
+              <Icon name="search" size={20} />
+              <span>
+                {installed.size === 0
+                  ? "Nothing installed yet. Install a skill from the All tab."
+                  : `No installed skills match "${query}".`}
+              </span>
+            </div>
+          ) : (
+            installedEntries.map((row) => (
+              <InstalledCard
+                key={row.name}
+                name={row.name}
+                displayName={row.displayName}
+                description={row.description}
+                source={row.source}
+                busy={busyName === row.name}
+                onUninstall={() => uninstall(row.name, row.source)}
+              />
+            ))
+          )
+        ) : state.status === "loading" && state.skills.length === 0 ? (
+          <div className={mk.empty}>
+            <span className={mk.spinnerLg} />
+            <span>Loading skills…</span>
+          </div>
+        ) : state.status === "error" ? (
+          <div className={mk.empty}>
+            <Icon name="x" size={20} />
+            <span>Couldn't load: {state.error ?? "network error"}</span>
+          </div>
+        ) : state.skills.length === 0 ? (
+          <div className={mk.empty}>
+            <Icon name="search" size={20} />
+            <span>No skills match {query ? `"${query}"` : "your filter"}.</span>
+          </div>
+        ) : (
+          <>
+            {state.skills.map((s) => (
+              <MarketCard
+                key={s.id}
+                skill={s}
+                installed={installed.get(s.name) ?? null}
+                busy={busyName === s.name}
+                onInstall={(scope) => install(s, scope)}
+                onUninstall={(scope) => uninstall(s.name, scope)}
+              />
+            ))}
+            {hasMore && (
+              <div className={mk.loadMore}>
                 <button
                   type="button"
-                  role="tab"
-                  aria-selected={tab === "all"}
-                  className={`${mk.tab}${tab === "all" ? ` ${mk.tabActive}` : ""}`}
-                  onClick={() => setTab("all")}
+                  className={`${mk.cardBtn} ${mk.ghost}`}
+                  onClick={loadMore}
+                  disabled={state.status === "loadingMore"}
                 >
-                  All
+                  {state.status === "loadingMore"
+                    ? "Loading…"
+                    : `Load ${Math.min(PAGE_SIZE, state.total - state.skills.length)} more`}
                 </button>
-                <Tooltip
-                  label={
-                    installed.size === 0
-                      ? "No skills installed yet"
-                      : `${installed.size} installed`
-                  }
-                >
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={tab === "installed"}
-                    className={`${mk.tab}${tab === "installed" ? ` ${mk.tabActive}` : ""}`}
-                    onClick={() => setTab("installed")}
-                    disabled={installed.size === 0}
-                  >
-                    Installed
-                    {installed.size > 0 && (
-                      <span className={mk.tabCount}>{installed.size}</span>
-                    )}
-                  </button>
-                </Tooltip>
-              </div>
-            </div>
-
-            <div
-              className={`${mk.grid}${isSearching && tab === "all" ? ` ${mk.gridSearching}` : ""}`}
-              aria-busy={state.status === "loading"}
-            >
-              {tab === "installed" ? (
-                installedEntries.length === 0 ? (
-                  <div className={mk.empty}>
-                    <Icon name="search" size={20} />
-                    <span>
-                      {installed.size === 0
-                        ? "Nothing installed yet. Install a skill from the All tab."
-                        : `No installed skills match "${query}".`}
-                    </span>
-                  </div>
-                ) : (
-                  installedEntries.map((row) => (
-                    <InstalledCard
-                      key={row.name}
-                      name={row.name}
-                      displayName={row.displayName}
-                      description={row.description}
-                      source={row.source}
-                      busy={busyName === row.name}
-                      onUninstall={() => uninstall(row.name, row.source)}
-                    />
-                  ))
-                )
-              ) : state.status === "loading" && state.skills.length === 0 ? (
-                <div className={mk.empty}>
-                  <span className={mk.spinnerLg} />
-                  <span>Loading skills…</span>
-                </div>
-              ) : state.status === "error" ? (
-                <div className={mk.empty}>
-                  <Icon name="x" size={20} />
-                  <span>Couldn't load: {state.error ?? "network error"}</span>
-                </div>
-              ) : state.skills.length === 0 ? (
-                <div className={mk.empty}>
-                  <Icon name="search" size={20} />
-                  <span>
-                    No skills match {query ? `"${query}"` : "your filter"}.
-                  </span>
-                </div>
-              ) : (
-                <>
-                  {state.skills.map((s) => (
-                    <MarketCard
-                      key={s.id}
-                      skill={s}
-                      installed={installed.get(s.name) ?? null}
-                      busy={busyName === s.name}
-                      onInstall={(scope) => install(s, scope)}
-                      onUninstall={(scope) => uninstall(s.name, scope)}
-                    />
-                  ))}
-                  {hasMore && (
-                    <div className={mk.loadMore}>
-                      <button
-                        type="button"
-                        className={`${mk.cardBtn} ${mk.ghost}`}
-                        onClick={loadMore}
-                        disabled={state.status === "loadingMore"}
-                      >
-                        {state.status === "loadingMore"
-                          ? "Loading…"
-                          : `Load ${Math.min(PAGE_SIZE, state.total - state.skills.length)} more`}
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            {toast && (
-              <div
-                className={`${mk.toast} ${toast.ok ? mk.toastOk : mk.toastErr}`}
-              >
-                <Icon name={toast.ok ? "check" : "x"} size={11} />
-                <span>{toast.text}</span>
               </div>
             )}
+          </>
+        )}
+      </div>
 
-            <footer className={mk.foot}>
-              <span>Powered by claude-plugins.dev</span>
-              <button
-                type="button"
-                className={mk.inlineBtn}
-                onClick={() =>
-                  send({
-                    type: "openExternal",
-                    url: "https://claude-plugins.dev/skills"
-                  })
-                }
-              >
-                Browse all ↗
-              </button>
-            </footer>
-          </motion.div>
-        </motion.div>
+      {toast && (
+        <div className={`${mk.toast} ${toast.ok ? mk.toastOk : mk.toastErr}`}>
+          <Icon name={toast.ok ? "check" : "x"} size={11} />
+          <span>{toast.text}</span>
+        </div>
       )}
-    </AnimatePresence>
+
+      <footer className={mk.foot}>
+        <span>Powered by claude-plugins.dev</span>
+        <button
+          type="button"
+          className={mk.inlineBtn}
+          onClick={() =>
+            send({
+              type: "openExternal",
+              url: "https://claude-plugins.dev/skills"
+            })
+          }
+        >
+          Browse all ↗
+        </button>
+      </footer>
+    </Overlay>
   );
 }
 

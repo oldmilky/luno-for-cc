@@ -17,13 +17,9 @@
 
 // ── Backdrop + panel ─────────────────────────────────────────
 
+// Fixed, inset, centring and layer are `Overlay`'s. The gutter is asymmetric
+// here, so it is restated rather than inherited.
 .backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 24px 16px;
   background: color-mix(in srgb, var(--shadow-color) 72%, transparent);
   backdrop-filter: blur(8px);
