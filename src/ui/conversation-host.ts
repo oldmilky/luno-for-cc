@@ -157,7 +157,7 @@ import type { InstallTarget } from "../services/marketplace.js";
 // Only what the turn path still needs: the connector *handlers* live in
 // `domains/connectors.ts`, but a turn has to hand the CLI an MCP config file
 // built from whatever is currently connected.
-import { writeCliMcpConfig } from "../services/mcp/index.js";
+import { writeCliMcpConfig } from "../services/mcp/cli-bridge.js";
 
 /**
  * Services that exist once per extension, not once per conversation.

@@ -5,11 +5,14 @@ vi.mock("vscode", () => ({}));
 
 import {
   slugify,
-  cliServerName,
-  cliToolNamespace,
   deriveConnectorId,
   parseManagedId
 } from "../../src/services/mcp/index.js";
+// The two CLI-facing names moved out with the bridge that builds them.
+import {
+  cliServerName,
+  cliToolNamespace
+} from "../../src/services/mcp/cli-bridge.js";
 
 describe("slugify (custom connector id prefix)", () => {
   it("lowercases and hyphenates non-alphanumerics", () => {

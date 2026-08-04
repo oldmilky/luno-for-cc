@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 // index.ts imports `* as vscode` (and transitively oauth/client/storage).
 vi.mock("vscode", () => ({}));
 
-import { toCliServerEntry } from "../../src/services/mcp/index.js";
+import { toCliServerEntry } from "../../src/services/mcp/cli-bridge.js";
 
 // Verifies the connector → `--mcp-config` entry mapping that Claude Code's
 // CLI consumes. The CLI's format is `{type:"http"|"sse", url, headers}` for

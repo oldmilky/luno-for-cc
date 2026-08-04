@@ -12,7 +12,7 @@ vi.mock("../../src/services/mcp/cli-config.js", async (orig) => ({
   loadManagedServers: () => []
 }));
 
-import { writeCliMcpConfig } from "../../src/services/mcp/index.js";
+import { writeCliMcpConfig } from "../../src/services/mcp/cli-bridge.js";
 import { IDE_SERVER_NAME } from "../../src/core/ide-tools.js";
 
 /** An extension context with nothing stored — the shape a user who has never
