@@ -266,7 +266,56 @@ a missing key. That guarantee is the entire reason the table replaced a
 _not_ catch is the same key supplied by two groups — cheap to avoid by domain,
 worth a comment.)
 
-### 3b. The turn loop — ~600 lines, `src/ui/turn-runner.ts`
+### 3b. The turn loop — NOT DONE, and it must not be attempted as written
+
+> **Measured 2026-08-04, after 3a, which is when this section said to measure.
+> The abort criterion below fires, with room to spare.**
+>
+> The eight methods are **560 lines touching 45 distinct class members**:
+> 20 methods called, **11 fields written**, 14 read-only collaborators. The
+> extracted interface would be around 39 members against a stated ceiling of 8.
+>
+> | method                 | lines | members |
+> | ---------------------- | ----- | ------- |
+> | `runPromptTurn`        | 167   | 23      |
+> | `startSessionProvider` | 133   | 22      |
+> | `onTurnDelta`          | 115   | 11      |
+> | `beginRemoteTurn`      | 68    | 19      |
+> | `onSubagentUpdate`     | 49    | 7       |
+> | the other three        | 28    | 2–6     |
+>
+> The eleven written fields are the finding: `activeTurn`, `activeProvider`,
+> `orchestrator`, `remoteTurn`, `sessionProvider`, `resumeId`, `turnStartedAt`,
+> `awaitingApproval`, `outOfTurnText`, `pendingSettings`, `finishedWhileHidden`.
+> That is the turn's state. This section assumed the methods could leave and the
+> state could stay; they are one object, and `turn-runner.ts` would be the class
+> re-declared through an interface plus eleven setters.
+>
+> **The information this section was waiting for has arrived and it says no.**
+> "3a shrinks the class enough to see the loop's actual dependencies" — 3a
+> removed 45 lines and not one of them was reachable from the loop. The coupling
+> is structural, not accumulated clutter that a previous phase would clear.
+>
+> **What was done instead**, on this file's own "stop and re-cut" instruction:
+> the one cluster that does separate. `liveTasks` / `taskIdentity` /
+> `reportedTasks` are three collections only ever touched together, read from
+> outside the loop through `.size` and `.values()` alone. They became
+> `ui/domains/subagent-roster.ts` — the merge precedence, the workflow
+> `lastToolName` rule, the phase routing and the late-event guard, returning
+> what an update _means_ while the host keeps `session.emit`, `post` and
+> `scheduleSave`. 11 new tests over rules that previously needed the whole class
+> to reach, including the guard whose comment records the bug it was written for.
+>
+> Scope: ~35 lines, not the ~600 this section promised. That gap is the finding.
+>
+> **What is left of the turn loop is a genuine design question, not a move.**
+> Splitting it needs the state to move with the methods — a `Turn` object that
+> owns its own lifecycle and that the host holds one of — which is a rewrite of
+> the conversation's core with its ~4200 lines of tests driving the class rather
+> than its parts. Worth deciding deliberately, alongside `claude-cli.ts`'s two
+> stream generators as Phase 2 notes. Not a refactor phase.
+
+### 3b (as originally written — kept for the reasoning, not the instruction)
 
 [`runPromptTurn`](../../src/ui/conversation-host.ts#L2455) 180 ·
 [`startSessionProvider`](../../src/ui/conversation-host.ts#L2290) 147 ·
@@ -284,15 +333,31 @@ yet.
 If the extracted interface needs more than ~8 members, that is the signal the
 seam is in the wrong place — stop and re-cut rather than pushing through.
 
-### 3c. The small ones, same phase
+### 3c. NOT the small ones — measured 2026-08-04, and two of the three are 3b again
 
-- `html()` at [2956](../../src/ui/conversation-host.ts#L2956) → `src/ui/webview-html.ts`
-- `rewindTo` / `forkBeforeTruncating` / `editAt` → `src/ui/domains/rewind.ts`
-- `ensureWorkingRoot` / `releaseWorktree` → into the existing `services/worktree.ts`
+> They are called "the small ones" because they are short. Short is not the
+> measurement that matters here, and the same abort criterion fires:
+>
+> - `rewindTo` / `forkBeforeTruncating` / `editAt` touch **17 distinct class
+>   members** between them — `checkpoints`, `history`, `sessions`, `activeTurn`,
+>   `resumeId`, `steerIntoRunningTurn`, `runTurnReportingFailure`, `abortTurn`,
+>   `handlePrompt`, `publishHistory`, `scheduleSave`, `settings`, `applySetting`,
+>   `releaseSessionProvider`, `session`, `post`, `forkBeforeTruncating`. That is
+>   the turn loop's state again, reached from a different door.
+> - `ensureWorkingRoot` / `releaseWorktree` touch **9**, and
+>   `services/worktree.ts` is today a clean module over explicit parameters
+>   (`createWorktree(root, name)`). Moving these in would hand it panel state,
+>   `post`, and two isolation flags — making the module worse to save nine lines
+>   in the host.
+>
+> `html()` was already dropped above: the module exists and the method is a
+> 7-line delegation to it.
+>
+> **So Phase 3 is closed at 3a plus the roster.** What is left of it is not
+> refactor work; it is the `Turn` object question recorded under 3b.
 
-**Size:** large. **Risk:** medium — no pure/impure line runs through this file.
-**Evidence:** the three gates, plus a real turn, a rewind, and a fork exercised
-by hand.
+**Superseded.** Original text: `html()` → `src/ui/webview-html.ts`, the rewind
+trio → `src/ui/domains/rewind.ts`, the worktree pair → `services/worktree.ts`.
 
 ---
 
