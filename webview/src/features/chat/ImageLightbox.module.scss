@@ -3,13 +3,11 @@
 // the image chips inside user messages.
 // ─────────────────────────────────────────────────────────────
 
+// Fixed, inset, centring and layer are `Overlay`'s. What is left is this
+// lightbox's own: a heavier scrim than a dialog needs, a wider gutter so a
+// large image does not touch the edges, and the cursor that says the backdrop
+// is the way out.
 .backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 32px;
   background: color-mix(in srgb, var(--s0) 78%, transparent);
   backdrop-filter: blur(6px);

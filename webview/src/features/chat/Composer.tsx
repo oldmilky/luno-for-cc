@@ -544,17 +544,14 @@ export function Composer({
         </div>
       )}
 
-      <AnimatePresence>
-        {preview && (
-          <ImageLightbox
-            name={preview.name}
-            src={preview.dataUrl}
-            width={preview.width}
-            height={preview.height}
-            onClose={() => setPreview(null)}
-          />
-        )}
-      </AnimatePresence>
+      <ImageLightbox
+        open={preview !== null}
+        name={preview?.name ?? ""}
+        src={preview?.dataUrl}
+        width={preview?.width}
+        height={preview?.height}
+        onClose={() => setPreview(null)}
+      />
 
       <div
         className={`${s.editorArea}${voice && !inline ? ` ${s.editorAreaMic}` : ""}`}

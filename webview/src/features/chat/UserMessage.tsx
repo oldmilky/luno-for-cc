@@ -25,7 +25,7 @@ import {
   useRef,
   useState
 } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { ENTER, SPRING_PRESS } from "../../design/motion";
 import { Icon } from "../../design/icons";
 import { Tooltip } from "../../design/primitives";
@@ -362,16 +362,13 @@ function MsgImage({ name, src }: { name: string; src: string }) {
           <span className={s.imageChipName}>{name}</span>
         </button>
       </Tooltip>
-      <AnimatePresence>
-        {open && (
-          <ImageLightbox
-            name={name}
-            src={resolved}
-            error={error}
-            onClose={() => setOpen(false)}
-          />
-        )}
-      </AnimatePresence>
+      <ImageLightbox
+        open={open}
+        name={name}
+        src={resolved}
+        error={error}
+        onClose={() => setOpen(false)}
+      />
     </>
   );
 }

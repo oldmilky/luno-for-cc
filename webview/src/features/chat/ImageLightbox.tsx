@@ -1,7 +1,10 @@
 // ─────────────────────────────────────────────────────────────
 // Image lightbox. Click outside or press Escape to dismiss.
-// Renders in place (no portal) — a full-viewport fixed overlay is
-// enough, and it keeps the dialog inside the tree that owns it.
+//
+// It used to say a full-viewport fixed overlay was enough without a portal.
+// It is not: measured, an identical `position: fixed; inset: 0` under an
+// ancestor carrying a transform collapses to 917x0 and leaves the screen. It
+// goes through `Overlay` now, which portals.
 //
 // Shared by the composer's attachment chips and the image chips in
 // user messages; the caller resolves the source (a data URL it
@@ -9,13 +12,13 @@
 // or neither for the loading state.
 // ─────────────────────────────────────────────────────────────
 
-import { useEffect } from "react";
-import { motion } from "framer-motion";
-import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
+import { useState } from "react";
+import { Overlay } from "../../design/primitives";
 import { Icon } from "../../design/icons";
 import s from "./ImageLightbox.module.scss";
 
 export interface ImageLightboxProps {
+  open: boolean;
   name: string;
   /** Resolved image source; null while it is still being fetched. */
   src?: string | null;
@@ -26,6 +29,7 @@ export interface ImageLightboxProps {
 }
 
 export function ImageLightbox({
+  open,
   name,
   src,
   error,
@@ -33,60 +37,58 @@ export function ImageLightbox({
   height = 0,
   onClose
 }: ImageLightboxProps) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Held so the dismissal animates over the image rather than over an empty
+  // frame: the caller clears its preview state the moment it closes. Compared
+  // by VALUE, never by identity — a caller that builds this bundle inline would
+  // otherwise set state on every render and never settle.
+  const [shown, setShown] = useState({ name, src, error, width, height });
+  if (
+    open &&
+    (shown.name !== name ||
+      shown.src !== src ||
+      shown.error !== error ||
+      shown.width !== width ||
+      shown.height !== height)
+  ) {
+    setShown({ name, src, error, width, height });
+  }
 
   return (
-    <motion.div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Preview of ${name}`}
-      onClick={onClose}
-      className={s.backdrop}
-      {...BACKDROP}
+    <Overlay
+      open={open}
+      onClose={onClose}
+      label={`Preview of ${shown.name}`}
+      className={s.panel}
+      backdropClassName={s.backdrop}
     >
-      <motion.div
-        onClick={(e) => e.stopPropagation()}
-        className={s.panel}
-        {...OVERLAY_PANEL}
-      >
-        <div className={s.bar}>
-          <div className={s.meta}>
-            <Icon name="file" size={13} />
-            <span className={s.name}>{name}</span>
-            {width > 0 && (
-              <span className={s.dims}>
-                {width}×{height}
-              </span>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close preview"
-            className={s.close}
-          >
-            <Icon name="x" size={12} />
-          </button>
+      <div className={s.bar}>
+        <div className={s.meta}>
+          <Icon name="file" size={13} />
+          <span className={s.name}>{shown.name}</span>
+          {shown.width > 0 && (
+            <span className={s.dims}>
+              {shown.width}×{shown.height}
+            </span>
+          )}
         </div>
-        {src ? (
-          <img src={src} alt={name} className={s.image} />
-        ) : error ? (
-          <div className={`${s.status} ${s.error}`}>
-            Could not load image: {error}
-          </div>
-        ) : (
-          <div className={s.status}>Loading…</div>
-        )}
-      </motion.div>
-    </motion.div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close preview"
+          className={s.close}
+        >
+          <Icon name="x" size={12} />
+        </button>
+      </div>
+      {shown.src ? (
+        <img src={shown.src} alt={shown.name} className={s.image} />
+      ) : shown.error ? (
+        <div className={`${s.status} ${s.error}`}>
+          Could not load image: {shown.error}
+        </div>
+      ) : (
+        <div className={s.status}>Loading…</div>
+      )}
+    </Overlay>
   );
 }
