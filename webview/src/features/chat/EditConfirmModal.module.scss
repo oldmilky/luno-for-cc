@@ -9,22 +9,20 @@
 // `text-on-accent/85` kbd hint were the only two literal colors.
 // ─────────────────────────────────────────────────────────────
 
+// Only the scrim is left here; the rest — fixed, inset, centring, layer — is
+// `Overlay`'s.
+//
+// The `!important` pair that used to be in this block is gone with it. It was
+// there because the dialog mounted as a direct child of `.app`, and the shell
+// flattens those to `position: relative; z-index: 1` unless the child is on the
+// exclusion list in theme.css. That selector scores 0-5-1, so no module class
+// could out-specify it, and without the force the backdrop dropped into normal
+// flow — stretching the document and scrolling the whole sidebar. Rendering
+// into `document.body` puts the element outside `.app` entirely, so the rule
+// cannot reach it and there is nothing left to force.
 .overlay {
-  inset: 0;
-  display: grid;
-  place-items: center;
   background: color-mix(in srgb, var(--s0) 55%, transparent);
   backdrop-filter: blur(2px);
-
-  // This dialog mounts as a direct child of `.app`, and the app shell
-  // flattens those to `position: relative; z-index: 1` unless the child is on
-  // its exclusion list (theme.css `.app > *:not(…)`). That selector scores
-  // 0-5-1, so a module class cannot out-specify it and the backdrop would
-  // drop into normal flow — stretching the document and scrolling the whole
-  // sidebar. The exclusion list keys on global class names we no longer
-  // carry, so the two properties it clobbers are forced here instead.
-  position: fixed !important;
-  z-index: 1000 !important;
 }
 
 .dialog {

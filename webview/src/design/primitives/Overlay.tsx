@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, type MotionProps } from "framer-motion";
 import { BACKDROP, OVERLAY_PANEL } from "../motion";
 import s from "./Overlay.module.scss";
 
@@ -56,6 +56,10 @@ export interface OverlayProps {
   dismissOnBackdrop?: boolean;
   /** Whether Escape dismisses. Same reasoning as the backdrop. */
   dismissOnEscape?: boolean;
+  /** Overrides spread over `OVERLAY_PANEL`, for a dialog whose motion genuinely
+   *  differs — not a licence to hand-write one. Build the override out of the
+   *  preset's own values so timing and curve stay shared. */
+  panelMotion?: Pick<MotionProps, "initial" | "animate" | "exit">;
 }
 
 export function Overlay({
@@ -66,7 +70,8 @@ export function Overlay({
   className,
   backdropClassName,
   dismissOnBackdrop = true,
-  dismissOnEscape = true
+  dismissOnEscape = true,
+  panelMotion
 }: OverlayProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreTo = useRef<HTMLElement | null>(null);
@@ -102,12 +107,17 @@ export function Overlay({
 
   // Focus lands inside on open, so the first Tab goes where the eye already is
   // and a screen reader starts reading the dialog rather than the page under it.
+  //
+  // It lands on the PANEL unless a control asks for it with `data-autofocus`.
+  // Focusing the first button by default would change what Enter does: a
+  // focused button activates on Enter, so a dialog that also binds Enter to a
+  // decision would run both, and the one it ran first would not be the one the
+  // key means. Nominating is explicit; falling into it is not.
   useEffect(() => {
     if (!open) return;
     const panel = panelRef.current;
     if (!panel) return;
-    const first = panel.querySelector<HTMLElement>("[data-autofocus]");
-    (first ?? panel.querySelector<HTMLElement>(FOCUSABLE) ?? panel).focus();
+    (panel.querySelector<HTMLElement>("[data-autofocus]") ?? panel).focus();
   }, [open]);
 
   const onKeyDown = useCallback(
@@ -165,6 +175,7 @@ export function Overlay({
             className={className ? `${s.panel} ${className}` : s.panel}
             tabIndex={-1}
             {...OVERLAY_PANEL}
+            {...panelMotion}
           >
             {children}
           </motion.div>

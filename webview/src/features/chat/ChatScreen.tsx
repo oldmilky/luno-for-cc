@@ -522,36 +522,35 @@ export function ChatScreen({
         }}
       />
 
-      <AnimatePresence>
-        {pendingEdit && (
-          <EditConfirmModal
-            key="edit-modal"
-            messagesAfter={pendingEdit.messagesAfter}
-            agents={running}
-            onCancel={() => setPendingEdit(null)}
-            onDontRevert={() => {
-              send({
-                type: "editAt",
-                turnId: pendingEdit.turnId,
-                text: pendingEdit.text,
-                revertFiles: false
-              });
-              setPendingEdit(null);
-              setEditingTurnId(null);
-            }}
-            onRevert={() => {
-              send({
-                type: "editAt",
-                turnId: pendingEdit.turnId,
-                text: pendingEdit.text,
-                revertFiles: true
-              });
-              setPendingEdit(null);
-              setEditingTurnId(null);
-            }}
-          />
-        )}
-      </AnimatePresence>
+      <EditConfirmModal
+        pending={pendingEdit}
+        agents={running}
+        onCancel={() => setPendingEdit(null)}
+        onDontRevert={() => {
+          if (pendingEdit) {
+            send({
+              type: "editAt",
+              turnId: pendingEdit.turnId,
+              text: pendingEdit.text,
+              revertFiles: false
+            });
+          }
+          setPendingEdit(null);
+          setEditingTurnId(null);
+        }}
+        onRevert={() => {
+          if (pendingEdit) {
+            send({
+              type: "editAt",
+              turnId: pendingEdit.turnId,
+              text: pendingEdit.text,
+              revertFiles: true
+            });
+          }
+          setPendingEdit(null);
+          setEditingTurnId(null);
+        }}
+      />
 
       <HistoryDrawer
         open={historyOpen}
