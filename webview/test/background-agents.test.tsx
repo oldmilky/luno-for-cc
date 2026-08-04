@@ -175,14 +175,21 @@ describe("the header's agents chip", () => {
 });
 
 describe("the background-agents panel", () => {
-  const open = (p: AgentPanel, onClose = () => {}, onStopAll = () => {}) =>
-    render(
+  // The panel goes through `Overlay`, which portals to `document.body` — so
+  // the div the root rendered into is not where the dialog lands, and every
+  // query below has to start from the portal host instead. `unmount()` still
+  // belongs to the original mount and still takes the portal with it.
+  const open = (p: AgentPanel, onClose = () => {}, onStopAll = () => {}) => {
+    const mounted = render(
       <BackgroundAgentsModal
+        open
         panel={p}
         onClose={onClose}
         onStopAll={onStopAll}
       />
     );
+    return { ...mounted, container: document.body };
+  };
 
   const stopButton = (container: HTMLElement) =>
     [...container.querySelectorAll("button")].find((b) =>
@@ -414,13 +421,22 @@ describe("the background-agents panel", () => {
     unmount();
   });
 
-  it("closes on Escape", () => {
+  // Escape is `Overlay`'s and it listens on the dialog rather than on
+  // `window`, so the key has to come from inside — which is where it comes
+  // from in practice, because opening moves focus into the panel. Dispatching
+  // at `window` no longer reaches it, and that is the change rather than a
+  // gap: a key pressed with the focus somewhere else is not this dialog's.
+  it("closes on Escape pressed inside it", () => {
     let closed = 0;
-    const { unmount } = open(panel(), () => {
+    const { container, unmount } = open(panel(), () => {
       closed += 1;
     });
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog?.contains(document.activeElement)).toBe(true);
     act(() => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      );
     });
     expect(closed).toBe(1);
     unmount();

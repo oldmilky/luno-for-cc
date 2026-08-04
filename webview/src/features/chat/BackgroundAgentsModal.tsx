@@ -10,11 +10,9 @@
 // `docs/WORKFLOW-AGENTS-PANEL.md` holds the capture behind each.
 // ─────────────────────────────────────────────────────────────
 
-import { useEffect, useId, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useId, useState } from "react";
 import { Icon } from "../../design/icons";
-import { Tooltip } from "../../design/primitives";
-import { BACKDROP, OVERLAY_PANEL } from "../../design/motion";
+import { Overlay, Tooltip } from "../../design/primitives";
 import { formatDuration, formatTokens } from "../../lib/format";
 import { workflowAgentOutcome } from "./subagent-state";
 import type { AgentPanel, AgentRun } from "./subagent-state";
@@ -22,6 +20,7 @@ import type { WorkflowProgressEntry } from "../../lib/rpc";
 import s from "./BackgroundAgentsModal.module.scss";
 
 interface BackgroundAgentsModalProps {
+  open: boolean;
   panel: AgentPanel;
   onClose: () => void;
   /** Hands the decision to the existing stop confirmation — there is no way to
@@ -57,139 +56,118 @@ function useSecondHand(live: boolean): number {
 }
 
 export function BackgroundAgentsModal({
+  open,
   panel,
   onClose,
   onStopAll
 }: BackgroundAgentsModalProps) {
   const titleId = useId();
-  const panelRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  // Keyboard focus follows the dialog in, and goes back where it came from on
-  // the way out — otherwise Tab resumes from the composer behind the scrim.
-  useEffect(() => {
-    const returnTo = document.activeElement as HTMLElement | null;
-    panelRef.current?.focus();
-    return () => returnTo?.focus?.();
-  }, []);
-
-  const live = panel.running > 0;
+  // Escape, the focus trap and its restore are `Overlay`'s now. The second hand
+  // below only runs while the panel is open and something is still working.
+  const live = open && panel.running > 0;
   const pct = panel.total > 0 ? (panel.done / panel.total) * 100 : 0;
   const now = useSecondHand(live);
 
   return (
-    <motion.div className={s.backdrop} onClick={onClose} {...BACKDROP}>
-      <motion.div
-        ref={panelRef}
-        className={s.panel}
-        onClick={(e) => e.stopPropagation()}
-        // The dialog is the panel, not the scrim around it, and its name is the
-        // heading it already draws — a second `aria-label` here would give the
-        // toolbar button and this surface the same accessible name.
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        {...OVERLAY_PANEL}
-      >
-        <div className={s.hairline} />
+    <Overlay
+      open={open}
+      onClose={onClose}
+      // Named by the heading it already draws rather than by a string of its
+      // own: a second `aria-label` would give the toolbar button and this
+      // surface the same accessible name.
+      labelledBy={titleId}
+      className={s.panel}
+      backdropClassName={s.backdrop}
+    >
+      <div className={s.hairline} />
 
-        <div className={s.head}>
-          <div className={s.headRow}>
-            <div className={`${s.iconTile}${live ? ` ${s.iconTileLive}` : ""}`}>
-              <Icon name="layers" size={20} />
-            </div>
-            <div className={s.headText}>
-              <h2 className={s.title} id={titleId}>
-                Background agents
-              </h2>
-              {/* Never "N of M still working": the two numbers answer
+      <div className={s.head}>
+        <div className={s.headRow}>
+          <div className={`${s.iconTile}${live ? ` ${s.iconTileLive}` : ""}`}>
+            <Icon name="layers" size={20} />
+          </div>
+          <div className={s.headText}>
+            <h2 className={s.title} id={titleId}>
+              Background agents
+            </h2>
+            {/* Never "N of M still working": the two numbers answer
                   different questions — how much is alive, and how many agents
                   have answered — and a workflow between phases makes them
                   disagree. The bar below carries the total. */}
-              <p className={s.sub}>
-                {live
-                  ? `${panel.running} still working`
-                  : `${panel.total} agent${panel.total === 1 ? "" : "s"} · all finished`}
-              </p>
-            </div>
-            <div className={s.stats}>
-              <Tooltip label="What these agents have spent, as the CLI reports it">
-                <span className={s.stat}>{formatTokens(panel.tokens)}</span>
-              </Tooltip>
-              <span className={s.statDot} aria-hidden>
-                ·
-              </span>
-              <Tooltip label="The longest launch's own elapsed time">
-                <span className={s.stat}>
-                  {formatDuration(panel.elapsedMs)}
-                </span>
-              </Tooltip>
-              {panel.etaMs !== undefined && (
-                <>
-                  <span className={s.statDot} aria-hidden>
-                    ·
-                  </span>
-                  <Tooltip
-                    label={`A guess, from the ${panel.etaSample} agents that have already finished`}
-                  >
-                    <span className={`${s.stat} ${s.eta}`}>
-                      ≈{formatDuration(panel.etaMs)}
-                    </span>
-                  </Tooltip>
-                </>
-              )}
-            </div>
+            <p className={s.sub}>
+              {live
+                ? `${panel.running} still working`
+                : `${panel.total} agent${panel.total === 1 ? "" : "s"} · all finished`}
+            </p>
           </div>
-
-          <div className={s.barRow}>
-            <div
-              className={s.bar}
-              role="progressbar"
-              aria-valuenow={panel.done}
-              aria-valuemin={0}
-              aria-valuemax={panel.total}
-              aria-label="Agents finished"
-            >
-              <div className={s.fill} style={{ width: `${pct}%` }} />
-            </div>
-            <span className={s.barLabel}>
-              {panel.done} / {panel.total} done
+          <div className={s.stats}>
+            <Tooltip label="What these agents have spent, as the CLI reports it">
+              <span className={s.stat}>{formatTokens(panel.tokens)}</span>
+            </Tooltip>
+            <span className={s.statDot} aria-hidden>
+              ·
             </span>
+            <Tooltip label="The longest launch's own elapsed time">
+              <span className={s.stat}>{formatDuration(panel.elapsedMs)}</span>
+            </Tooltip>
+            {panel.etaMs !== undefined && (
+              <>
+                <span className={s.statDot} aria-hidden>
+                  ·
+                </span>
+                <Tooltip
+                  label={`A guess, from the ${panel.etaSample} agents that have already finished`}
+                >
+                  <span className={`${s.stat} ${s.eta}`}>
+                    ≈{formatDuration(panel.etaMs)}
+                  </span>
+                </Tooltip>
+              </>
+            )}
           </div>
         </div>
 
-        <div className={s.body}>
-          {panel.runs.map((run) => (
-            <RunBlock key={run.taskId} run={run} now={now} />
-          ))}
-        </div>
-
-        <div className={s.foot}>
-          <div className={s.escHint}>
-            <kbd className={s.kbd}>Esc</kbd>
-            <span>to close</span>
+        <div className={s.barRow}>
+          <div
+            className={s.bar}
+            role="progressbar"
+            aria-valuenow={panel.done}
+            aria-valuemin={0}
+            aria-valuemax={panel.total}
+            aria-label="Agents finished"
+          >
+            <div className={s.fill} style={{ width: `${pct}%` }} />
           </div>
-          {/* Only while there is something to stop, and it asks rather than
+          <span className={s.barLabel}>
+            {panel.done} / {panel.total} done
+          </span>
+        </div>
+      </div>
+
+      <div className={s.body}>
+        {panel.runs.map((run) => (
+          <RunBlock key={run.taskId} run={run} now={now} />
+        ))}
+      </div>
+
+      <div className={s.foot}>
+        <div className={s.escHint}>
+          <kbd className={s.kbd}>Esc</kbd>
+          <span>to close</span>
+        </div>
+        {/* Only while there is something to stop, and it asks rather than
               acts: stopping reaches the CLI as an `interrupt`, which takes
               every agent at once. The confirmation that already exists names
               what is about to be lost. */}
-          {live && (
-            <button type="button" className={s.stopAll} onClick={onStopAll}>
-              <Icon name="stop" size={10} />
-              Stop all
-            </button>
-          )}
-        </div>
-      </motion.div>
-    </motion.div>
+        {live && (
+          <button type="button" className={s.stopAll} onClick={onStopAll}>
+            <Icon name="stop" size={10} />
+            Stop all
+          </button>
+        )}
+      </div>
+    </Overlay>
   );
 }
 

@@ -39,12 +39,21 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])'
 ].join(",");
 
-export interface OverlayProps {
+/**
+ * A dialog has to be named, and there are two ways to do it.
+ *
+ * `labelledBy` points at a heading the dialog already draws, which is the
+ * better one when it has a visible title — it keeps the name and the heading
+ * from drifting apart, and it stops a dialog and the button that opens it from
+ * announcing as the same string. `label` is for a dialog with no heading of its
+ * own. Exactly one, enforced here rather than left to a review.
+ */
+type OverlayName =
+  { label: string; labelledBy?: never } | { labelledBy: string; label?: never };
+
+interface OverlayBaseProps {
   open: boolean;
   onClose: () => void;
-  /** Names the dialog for a screen reader. Required — an unnamed dialog is
-   *  announced as nothing at all. */
-  label: string;
   children: ReactNode;
   /** Extra class on the panel — its chrome, width and layout. */
   className?: string;
@@ -60,18 +69,26 @@ export interface OverlayProps {
    *  differs — not a licence to hand-write one. Build the override out of the
    *  preset's own values so timing and curve stay shared. */
   panelMotion?: Pick<MotionProps, "initial" | "animate" | "exit">;
+  /** The same, for the backdrop over `BACKDROP`. `BACKDROP` carries opacity
+   *  only, so a scrim that also blurs has to re-state each state with the blur
+   *  folded in — declaring the blur in CSS instead would fight the tween. */
+  backdropMotion?: Pick<MotionProps, "initial" | "animate" | "exit">;
 }
+
+export type OverlayProps = OverlayBaseProps & OverlayName;
 
 export function Overlay({
   open,
   onClose,
   label,
+  labelledBy,
   children,
   className,
   backdropClassName,
   dismissOnBackdrop = true,
   dismissOnEscape = true,
-  panelMotion
+  panelMotion,
+  backdropMotion
 }: OverlayProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreTo = useRef<HTMLElement | null>(null);
@@ -158,6 +175,7 @@ export function Overlay({
           role="dialog"
           aria-modal="true"
           aria-label={label}
+          aria-labelledby={labelledBy}
           onKeyDown={onKeyDown}
           onMouseDown={(e) => {
             pressedBackdrop.current = e.target === e.currentTarget;
@@ -169,6 +187,7 @@ export function Overlay({
             }
           }}
           {...BACKDROP}
+          {...backdropMotion}
         >
           <motion.div
             ref={panelRef}

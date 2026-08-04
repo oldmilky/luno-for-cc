@@ -571,6 +571,8 @@ export function ChatScreen({
         onClose={() => setPermissionsOpen(false)}
       />
 
+      <KeyboardHints open={hintsOpen} onClose={() => setHintsOpen(false)} />
+
       <AnimatePresence>
         {paletteOpen && (
           <CommandPalette
@@ -585,24 +587,20 @@ export function ChatScreen({
             onOpenHistory={() => setHistoryOpen(true)}
           />
         )}
-        {hintsOpen && (
-          <KeyboardHints key="kbd-hints" onClose={() => setHintsOpen(false)} />
-        )}
-        {agentsOpen && (
-          <BackgroundAgentsModal
-            key="bg-agents"
-            panel={agents}
-            onClose={() => setAgentsOpen(false)}
-            // The same door the composer's Stop uses, so the confirmation that
-            // names what is about to be lost is reached either way — and there
-            // is exactly one path that sends the interrupt.
-            onStopAll={() => {
-              setAgentsOpen(false);
-              onCancel();
-            }}
-          />
-        )}
       </AnimatePresence>
+
+      <BackgroundAgentsModal
+        open={agentsOpen}
+        panel={agents}
+        onClose={() => setAgentsOpen(false)}
+        // The same door the composer's Stop uses, so the confirmation that
+        // names what is about to be lost is reached either way — and there is
+        // exactly one path that sends the interrupt.
+        onStopAll={() => {
+          setAgentsOpen(false);
+          onCancel();
+        }}
+      />
 
       <div
         className={s.dock}
