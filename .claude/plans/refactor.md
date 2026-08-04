@@ -452,11 +452,33 @@ at **1544 / 6**, lint exit 0 at 35 warnings, package 1.28 MB throughout.
 > `SelectionCommentLayer`. Both are `position: fixed` anchored to coordinates
 > from a `DOMRect`, not full-viewport backdrops — a popover, not a dialog.
 > `Overlay` would give them `aria-modal`, a focus trap and a scroll lock, none of
-> which belongs on a popover pinned to a text selection. **They carry the same
-> latent bug**: a transformed ancestor re-anchors their coordinates just as it
-> does a backdrop. What they need is a bare portal — which `Tooltip` already
-> implements privately, positioning from a rect. Extracting that is the next
-> piece of this work and it is a different primitive, not this one.
+> which belongs on a popover pinned to a text selection.
+>
+> **Corrected 2026-08-04, after measuring rather than assuming.** This entry
+> first said they carry the same bug and that the fix was to extract Tooltip's
+> private portal. Both halves were wrong:
+>
+> - **There is no primitive to extract.** Tooltip's portal is `createPortal`
+>   plus placement logic — measure, flip above/below, clamp to the viewport —
+>   and neither popover wants any of it. `PlanReviewDropdown` takes an
+>   `anchor: {right, top}` from its parent; `SelectionCommentLayer` computes
+>   from a `Range`'s rect and clamps itself. What they would need is one React
+>   call, and wrapping one call in a component is ceremony.
+> - **The bug is latent here, not live.** Measured in the harness: framer
+>   settles a `y: 0` element on `transform: none`, which creates no containing
+>   block — only an element mid-animation does. What does create one
+>   permanently is `filter`, `backdrop-filter` and `will-change`; the chat
+>   surface has five such elements, all in the header and the orb. In the plan
+>   tree the only `filter: opacity()` sits on step rows, which are not ancestors
+>   of either popover.
+>
+> So there is nothing to fix here today, and portalling a working popover to
+> close a class of bug it is not currently hit by is the speculative change this
+> plan's own scope rules warn against. Left alone deliberately. The thing worth
+> writing down is the rule, not the change: **an overlay is safe until something
+> above it grows a `filter`, and `filter: opacity()` is what this codebase uses
+> for state-based dimming on framer surfaces** — so the two are one careless
+> commit apart.
 >
 > **What was NOT verified, throughout.** The harness window stopped compositing
 > partway through the session — `requestAnimationFrame` fell to 1–2 ticks per
