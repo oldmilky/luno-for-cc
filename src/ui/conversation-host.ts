@@ -10,7 +10,6 @@ import { Orchestrator } from "../core/orchestrator.js";
 import { DeltaQueue } from "../core/delta-queue.js";
 import {
   isTerminalTaskStatus,
-  isWorkflowTask,
   PermissionMode,
   PermissionBehavior,
   GrantScope,
@@ -63,7 +62,6 @@ import {
   cleanSelection,
   compactionSummary,
   forkName,
-  stripUndefined,
   subagentTitle,
   worktreeName
 } from "./conversation-format.js";
@@ -87,6 +85,7 @@ import {
 } from "./domains/session-store.js";
 import { applyPermissionMode } from "./domains/permission-modes.js";
 import { toggleRemoteControl } from "./domains/remote-control.js";
+import { SubagentRoster } from "./domains/subagent-roster.js";
 import { nextCycleMode } from "../core/permission-cycle.js";
 import { AuthManager } from "./domains/auth.js";
 import { PlanHandlers } from "./domains/plan-handlers.js";
@@ -353,40 +352,13 @@ export class ConversationHost {
   /** When the running turn began, for the one notification that depends on how
    *  long it took. Zero between turns. */
   private turnStartedAt = 0;
-  /**
-   * Subagents dispatched this turn that have not reported a terminal status,
-   * keyed by CLI task id.
-   *
-   * Kept because `task_updated` identifies its task by id alone — it carries no
-   * `tool_use_id` — so the card it belongs to is only findable through what
-   * `task_started` said. Cleared when a task ends and swept at turn end: the
-   * CLI process dies with the turn, so anything still open at that point is
-   * dead rather than slow, and a card left spinning would claim otherwise.
-   */
-  private readonly liveTasks = new Map<string, SubagentUpdate>();
-  /**
-   * Tasks the CLI has itself reported a terminal status for.
-   *
-   * A `task_progress` can land *after* the `task_notification` that ended a
-   * task — measured, 1.4s after, in the run behind the ten-minute-cutoff audit.
-   * Any phase but `notification` puts its task back into `liveTasks`, so that
-   * one late event resurrected a finished workflow and the turn-end sweep then
-   * filed it `interrupted`. That fabricated status is what the card showed,
-   * over the `stopped` the CLI had actually reported a second earlier.
-   *
-   * Only a status the CLI reported gets an entry here. A card closed by the
-   * sweep does not, so a late notification can still heal one — measured, an
-   * agent closed yellow at 38.6s and reopened green at 107.6s.
-   */
   /** Controls whose value the running process has not been told, because
    *  telling it means replacing the process and the conversation has agents in
    *  it. Cleared by the provider the moment a fresh process is spawned. */
   private pendingSettings: PendingSetting[] = [];
-  private readonly reportedTasks = new Set<string>();
-  /** Identity of every task seen this conversation: the fields that arrive once
-   *  on `task_started` and never again. Kept past the end of the card so a late
-   *  event cannot degrade a workflow's row to a bare "Agent". */
-  private readonly taskIdentity = new Map<string, SubagentUpdate>();
+  /** Every background agent this conversation has dispatched, and the rules for
+   *  what an update to one means. */
+  private readonly subagents = new SubagentRoster();
   /** Text the model produced with no turn running — see the `text` branch in
    *  `onOutOfTurn`. Buffered because it arrives as a stream of fragments and
    *  only reads as a message once. */
@@ -646,7 +618,7 @@ export class ConversationHost {
     // because nothing is streaming and nobody is being waited on — and because
     // this is precisely the row the user is looking for in the list, which
     // would otherwise read `done` while twenty agents run.
-    if (this.liveTasks.size > 0) return { status: "agents" };
+    if (this.subagents.openCount > 0) return { status: "agents" };
     return {};
   }
 
@@ -760,7 +732,7 @@ export class ConversationHost {
    * from. Both die with the CLI process, and neither is recoverable.
    */
   get hasLiveWork(): boolean {
-    return this.activeTurn !== undefined || this.liveTasks.size > 0;
+    return this.activeTurn !== undefined || this.subagents.openCount > 0;
   }
 
   /** Whether some surface is currently showing this conversation. */
@@ -833,7 +805,7 @@ export class ConversationHost {
     // just cleared what the previous occupant left there, and these outlive a
     // turn now — without this, switching back to a chat running a workflow
     // showed a card with a title and nothing moving in it.
-    for (const task of this.liveTasks.values()) {
+    for (const task of this.subagents.open()) {
       void webview.postMessage({ type: "subagentProgress", task });
     }
     // Including `off`, and that is the whole point: the pill's state lives in
@@ -2403,7 +2375,7 @@ export class ConversationHost {
     logInfo(
       `[luno] releasing the CLI process` +
         (this.hasLiveWork
-          ? ` — with a turn ${this.activeTurn ? "running" : "idle"} and ${this.liveTasks.size} task(s) still open`
+          ? ` — with a turn ${this.activeTurn ? "running" : "idle"} and ${this.subagents.openCount} task(s) still open`
           : "")
     );
     this.sessionProvider = null;
@@ -2798,53 +2770,25 @@ export class ConversationHost {
    * summary, and the pair arrives back to back.
    */
   private onSubagentUpdate(update: SubagentUpdate): void {
-    // The CLI has already said how this one ended. Nothing arriving afterwards
-    // can add to that, and letting it through is what put a task the CLI had
-    // reported `stopped` back among the live ones, to be swept as
-    // `interrupted` — see `reportedTasks`.
-    if (this.reportedTasks.has(update.taskId)) return;
-
-    const merged: SubagentUpdate = {
-      ...this.taskIdentity.get(update.taskId),
-      ...this.liveTasks.get(update.taskId),
-      ...stripUndefined(update),
-      // Restated because `stripUndefined` widens both to optional; they are the
-      // two fields the incoming event is always authoritative for.
-      taskId: update.taskId,
-      phase: update.phase
-    };
-
-    // `task_type` rides on `task_started` and on no other phase, so this is the
-    // first point that knows a progress event belongs to a workflow — the
-    // dispatch has been merged in by now. A workflow puts the *agent's label*
-    // in `last_tool_name` ("Reply with exactly the word OK"), not the name of a
-    // tool, and the same string is already the activity.
-    if (isWorkflowTask(merged.taskType)) delete merged.lastToolName;
-
-    if (update.phase === "notification") {
-      this.liveTasks.delete(update.taskId);
-      this.reportedTasks.add(update.taskId);
-      this.emitSubagentEnd(merged);
-      return;
+    const outcome = this.subagents.accept(update);
+    switch (outcome.kind) {
+      case "ignored":
+        return;
+      case "ended":
+        this.emitSubagentEnd(outcome.task);
+        return;
+      case "started":
+        this.session.emit({
+          kind: "subagent",
+          title: subagentTitle(outcome.task),
+          body: outcome.task.description ?? "",
+          meta: { ...outcome.task, phase: "start", status: "running" }
+        });
+        this.scheduleSave();
+        return;
+      case "progress":
+        this.post({ type: "subagentProgress", task: outcome.task });
     }
-
-    this.liveTasks.set(update.taskId, merged);
-
-    if (update.phase === "started") {
-      // The only phase carrying description, task type and workflow name. Kept
-      // apart from `liveTasks` because that map is cleared when the card
-      // closes, and a row rebuilt without these reads as an anonymous "Agent".
-      this.taskIdentity.set(update.taskId, merged);
-      this.session.emit({
-        kind: "subagent",
-        title: subagentTitle(merged),
-        body: merged.description ?? "",
-        meta: { ...merged, phase: "start", status: "running" }
-      });
-      this.scheduleSave();
-      return;
-    }
-    this.post({ type: "subagentProgress", task: merged });
   }
 
   private emitSubagentEnd(task: SubagentUpdate): void {
@@ -2894,10 +2838,7 @@ export class ConversationHost {
    * one that was not is what D1 in the parity audit was.
    */
   private sweepLiveTasks(): void {
-    if (this.liveTasks.size === 0) return;
-    const open = [...this.liveTasks.values()];
-    this.liveTasks.clear();
-    for (const task of open) this.emitSubagentEnd(task);
+    for (const task of this.subagents.sweep()) this.emitSubagentEnd(task);
   }
 
   /**
