@@ -8,10 +8,11 @@
 // --add-*/--del-* tokens rather than Tailwind arbitrary values.
 // ─────────────────────────────────────────────────────────────
 
+// Fixed, inset, layer and the portal are `Overlay`'s. The diff fills the height
+// it is given rather than being centred in it, so `align-items: stretch`
+// replaces the primitive's centring grid; the gutter is restated because it has
+// a breakpoint.
 .overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
   display: flex;
   align-items: stretch;
   justify-content: center;

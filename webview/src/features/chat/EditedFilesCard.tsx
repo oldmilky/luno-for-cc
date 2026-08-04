@@ -242,16 +242,12 @@ export function EditedFilesCard({
         </AnimatePresence>
       </motion.div>
 
-      <AnimatePresence>
-        {openEntry && (
-          <FileDiffModal
-            entry={openEntry}
-            originRect={openState?.rect ?? null}
-            onClose={() => setOpenState(null)}
-            onAddNote={onAddDiffNote}
-          />
-        )}
-      </AnimatePresence>
+      <FileDiffModal
+        entry={openEntry}
+        originRect={openState?.rect ?? null}
+        onClose={() => setOpenState(null)}
+        onAddNote={onAddDiffNote}
+      />
     </>
   );
 }

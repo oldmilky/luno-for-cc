@@ -14,12 +14,11 @@
 //   └─────────────────────────────────────────────────┘
 // ─────────────────────────────────────────────────────────────
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "../../design/icons";
-import { Tooltip } from "../../design/primitives";
+import { Overlay, Tooltip } from "../../design/primitives";
 import {
-  BACKDROP,
   EXPAND,
   OVERLAY_PANEL,
   SPRING_POP,
@@ -53,7 +52,9 @@ export interface DiffLineNote {
 }
 
 interface FileDiffModalProps {
-  entry: FileEditEntry;
+  /** The file being shown, or null when closed. Null *is* the closed state —
+   *  the component stays mounted so it can animate out. */
+  entry: FileEditEntry | null;
   onClose: () => void;
   /** Where on screen the click originated — modal will spring out of this rect. */
   originRect?: DOMRect | null;
@@ -61,11 +62,16 @@ interface FileDiffModalProps {
 }
 
 export function FileDiffModal({
-  entry,
+  entry: incoming,
   onClose,
   originRect,
   onAddNote
 }: FileDiffModalProps) {
+  const open = incoming !== null;
+  // Held so the dismissal animates over the diff rather than an empty sheet:
+  // the card clears its selection the moment it closes.
+  const [entry, setEntry] = useState(incoming);
+  if (incoming && incoming !== entry) setEntry(incoming);
   const [copied, setCopied] = useState(false);
   const [noteFor, setNoteFor] = useState<{
     lineNo: number;
@@ -89,21 +95,19 @@ export function FileDiffModal({
     };
   }, [originRect]);
 
-  // ESC to dismiss
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const totals = useMemo(() => computeTotals(entry), [entry]);
-  const crumbs = useMemo(() => makeCrumbs(entry.path), [entry.path]);
-  const ext = useMemo(() => extOf(entry.path), [entry.path]);
+  // Null only until the first open — the retained entry outlives every close
+  // after that. The hooks still have to be reachable on that first render,
+  // which is why they take the empty path rather than sitting behind a guard.
+  const path = entry?.path ?? "";
+  const totals = useMemo(
+    () => computeTotals(entry ?? { changes: [] }),
+    [entry]
+  );
+  const crumbs = useMemo(() => makeCrumbs(path), [path]);
+  const ext = useMemo(() => extOf(path), [path]);
 
   const copyDiff = async () => {
-    const text = entry.changes
+    const text = (entry?.changes ?? [])
       .map((c) =>
         diffChange(c)
           .map(
@@ -127,197 +131,194 @@ export function FileDiffModal({
     setTimeout(() => setCopied(false), 1400);
   };
 
-  return (
-    <motion.div className={s.overlay} {...BACKDROP} onClick={onClose}>
-      <motion.div
-        {...OVERLAY_PANEL}
-        // Two overrides, both because of the origin morph: where the panel
-        // starts is computed per-open so it grows out of the row that was
-        // clicked, and the resting state has to name `x` — the preset never
-        // travels sideways, so without it the horizontal offset would stick.
-        initial={initialTransform}
-        animate={{ ...OVERLAY_PANEL.animate, x: 0 }}
-        className={s.panel}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Diff for ${baseName(entry.path)}`}
-      >
-        {/* ─────────────────── Header ─────────────────── */}
-        <div className={s.header}>
-          <div className={s.headerMain}>
-            <motion.div
-              initial={{ scale: 0.85, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              // The pop spring is reserved for brand marks; this tile is one.
-              // The delay keeps it a beat behind the panel rather than riding in
-              // with it.
-              transition={{ ...SPRING_POP, delay: stagger(2) }}
-              className={s.tile}
-              // Per-language brand color — not themeable, so it stays data in
-              // this file (EXT_COLORS). Unknown extensions keep the module's
-              // --accent-glow.
-              style={ext.color ? { color: ext.color } : undefined}
-            >
-              <Icon name="edit" size={14} />
-            </motion.div>
-            <div className={s.titleWrap}>
-              {/* Title row: filename + action + stats */}
-              <div className={s.titleRow}>
-                <span className={s.fileName}>{baseName(entry.path)}</span>
-                <ActionPill action={entry.action} />
-                {(totals.added > 0 || totals.removed > 0) && (
-                  <span className={s.stats}>
-                    {totals.added > 0 && (
-                      <span className={s.added}>+{totals.added}</span>
-                    )}
-                    {totals.removed > 0 && (
-                      <span className={s.removed}>−{totals.removed}</span>
-                    )}
-                  </span>
-                )}
-              </div>
-              {/* Breadcrumb row */}
-              <BreadcrumbRow crumbs={crumbs} />
-            </div>
-          </div>
+  if (!entry) return null;
 
-          <div className={s.actions}>
-            <HeaderButton
-              icon="copy"
-              label={copied ? "Copied" : "Copy diff"}
-              onClick={copyDiff}
-              active={copied}
-            />
-            <HeaderButton
-              icon="arrow"
-              label="Open"
-              onClick={() => send({ type: "openFile", path: entry.path })}
-            />
-            <Tooltip label="Close (Esc)">
+  return (
+    <Overlay
+      open={open}
+      onClose={onClose}
+      label={`Diff for ${baseName(entry.path)}`}
+      className={s.panel}
+      backdropClassName={s.overlay}
+      // Two overrides, both because of the origin morph: where the panel starts
+      // is computed per-open so it grows out of the row that was clicked, and
+      // the resting state has to name `x` — the preset never travels sideways,
+      // so without it the horizontal offset would stick.
+      panelMotion={{
+        initial: initialTransform,
+        animate: { ...OVERLAY_PANEL.animate, x: 0 }
+      }}
+    >
+      {/* ─────────────────── Header ─────────────────── */}
+      <div className={s.header}>
+        <div className={s.headerMain}>
+          <motion.div
+            initial={{ scale: 0.85, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            // The pop spring is reserved for brand marks; this tile is one.
+            // The delay keeps it a beat behind the panel rather than riding in
+            // with it.
+            transition={{ ...SPRING_POP, delay: stagger(2) }}
+            className={s.tile}
+            // Per-language brand color — not themeable, so it stays data in
+            // this file (EXT_COLORS). Unknown extensions keep the module's
+            // --accent-glow.
+            style={ext.color ? { color: ext.color } : undefined}
+          >
+            <Icon name="edit" size={14} />
+          </motion.div>
+          <div className={s.titleWrap}>
+            {/* Title row: filename + action + stats */}
+            <div className={s.titleRow}>
+              <span className={s.fileName}>{baseName(entry.path)}</span>
+              <ActionPill action={entry.action} />
+              {(totals.added > 0 || totals.removed > 0) && (
+                <span className={s.stats}>
+                  {totals.added > 0 && (
+                    <span className={s.added}>+{totals.added}</span>
+                  )}
+                  {totals.removed > 0 && (
+                    <span className={s.removed}>−{totals.removed}</span>
+                  )}
+                </span>
+              )}
+            </div>
+            {/* Breadcrumb row */}
+            <BreadcrumbRow crumbs={crumbs} />
+          </div>
+        </div>
+
+        <div className={s.actions}>
+          <HeaderButton
+            icon="copy"
+            label={copied ? "Copied" : "Copy diff"}
+            onClick={copyDiff}
+            active={copied}
+          />
+          <HeaderButton
+            icon="arrow"
+            label="Open"
+            onClick={() => send({ type: "openFile", path: entry.path })}
+          />
+          <Tooltip label="Close (Esc)">
+            <button
+              type="button"
+              onClick={onClose}
+              className={s.close}
+              aria-label="Close"
+            >
+              <Icon name="x" size={13} />
+            </button>
+          </Tooltip>
+        </div>
+      </div>
+
+      {/* ─────────────────── Body ─────────────────── */}
+      <div className={s.body}>
+        {entry.changes.length === 0 ? (
+          <EmptyDiff path={entry.path} />
+        ) : (
+          <div className={s.changes}>
+            {entry.changes.map((c, i) => (
+              <ChangeBlock
+                key={i}
+                change={c}
+                index={i}
+                total={entry.changes.length}
+                onLineClick={
+                  onAddNote
+                    ? (lineNo, context) => {
+                        setNoteFor({ lineNo, context });
+                        setNoteDraft("");
+                      }
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {noteFor && (
+          <motion.div key="note-popover" {...OVERLAY_PANEL} className={s.note}>
+            <div className={s.noteHead}>
+              <div className={s.noteTitle}>
+                Comment on line {noteFor.lineNo}
+              </div>
               <button
                 type="button"
-                onClick={onClose}
-                className={s.close}
-                aria-label="Close"
+                onClick={() => setNoteFor(null)}
+                className={s.noteClose}
+                aria-label="Close note"
               >
-                <Icon name="x" size={13} />
+                <Icon name="x" size={11} />
               </button>
-            </Tooltip>
-          </div>
-        </div>
-
-        {/* ─────────────────── Body ─────────────────── */}
-        <div className={s.body}>
-          {entry.changes.length === 0 ? (
-            <EmptyDiff path={entry.path} />
-          ) : (
-            <div className={s.changes}>
-              {entry.changes.map((c, i) => (
-                <ChangeBlock
-                  key={i}
-                  change={c}
-                  index={i}
-                  total={entry.changes.length}
-                  onLineClick={
-                    onAddNote
-                      ? (lineNo, context) => {
-                          setNoteFor({ lineNo, context });
-                          setNoteDraft("");
-                        }
-                      : undefined
-                  }
-                />
-              ))}
             </div>
-          )}
-        </div>
-
-        <AnimatePresence>
-          {noteFor && (
-            <motion.div
-              key="note-popover"
-              {...OVERLAY_PANEL}
-              className={s.note}
-            >
-              <div className={s.noteHead}>
-                <div className={s.noteTitle}>
-                  Comment on line {noteFor.lineNo}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setNoteFor(null)}
-                  className={s.noteClose}
-                  aria-label="Close note"
-                >
-                  <Icon name="x" size={11} />
-                </button>
+            <pre className={s.noteContext}>{noteFor.context}</pre>
+            <textarea
+              value={noteDraft}
+              autoFocus
+              rows={2}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              placeholder="Leave a note — it'll be added to your next prompt as context."
+              className={s.noteInput}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (!noteDraft.trim() || !onAddNote) return;
+                  onAddNote({
+                    path: entry.path,
+                    lineNo: noteFor.lineNo,
+                    text: noteDraft.trim(),
+                    context: noteFor.context
+                  });
+                  setNoteFor(null);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  setNoteFor(null);
+                }
+              }}
+            />
+            <div className={s.noteFoot}>
+              <div className={s.noteHint}>
+                <kbd className={s.noteKbd}>↵</kbd> to add ·{" "}
+                <kbd className={s.noteKbd}>Esc</kbd> to cancel
               </div>
-              <pre className={s.noteContext}>{noteFor.context}</pre>
-              <textarea
-                value={noteDraft}
-                autoFocus
-                rows={2}
-                onChange={(e) => setNoteDraft(e.target.value)}
-                placeholder="Leave a note — it'll be added to your next prompt as context."
-                className={s.noteInput}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    if (!noteDraft.trim() || !onAddNote) return;
-                    onAddNote({
-                      path: entry.path,
-                      lineNo: noteFor.lineNo,
-                      text: noteDraft.trim(),
-                      context: noteFor.context
-                    });
-                    setNoteFor(null);
-                  } else if (e.key === "Escape") {
-                    e.preventDefault();
-                    setNoteFor(null);
-                  }
+              <button
+                type="button"
+                disabled={!noteDraft.trim()}
+                onClick={() => {
+                  if (!noteDraft.trim() || !onAddNote) return;
+                  onAddNote({
+                    path: entry.path,
+                    lineNo: noteFor.lineNo,
+                    text: noteDraft.trim(),
+                    context: noteFor.context
+                  });
+                  setNoteFor(null);
                 }}
-              />
-              <div className={s.noteFoot}>
-                <div className={s.noteHint}>
-                  <kbd className={s.noteKbd}>↵</kbd> to add ·{" "}
-                  <kbd className={s.noteKbd}>Esc</kbd> to cancel
-                </div>
-                <button
-                  type="button"
-                  disabled={!noteDraft.trim()}
-                  onClick={() => {
-                    if (!noteDraft.trim() || !onAddNote) return;
-                    onAddNote({
-                      path: entry.path,
-                      lineNo: noteFor.lineNo,
-                      text: noteDraft.trim(),
-                      context: noteFor.context
-                    });
-                    setNoteFor(null);
-                  }}
-                  className={s.noteAdd}
-                >
-                  Add to next prompt
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                className={s.noteAdd}
+              >
+                Add to next prompt
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-        {/* ─────────────────── Footer ─────────────────── */}
-        <div className={s.footer}>
-          <span>
-            <kbd className={s.footerKbd}>Esc</kbd>
-            <span className={s.footerKbdLabel}>to close</span>
-          </span>
-          <span className={s.footerCount}>
-            {entry.changes.length}{" "}
-            {entry.changes.length === 1 ? "change" : "changes"}
-          </span>
-        </div>
-      </motion.div>
-    </motion.div>
+      {/* ─────────────────── Footer ─────────────────── */}
+      <div className={s.footer}>
+        <span>
+          <kbd className={s.footerKbd}>Esc</kbd>
+          <span className={s.footerKbdLabel}>to close</span>
+        </span>
+        <span className={s.footerCount}>
+          {entry.changes.length}{" "}
+          {entry.changes.length === 1 ? "change" : "changes"}
+        </span>
+      </div>
+    </Overlay>
   );
 }
 
@@ -571,7 +572,9 @@ function diffLines(a: string, b: string): DiffRow[] {
   return rows;
 }
 
-function computeTotals(entry: FileEditEntry): {
+/** Takes the changes rather than the whole entry: it reads nothing else, and
+ *  the narrower parameter is what lets the caller total an absent file. */
+function computeTotals(entry: { changes: FileChange[] }): {
   added: number;
   removed: number;
 } {
