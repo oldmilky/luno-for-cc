@@ -18,13 +18,46 @@ const CONVENTIONS: ConventionsFile = {
   hasAlternative: false
 };
 
+/**
+ * The pieces of the one `--append-system-prompt` argv carries.
+ *
+ * One flag, not several: the CLI keeps only the last value it is handed and
+ * drops the rest — measured, see `SEPARATOR` in args.ts. Split back apart here
+ * so presence and order still read the way they did when each piece had its
+ * own flag.
+ */
 function appends(args: string[]): string[] {
-  return args
-    .map((a, i) => (args[i - 1] === "--append-system-prompt" ? a : null))
-    .filter((a): a is string => a !== null);
+  const i = args.indexOf("--append-system-prompt");
+  if (i === -1) return [];
+  // Exactly one, or the CLI is dropping something again.
+  expect(args.filter((a) => a === "--append-system-prompt")).toHaveLength(1);
+  return args[i + 1].split("\n\n---\n\n");
 }
 
 describe("buildArgs — system prompt appends", () => {
+  it("hands the CLI exactly one append, carrying every piece", () => {
+    // The defect this pins: the CLI keeps only the **last**
+    // `--append-system-prompt` and silently drops the others. Measured
+    // against 2.1.233 — two marked appends went in, the second came back,
+    // and swapping their order swapped the answer. LUNO passed up to six, so
+    // `common.md` reached the model in no mode at all, and the mode prompt
+    // only when no project conventions followed it.
+    const args = buildArgs("hi", "sonnet", {
+      ...base,
+      permissionMode: "plan",
+      taskType: "backend",
+      conventions: CONVENTIONS,
+      disabledSkills: ["some-skill"]
+    });
+
+    expect(args.filter((a) => a === "--append-system-prompt")).toHaveLength(1);
+
+    const blob = args[args.indexOf("--append-system-prompt") + 1];
+    expect(blob).toContain("# LUNO");
+    expect(blob).toContain("some-skill");
+    expect(blob).toContain("Project conventions from");
+  });
+
   it("sends the common prompt in every mode", () => {
     for (const permissionMode of [
       "default",

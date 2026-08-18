@@ -1196,7 +1196,7 @@ describe("ClaudeCliProvider — the bridge toggle spawning a process", () => {
       .calls[1][1] as string[];
     // Assert the playbook itself, not how many appends ride with it — the
     // count also moves when an unrelated append is added or dropped.
-    expect(argv.some((a) => a.startsWith("# Backend work"))).toBe(true);
+    expect(argv.some((a) => a.includes("# Backend work"))).toBe(true);
   });
 
   it("does not replace it over an effort level the pinned model refuses", async () => {

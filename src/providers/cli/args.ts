@@ -47,6 +47,10 @@ function usesPermissionProtocol(mode: PermissionMode): boolean {
 /** Diagnostics and editor context as a block that rides with the turn text.
  *  Session mode only: there the system prompt is fixed at spawn, and these two
  *  describe the moment the message was sent. */
+/** Between two appended prompts, so the model reads them as separate
+ *  documents rather than one run-on instruction. */
+const SEPARATOR = "\n\n---\n\n";
+
 export function turnPreamble(opts: ClaudeCliOpts): string {
   const parts = [opts.diagnostics, opts.editorContext].filter(
     (p): p is string => Boolean(p && p.trim())
@@ -302,6 +306,20 @@ export function buildArgs(
     );
   }
 
+  // Everything that ends up in ONE `--append-system-prompt`.
+  //
+  // One flag, because the CLI keeps only the **last** value it is given and
+  // silently drops the rest — measured against 2.1.233 by handing it two
+  // marked appends and asking which arrived, then swapping their order and
+  // watching the answer swap with them. LUNO passed up to six, so everything
+  // but the last was thrown away: `common.md` never reached the model at all,
+  // and the mode prompt only did when no project conventions followed it.
+  //
+  // Order is precedence, weakest first. Conventions go last because
+  // `common.md` says they outrank it, and a later line is the one the model
+  // reads as final.
+  const appends: string[] = [];
+
   // Skills the user has toggled off in the picker need to be *actually*
   // blocked. Belt-and-suspenders:
   //   1. --disallowedTools "Skill(<name>)" — if Claude Code's permission
@@ -313,20 +331,18 @@ export function buildArgs(
   if (disabled.length > 0) {
     args.push("--disallowedTools", ...disabled.map((id) => `Skill(${id})`));
     const list = disabled.map((id) => `\`${id}\``).join(", ");
-    args.push(
-      "--append-system-prompt",
-      `The user has disabled the following Claude Code skills via Luno's Skills picker: ${list}. Do not invoke any of them, even if a task would benefit. If you would normally use a disabled skill, tell the user which skill is disabled and ask them to re-enable it from the Skills picker before retrying. All other skills remain available.`
+    appends.push(`The user has disabled the following Claude Code skills via Luno's Skills picker: ${list}. Do not invoke any of them, even if a task would benefit. If you would normally use a disabled skill, tell the user which skill is disabled and ask them to re-enable it from the Skills picker before retrying. All other skills remain available.`
     );
   }
 
   // What holds in every mode: the environment, what this surface can do, and
   // the rules the approval posture does not change.
   const commonAppend = getCommonPrompt();
-  if (commonAppend) args.push("--append-system-prompt", commonAppend);
+  if (commonAppend) appends.push(commonAppend);
 
   // Per-mode prompt: the posture this approval mode implies, and nothing else.
   const modeAppend = getModePrompt(mode);
-  if (modeAppend) args.push("--append-system-prompt", modeAppend);
+  if (modeAppend) appends.push(modeAppend);
 
   // Plan mode, and only when the project has written nothing of its own: the
   // task-type playbook is a stand-in for conventions, not a supplement to them.
@@ -334,7 +350,7 @@ export function buildArgs(
   // and a generic checklist landing beside it competes rather than adds.
   if (mode === "plan" && opts.taskType && !opts.conventions) {
     const taskAppend = getTaskTypePrompt(opts.taskType);
-    if (taskAppend) args.push("--append-system-prompt", taskAppend);
+    if (taskAppend) appends.push(taskAppend);
   }
 
   // What the language servers already know. Sent as its own append so it can
@@ -346,21 +362,23 @@ export function buildArgs(
   // instead (see turnPreamble) rather than being frozen at spawn — stale
   // diagnostics are worse than none.
   if (opts.diagnostics && !opts.sessionMode) {
-    args.push("--append-system-prompt", opts.diagnostics);
+    appends.push(opts.diagnostics);
   }
 
   // What the user has open and highlighted as they send the message.
   if (opts.editorContext && !opts.sessionMode) {
-    args.push("--append-system-prompt", opts.editorContext);
+    appends.push(opts.editorContext);
   }
 
   // Project conventions. CLAUDE.md at root is auto-loaded by the CLI itself —
   // re-injecting would double the token cost — so skip in that case.
   if (opts.conventions && !opts.conventions.alreadyLoadedByCli) {
-    args.push(
-      "--append-system-prompt",
-      `Project conventions from \`${opts.conventions.workspaceRelativePath}\`:\n\n${opts.conventions.content}`
+    appends.push(`Project conventions from \`${opts.conventions.workspaceRelativePath}\`:\n\n${opts.conventions.content}`
     );
+  }
+
+  if (appends.length > 0) {
+    args.push("--append-system-prompt", appends.join(SEPARATOR));
   }
 
   // Hand the CLI a list of remote MCP servers it should connect to for
