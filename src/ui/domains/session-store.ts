@@ -26,7 +26,7 @@ import {
 } from "../../services/history.js";
 import type { PlanDecorationService } from "../../services/plan-decorations.js";
 import { CheckpointService as Checkpoints } from "../../services/checkpoint.js";
-import { fileTouchedByTool } from "./checkpoint-triggers.js";
+import { filesTouchedByTool } from "./checkpoint-triggers.js";
 import type { Post } from "../messages.js";
 
 /** Coalesce a burst of timeline events into one write. */
@@ -260,8 +260,12 @@ export class SessionStore {
       // pre-edit state from git HEAD, and `test/unit/checkpoint.test.ts` guards
       // it with a named regression test. "Simplifying" that back to a disk read
       // breaks rewind for every tracked file.
-      const touched = fileTouchedByTool(e);
-      if (touched) void this.checkpointService?.addFileToLatest(touched);
+      // Plural: an edit tool names one file, and a shell command line writes
+      // as many as it likes. The shell half is a net under the CLI's own steer
+      // towards `sed` and heredocs — see `filesWrittenByShell`.
+      for (const touched of filesTouchedByTool(e)) {
+        void this.checkpointService?.addFileToLatest(touched);
+      }
 
       // Every plan revision is its own restore point, so a rewind can land on
       // any revision and bring file state and comment threads with it.

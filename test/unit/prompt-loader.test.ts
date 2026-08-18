@@ -22,6 +22,24 @@ describe("getCommonPrompt", () => {
     expect(md).toMatch(/workspace root/);
   });
 
+  it("countermands the CLI's own steer towards shell edits", () => {
+    // The CLI ships an instruction, in its own system prompt, to make file
+    // changes "with sed, heredocs, or short scripts, rather than using the
+    // dedicated Read, Edit, or Write tools". Two things here are wired to the
+    // edit tools and see nothing else: the diff card the user reviews, and
+    // `fileTouchedByTool`, which is what puts a file in a checkpoint. A shell
+    // write is therefore invisible *and* unrewindable.
+    //
+    // Our append lands after the CLI's prompt, so it can say otherwise — and
+    // says so explicitly, because an instruction that merely disagrees with an
+    // earlier one reads as a preference.
+    const md = getCommonPrompt();
+    expect(md).toMatch(/Edit`?, `?Write/);
+    expect(md).toMatch(/overrides any instruction/i);
+    expect(md).toMatch(/rewind/i);
+    expect(md).toMatch(/sed -i/);
+  });
+
   it("carries the rules that used to be copied into every mode", () => {
     const md = getCommonPrompt();
     expect(md).toMatch(/AskUserQuestion/);
