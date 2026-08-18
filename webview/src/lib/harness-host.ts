@@ -201,7 +201,68 @@ export function harnessReplies(
         { terminalName: "watch", commandLine: "vite dev" }
       ]
     },
-    requestHistory: { type: "historyList", sessions: [] },
+    // The drawer had no rows here at all, so neither the order nor the buckets
+    // could be looked at. `agents` is the row that earns its place: that chat
+    // is busy *now* and still sits where the user last wrote in it, which is
+    // what ordering on `lastUserAt` is for.
+    requestHistory: {
+      type: "historyList",
+      sessions: [
+        {
+          id: "h-composer",
+          title: "The composer eats a trailing newline",
+          snippet:
+            "The composer eats a trailing newline when a mention is the last thing typed",
+          createdAt: now - 5 * HOUR,
+          lastUserAt: now - 4 * 60_000,
+          eventCount: 118,
+          status: "needs-you",
+          open: true
+        },
+        {
+          id: "h-refactor",
+          title: "Refactoring",
+          named: true,
+          snippet: "Split claude-cli.ts along the control channel",
+          createdAt: now - 30 * HOUR,
+          lastUserAt: now - 3 * HOUR,
+          eventCount: 1188,
+          status: "agents",
+          open: false
+        },
+        {
+          id: "h-history-order",
+          title: "Order the history list on my last message",
+          snippet: "",
+          createdAt: now - 9 * HOUR,
+          lastUserAt: now - 8 * HOUR,
+          eventCount: 91,
+          status: "done",
+          open: false
+        },
+        {
+          id: "h-modal",
+          title: "The overlay primitive owns Escape now",
+          snippet:
+            "Thirteen overlays, one key handler, and a drawer that backs out one step",
+          createdAt: now - 40 * HOUR,
+          lastUserAt: now - 26 * HOUR,
+          eventCount: 683,
+          status: "interrupted",
+          open: false
+        },
+        {
+          id: "h-tokens",
+          title: "Plan caps in the meter are guesses",
+          snippet: "PLAN_PRESETS hard-codes quotas Anthropic does not expose",
+          createdAt: now - 100 * HOUR,
+          lastUserAt: now - 96 * HOUR,
+          eventCount: 1413,
+          status: "failed",
+          open: false
+        }
+      ]
+    },
     // One of each state the modal groups on, because the split is the whole
     // question: connected, errored, custom-and-down, imported from Claude
     // Code, and three the user has never touched.

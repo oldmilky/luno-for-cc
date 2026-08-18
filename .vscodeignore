@@ -82,3 +82,15 @@ TESTING.md
 # `**/*.rs` would not catch Cargo.toml or the lockfile anyway.
 external/native/**
 external/scratch/**
+
+# Page snapshots and screenshots the Playwright MCP writes into the repo root
+# while the browser harness is being driven. Gitignored, but vsce reads this
+# file and not .gitignore — 25 files and 635 kB of debugging screenshots went
+# into the 1.2.0 build before this line, taking it from 1.28 MB to 1.77 MB.
+# Neither `*.png` nor `assets/**` reaches them: both are anchored elsewhere,
+# and half of what it writes is `.yml` anyway.
+.playwright-mcp/
+
+# CI workflows and issue templates. Dev-only, and nothing at runtime reads
+# them — the same class as `scripts/**` above.
+.github/**

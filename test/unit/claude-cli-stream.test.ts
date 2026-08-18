@@ -1916,3 +1916,179 @@ describe("ClaudeCliProvider — the ide MCP server over the control channel", ()
     expect(only.mcp!.result.serverInfo.name).toBe(IDE_SERVER_NAME);
   });
 });
+
+// What this guards: an attachment survives the trip to stdin.
+//
+// A message carrying an image or a PDF is an array of content blocks, and the
+// provider used to flatten the newest user message to a string before writing
+// it — `map(b => b.type === "text" ? b.text : "")` — so every block that was
+// not text was dropped on the floor. Nothing downstream could tell: the write
+// succeeded, the turn ran, and the model simply never saw the file. The
+// paperclip is built on this, so it is pinned here rather than assumed.
+describe("ClaudeCliProvider — content blocks reach the CLI", () => {
+  let children: any[];
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    children = [];
+    (spawn as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      const child = makeFakeChild();
+      children.push(child);
+      return child;
+    });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const IMAGE = {
+    type: "image" as const,
+    source: {
+      type: "base64" as const,
+      media_type: "image/png",
+      data: "iVBORw0KGgo="
+    }
+  };
+  const PDF = {
+    type: "document" as const,
+    source: {
+      type: "base64" as const,
+      media_type: "application/pdf",
+      data: "JVBERi0="
+    },
+    title: "spec.pdf"
+  };
+
+  /** The user message this turn put on stdin. */
+  function written(child: any): Record<string, any> | undefined {
+    return (child.written as Record<string, any>[]).find(
+      (m) => m.type === "user"
+    );
+  }
+
+  async function runTurn(
+    provider: ClaudeCliProvider,
+    content: unknown
+  ): Promise<Record<string, any> | undefined> {
+    const finished = (async () => {
+      for await (const _ of provider.stream({
+        model: "claude-sonnet-4-6",
+        maxTokens: 1,
+        messages: [{ role: "user", content: content as never }],
+        tools: []
+      })) {
+        /* drained */
+      }
+    })();
+    await new Promise((r) => setTimeout(r, 5));
+    children[children.length - 1].emitLine({
+      type: "result",
+      subtype: "success",
+      result: "done"
+    });
+    await finished;
+    return written(children[children.length - 1]);
+  }
+
+  it("writes an image block beside the prompt, in order", async () => {
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true
+    });
+
+    const msg = await runTurn(provider, [
+      IMAGE,
+      { type: "text", text: "what is wrong here?" }
+    ]);
+
+    expect(msg?.message.content).toEqual([
+      IMAGE,
+      { type: "text", text: "what is wrong here?" }
+    ]);
+  });
+
+  it("writes a PDF as a document block with its title", async () => {
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true
+    });
+
+    const msg = await runTurn(provider, [PDF, { type: "text", text: "read it" }]);
+
+    expect(msg?.message.content[0]).toEqual(PDF);
+  });
+
+  it("still writes a plain string as a plain string", async () => {
+    // The shape every existing turn uses. Wrapping it in a block array would be
+    // a change of contract for every caller that never attaches anything.
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true
+    });
+
+    const msg = await runTurn(provider, "just words");
+
+    expect(msg?.message.content).toBe("just words");
+  });
+
+  it("puts the turn preamble in front as its own block", async () => {
+    // `preamble + content` would have stringified the array into
+    // `[object Object]` and sent that as the prompt.
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true,
+      editorContext: "The user is looking at src/app.ts"
+    });
+
+    const msg = await runTurn(provider, [
+      IMAGE,
+      { type: "text", text: "and this?" }
+    ]);
+
+    const blocks = msg?.message.content as Array<Record<string, unknown>>;
+    expect(blocks[0].type).toBe("text");
+    expect(String(blocks[0].text)).toContain("src/app.ts");
+    expect(blocks[1]).toEqual(IMAGE);
+    expect(blocks[2]).toEqual({ type: "text", text: "and this?" });
+  });
+
+  it("sends a turn that is only an attachment", async () => {
+    // A screenshot with nothing typed. The old emptiness check read the words
+    // and refused the turn as "No user message to send."
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default",
+      sessionMode: true
+    });
+
+    const msg = await runTurn(provider, [IMAGE]);
+
+    expect(msg?.message.content).toEqual([IMAGE]);
+  });
+
+  it("carries blocks on the per-turn path too", async () => {
+    // Session mode is what the panel uses; this one is the fallback that is
+    // still reachable, and it writes the message through a different line.
+    const provider = new ClaudeCliProvider({
+      binary: "claude",
+      cwd: "/tmp",
+      permissionMode: "default"
+    });
+
+    const msg = await runTurn(provider, [
+      IMAGE,
+      { type: "text", text: "per-turn" }
+    ]);
+
+    expect(msg?.message.content).toEqual([
+      IMAGE,
+      { type: "text", text: "per-turn" }
+    ]);
+  });
+});

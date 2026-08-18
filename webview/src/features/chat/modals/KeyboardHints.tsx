@@ -48,8 +48,34 @@ function groups(useCtrlEnterToSend: boolean): Group[] {
         { keys: ["⌘", "K"], desc: "Command palette" },
         { keys: ["⇧", "Tab"], desc: "Cycle permission mode" },
         { keys: ["@"], desc: "Mention a file, folder or terminal" },
+        { keys: ["/"], desc: "Run a slash command" },
         ...sendRows,
-        { keys: ["Esc"], desc: "Cancel / close modal" }
+        { keys: ["Esc"], desc: "Stop the turn / close modal" }
+      ]
+    },
+    {
+      label: "Writing",
+      rows: [
+        { keys: ["↑"], desc: "Recall your previous message" },
+        { keys: ["↓"], desc: "Back towards the newest" },
+        { keys: ["⌘/Ctrl", "Z"], desc: "Undo" },
+        { keys: ["⌘/Ctrl", "⇧", "Z"], desc: "Redo" },
+        { keys: ["Ctrl", "Y"], desc: "Redo (Windows)" },
+        { keys: ["⌘/Ctrl", "X"], desc: "Cut — pills come out as their text" },
+        { keys: ["Tab"], desc: "Accept the highlighted suggestion" },
+        // The paperclip has no chord — it is a button — but paste does, and it
+        // is the fastest way to attach the thing people attach most.
+        { keys: ["⌘/Ctrl", "V"], desc: "Paste an image straight in" }
+      ]
+    },
+    {
+      label: "Attaching",
+      rows: [
+        { keys: ["📎"], desc: "Images, PDFs and text files — several at once" },
+        {
+          keys: ["Drop"],
+          desc: "A file with a path is mentioned; the rest attach"
+        }
       ]
     },
     {

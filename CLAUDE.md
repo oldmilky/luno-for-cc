@@ -19,7 +19,7 @@ reappears, something ran `npm install` and the two will drift.
 | ------------------- | ------------------------------------------------------------ |
 | All gates           | `bun run lint` (tsc ×2 → eslint → stylelint)                 |
 | Types only          | `bun run lint:types`                                         |
-| Tests               | `bun run test` — expect `1544 passed, 6 skipped`             |
+| Tests               | `bun run test` — expect `1628 passed, 6 skipped`             |
 | Build               | `bun run build` (esbuild → dist/, vite → webview/dist/)      |
 | Package             | `bun run package` → `luno-for-cc-<ver>.vsix`, ~1.28 MB       |
 | Format              | `bun run format` · check with `format:check`                 |
@@ -83,7 +83,7 @@ Never report work as complete without all four:
    **both** projects, eslint, stylelint. It is not a clean screen: 35 eslint
    warnings are real, held at `warn` on purpose, and explained in
    `eslint.config.mjs`. The gate is the exit code plus the count not rising
-2. `bun run test` at `1544 passed, 6 skipped` or better
+2. `bun run test` at `1628 passed, 6 skipped` or better
 3. Behaviour verified where it runs — the harness for UI, tests for host logic
 4. Every claim tied to evidence actually seen: a command's output, a measured
    value, a screenshot
@@ -126,6 +126,11 @@ Each of these was invisible to the compiler and cost a debugging round.
 - **Exits run on `--ease-soft`, never `--ease-out`.** The latter is an expo-out:
   ~90% of the change lands in the first third, so a dismissed panel is
   invisible halfway through its own duration.
+- **`scrollTo({behavior:"auto"})` does not mean "jump".** It means "use the
+  element's `scroll-behavior`", and `.log` in `ChatScreen.module.scss` sets that
+  to `smooth` — so `auto` silently keeps the animation you were trying to skip.
+  Only `"instant"` overrides CSS from script. Cost: two full rebuild-and-measure
+  cycles reading an unchanged 1 523 ms.
 - **A dangling `s.someName` renders unstyled and the build stays green.** A typo
   in a CSS-module class name is not a compile error.
 - **`prefers-reduced-motion`**: framer honours it only on the `animate`-prop
@@ -151,6 +156,7 @@ Each of these was invisible to the compiler and cost a debugging round.
 | Topic                                   | File                            |
 | --------------------------------------- | ------------------------------- |
 | Token contract every theme must satisfy | `docs/TOKENS.md`                |
+| What a file becomes when it is attached | `docs/ATTACHMENTS.md`           |
 | Comment policy in full                  | `.claude/rules/comments.md`     |
 | Naming and code style                   | `.claude/rules/code-style.md`   |
 | What lives where, sizes, seams          | `.claude/project-map.md`        |

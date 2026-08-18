@@ -20,7 +20,8 @@ import {
   RemoteControlStatus,
   PendingSetting,
   SubagentTaskView,
-  UserDialogView
+  UserDialogView,
+  type AttachmentBlock
 } from "../../lib/rpc";
 import { ConnectorsModal } from "../mcp";
 import { PermissionsModal } from "./modals/PermissionsModal";
@@ -47,7 +48,11 @@ import { AssistantMessage } from "./timeline/AssistantMessage";
 import { ThinkingIndicator } from "./timeline/ThinkingIndicator";
 import { ConventionsBanner } from "./ConventionsBanner";
 import { SkillSuggestion } from "./SkillSuggestion";
-import { liveAgents, agentPanel, mergeTaskState } from "./timeline/subagent-state";
+import {
+  liveAgents,
+  agentPanel,
+  mergeTaskState
+} from "./timeline/subagent-state";
 import type { VoiceState } from "./composer/voice-state";
 import { BackgroundAgentsModal } from "./modals/BackgroundAgentsModal";
 import { CommandPalette } from "./modals/CommandPalette";
@@ -110,7 +115,8 @@ export interface ChatScreenProps {
   onUnpin: (path: string) => void;
   onClearPins: () => void;
   onInput: (v: string) => void;
-  onSubmit: (text: string) => void;
+  /**  attachments files the user picked, in the API's block shape. */
+  onSubmit: (text: string, attachments: AttachmentBlock[]) => void;
   onCancel: () => void;
   onDismissError: () => void;
   /** The pending tool-permission prompt to render above the composer, if any. */
@@ -217,6 +223,23 @@ export function ChatScreen({
       if (m.type === "openConnectors") setConnectorsOpen(true);
     });
   }, []);
+
+  // A conversation arriving on this surface — switched to, reloaded, or
+  // replaced by New Chat. "The reader has scrolled away from the bottom" is
+  // true of the chat they were reading, not of the one that just arrived, and
+  // this screen is not remounted by the swap: leaving the flag up opened the
+  // new chat wherever the old one had been left and never followed it down.
+  useEffect(() => {
+    return onMessage((m) => {
+      if (
+        m.type === "loadedSession" ||
+        m.type === "hello" ||
+        m.type === "reset"
+      ) {
+        userScrolled.current = false;
+      }
+    });
+  }, []);
   // Session epoch — bumps when the timeline goes from non-empty → empty (i.e.
   // user clicked "New chat"). Wrapping the log content in AnimatePresence with
   // a key tied to this number gives a clean fade-out / fade-in on reset rather
@@ -244,6 +267,16 @@ export function ChatScreen({
   // Global keyboard shortcuts — Cmd/Ctrl+K opens palette, "?" opens hints.
   // We skip the "?" when the user is typing in a text field so it doesn't
   // hijack normal questions.
+  // Read through refs by the `[]`-dep listener below, which must not be torn
+  // down and re-registered on every render — `onCancel` is a fresh closure each
+  // time, and a listener rebuilt mid-keystroke drops the key.
+  const busyRef = useRef(busy);
+  const cancelRef = useRef(onCancel);
+  useEffect(() => {
+    busyRef.current = busy;
+    cancelRef.current = onCancel;
+  }, [busy, onCancel]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const inField =
@@ -259,6 +292,20 @@ export function ChatScreen({
       if (!inField && e.key === "?" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         setHintsOpen((o) => !o);
+        return;
+      }
+      // The hints have advertised `Esc — Cancel` all along and only the second
+      // half of that was true: overlays closed on it, a running turn ignored
+      // it. Stopping is what Esc does in the CLI this panel drives.
+      //
+      // Last, and behind two guards: anything already handled has consumed the
+      // key, and an open dialog owns Escape for closing itself — `Overlay`
+      // listens on the same window, so without this a card and the turn behind
+      // it would both go on one press.
+      if (e.key === "Escape" && !e.defaultPrevented && busyRef.current) {
+        if (document.querySelector('[role="dialog"]')) return;
+        e.preventDefault();
+        cancelRef.current();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -291,6 +338,21 @@ export function ChatScreen({
   };
 
   const grouped = useMemo(() => groupEvents(events), [events]);
+
+  /** What ArrowUp walks back through — this chat's own prompts, oldest first.
+   *  Pasted images ride in the body as data URIs, and megabytes of base64 are
+   *  not something anyone wants recalled into a text box: the marker is
+   *  stripped, and a message that was nothing else is dropped. */
+  const sentMessages = useMemo(
+    () =>
+      events
+        .filter((e) => e.kind === "user")
+        .map((e) =>
+          (e.body ?? "").replace(/!\[[^\]]*\]\(data:[^)]*\)/g, "").trim()
+        )
+        .filter((t) => t.length > 0),
+    [events]
+  );
   // Persistent "working" loader for the whole turn — from submit, through the
   // pre-output thinking gap, while text streams, and during tool execution —
   // until the turn ends. Trails at the bottom of the log so it always reads as
@@ -347,7 +409,9 @@ export function ChatScreen({
   // Diff-line comment: append a structured note to the composer so the next
   // prompt naturally carries the file/line context. Keeps everything else
   // the user has typed intact — just slots the note in below.
-  const handleAddDiffNote = (note: import("./modals/FileDiffModal").DiffLineNote) => {
+  const handleAddDiffNote = (
+    note: import("./modals/FileDiffModal").DiffLineNote
+  ) => {
     const fileName = note.path.split("/").pop() ?? note.path;
     const chunk = `On \`${fileName}:${note.lineNo}\` (\`${note.context.trim().slice(0, 80)}\`): ${note.text}`;
     const prefix = input.trim() ? input.trimEnd() + "\n\n" : "";
@@ -363,7 +427,23 @@ export function ChatScreen({
   useEffect(() => {
     if (userScrolled.current) return;
     const el = logRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    if (!el) return;
+    // Smooth is for keeping up with an answer arriving under the reader's eyes,
+    // where the travel is a line or two. A whole conversation replacing another
+    // — switching chats, or a reload replaying a stored one — puts the bottom
+    // screens away, and animating that is a ride down through somebody else's
+    // chat before this one's last message appears. Measured at 13 261 px and
+    // 1 523 ms on a 40-turn chat. Anything further than the screen the reader
+    // is looking at is a journey, not a nudge, so it is a jump.
+    //
+    // `instant`, never `auto`: the module sets `scroll-behavior: smooth` on
+    // this container, and `auto` means "whatever the CSS says" — which is the
+    // animation being avoided. Only `instant` overrides it from script.
+    const travel = el.scrollHeight - el.scrollTop - el.clientHeight;
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: travel > el.clientHeight ? "instant" : "smooth"
+    });
   }, [grouped, streaming, showThinking]);
 
   const onScroll = () => {
@@ -645,7 +725,7 @@ export function ChatScreen({
         <Composer
           value={input}
           onChange={onInput}
-          onSubmit={(text) => {
+          onSubmit={(text, attachments) => {
             userScrolled.current = false;
             // `/rc` never reaches the model. It is a command to this panel, and
             // the CLI does not expose it over stream-json anyway — it is absent
@@ -658,7 +738,7 @@ export function ChatScreen({
               });
               return;
             }
-            onSubmit(text);
+            onSubmit(text, attachments);
           }}
           onCancel={onCancel}
           busy={busy}
@@ -673,6 +753,7 @@ export function ChatScreen({
           skills={skills}
           pendingSettings={pendingSettings}
           disabledModes={disabledModes}
+          history={sentMessages}
           focusKey={composerFocusKey}
           pendingInsert={pendingInsert}
           onInserted={onInserted}

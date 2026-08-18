@@ -15,6 +15,7 @@ vi.mock("vscode", () => ({
 }));
 
 import {
+  deriveLastUserAt,
   deriveStatus,
   HistoryService,
   StoredSession
@@ -90,6 +91,38 @@ describe("deriveStatus", () => {
   });
 });
 
+// The list answers "what was I working on", so it is ordered on the user's own
+// last message rather than on the last thing that happened in the chat.
+describe("deriveLastUserAt", () => {
+  const ev = (kind: TimelineEvent["kind"], ts: number): TimelineEvent => ({
+    id: `${kind}-${ts}`,
+    ts,
+    kind,
+    title: kind
+  });
+
+  it("reads the last user event, not the last event", () => {
+    expect(
+      deriveLastUserAt([
+        ev("user", 10),
+        ev("assistant", 20),
+        ev("tool_call", 30)
+      ])
+    ).toBe(10);
+  });
+
+  it("moves when the user speaks again", () => {
+    expect(
+      deriveLastUserAt([ev("user", 10), ev("assistant", 20), ev("user", 40)])
+    ).toBe(40);
+  });
+
+  it("says nothing for a timeline the user is not in", () => {
+    expect(deriveLastUserAt([])).toBeUndefined();
+    expect(deriveLastUserAt([ev("assistant", 5)])).toBeUndefined();
+  });
+});
+
 describe("HistoryService save/delete on empty timeline", () => {
   let dir: string;
   let history: HistoryService;
@@ -109,6 +142,37 @@ describe("HistoryService save/delete on empty timeline", () => {
     const list = await history.list();
     expect(list).toHaveLength(1);
     expect(list[0].id).toBe("sess-1");
+  });
+
+  it("orders on the user's last message, not on the last activity", async () => {
+    // `busy` was written most recently — its agents are still going — but the
+    // user last spoke in it long before they typed into `typed`. Ordering on
+    // `updatedAt` put it on top, which is the report this fixes.
+    await history.save({
+      ...makeSession([
+        { id: "u", ts: 1_000, kind: "user", title: "User", body: "go" },
+        { id: "a", ts: 9_000, kind: "assistant", title: "Assistant" }
+      ]),
+      id: "busy",
+      updatedAt: 9_000
+    });
+    await history.save({
+      ...makeSession([
+        {
+          id: "u",
+          ts: 3_000,
+          kind: "user",
+          title: "User",
+          body: "fix the header"
+        }
+      ]),
+      id: "typed",
+      updatedAt: 3_000
+    });
+
+    const list = await history.list();
+    expect(list.map((e) => e.id)).toEqual(["typed", "busy"]);
+    expect(list[0].lastUserAt).toBe(3_000);
   });
 
   it("does not create a file for a brand-new empty session", async () => {

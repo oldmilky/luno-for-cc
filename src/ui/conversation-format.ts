@@ -14,6 +14,80 @@ export function worktreeName(sessionId: string): string {
   return `luno-${sessionId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8)}`;
 }
 
+/** Long enough to tell two chats apart, short enough to type after an `@`.
+ *  The CLI's own cap is 200 characters — that is a limit, not a target. */
+const NAME_MAX = 60;
+
+/** Names that identify nothing. A chat is called one of these precisely when
+ *  nobody has said what it is about yet. */
+const PLACEHOLDERS = new Set(["untitled", "new chat"]);
+
+/** This name reaches argv and another session's screen. A newline in it is a
+ *  thing to strip here rather than to discover there. */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001F\u007F]+/g;
+
+/**
+ * What this conversation is called *to the CLI* — `--name`, and the name every
+ * other session addresses it by.
+ *
+ * Three jobs, and only the first was being served: `/resume` lists it in a
+ * terminal, `/status` reports it, and since 2.1.224 it is the **address** a
+ * peer session sends a message to. LUNO was passing `Session.title` raw, and
+ * the session registry on this machine shows what that produced — `"/start
+ * Привет"`, `"Hello"`, `"Untitled"`. A slash command is not what the chat is
+ * about, and `Untitled` is not an identity.
+ *
+ * `undefined` means "say nothing", which is the useful answer rather than a
+ * fallback: given no `--name` the CLI derives one from the working directory —
+ * `luno-for-cc-3f` — and a derived name that says where the work is beats a
+ * placeholder that says nothing. It also lets the CLI keep names distinct
+ * itself, which it does by appending a variant when two sessions collide.
+ *
+ * @param userName what the user typed into the rename field, if anything. It
+ *   wins outright: they have already answered the question this function is
+ *   guessing at.
+ */
+export function cliSessionName(
+  userName: string | undefined,
+  derivedTitle: string | undefined
+): string | undefined {
+  const given = cleanName(userName);
+  if (given) return given;
+  return cleanName(stripLeadingCommand(derivedTitle ?? ""));
+}
+
+/**
+ * Drop a slash command from the front of a derived title.
+ *
+ * `deriveTitle` reads the first prompt, and a prompt that opens with `/start`
+ * or `/ship` names the command rather than the work. What follows it is the
+ * part that says something; when nothing follows, the whole title goes and the
+ * CLI derives a better one.
+ */
+function stripLeadingCommand(title: string): string {
+  // The token must end at whitespace or at the end of the string, and carries
+  // no slash of its own — otherwise `/etc/hosts is wrong` loses its first
+  // segment and the chat is called `/hosts is wrong`.
+  return title.replace(/^\/[a-zA-Z0-9:_-]+(?=\s|$)\s*/, "");
+}
+
+/** Collapsed, trimmed, capped on a word boundary — and empty for anything that
+ *  identifies nothing. */
+function cleanName(raw: string | undefined): string | undefined {
+  // Control characters included: this reaches argv, and a name is not a place
+  // to discover that something carried a newline.
+  const flat = (raw ?? "")
+    .replace(CONTROL_CHARS, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!flat || PLACEHOLDERS.has(flat.toLowerCase())) return undefined;
+  if (flat.length <= NAME_MAX) return flat;
+  const cut = flat.slice(0, NAME_MAX);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > NAME_MAX * 0.5 ? cut.slice(0, lastSpace) : cut).trim();
+}
+
 /**
  * One line explaining what the fold cost.
  *
@@ -71,22 +145,6 @@ export function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${Math.round(n / 1000)}k`;
   return String(n);
-}
-
-/**
- * What a rewind's safety copy is called in the history list.
- *
- * Named rather than left to the derived title: the fork and the chat it came
- * from open with the same first prompt, so without this the list shows two rows
- * that read identically and the user has to open both to tell which is which.
- */
-export function forkName(
-  current: string | undefined,
-  timeline: ReadonlyArray<{ kind: string }>
-): string {
-  const base = current ?? "Chat";
-  const turns = timeline.filter((e) => e.kind === "user").length;
-  return `${base} — before rewind (${turns} messages)`;
 }
 
 /** Strip stray slash prefixes and trailing whitespace from a captured selection. */

@@ -43,11 +43,14 @@ export class Orchestrator {
     this.cancelled = true;
   }
 
-  async turn(userText: string): Promise<void> {
+  async turn(
+    userText: string,
+    attachments: ContentBlock[] = []
+  ): Promise<void> {
     // Awaited so checkpoint capture (registered via session.onUserTurn)
     // finishes before the agent starts firing tool calls. Otherwise the
     // first write can race the snapshot and we lose pre-state for rewind.
-    await this.session.addUser(userText);
+    await this.session.addUser(userText, attachments);
 
     const req: ProviderRequest = {
       model: this.o.model,

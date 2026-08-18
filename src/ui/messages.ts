@@ -17,6 +17,8 @@
 // `test/unit/protocol-contract.test.ts` fails when the two drift.
 // ─────────────────────────────────────────────────────────────
 
+import type { ContentBlock } from "../core/types.js";
+
 /** Every message type the host accepts. Mirror of rpc.ts `Outbound`. */
 export type InboundType =
   // chat + turn lifecycle
@@ -172,4 +174,65 @@ export function oneOf<T extends string>(
   return typeof v === "string" && (allowed as readonly string[]).includes(v)
     ? (v as T)
     : undefined;
+}
+
+/**
+ * Attachments off a `prompt` message, validated rather than cast.
+ *
+ * Everything on this side of the seam is `unknown`, and these blocks go
+ * straight onto the wire to the CLI — a half-formed one is a turn the API
+ * refuses with no clue where the bad field came from. So each block is rebuilt
+ * from fields that were actually checked, and anything that does not answer the
+ * shape is dropped rather than repaired.
+ *
+ * The media type is not policed here. The webview classified the file against
+ * the API's own lists before building the block, and second-guessing that with
+ * a shorter list on this side would refuse files the reference sends happily.
+ */
+export function readAttachments(msg: RawMessage): ContentBlock[] {
+  const raw = arr(msg, "attachments");
+  if (!raw) return [];
+  const out: ContentBlock[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const block = item as Record<string, unknown>;
+    const rawSource = block.source;
+    if (!rawSource || typeof rawSource !== "object" || Array.isArray(rawSource))
+      continue;
+    const source = rawSource as Record<string, unknown>;
+    const mediaType = strOf(source, "media_type");
+    const data = strOf(source, "data");
+    if (!mediaType || !data) continue;
+
+    if (block.type === "image" && source.type === "base64") {
+      out.push({
+        type: "image",
+        source: { type: "base64", media_type: mediaType, data }
+      });
+      continue;
+    }
+    if (block.type !== "document") continue;
+    const title = strOf(block, "title");
+    if (source.type === "base64") {
+      out.push({
+        type: "document",
+        source: { type: "base64", media_type: mediaType, data },
+        ...(title && { title })
+      });
+    } else if (source.type === "text") {
+      out.push({
+        type: "document",
+        source: { type: "text", media_type: "text/plain", data },
+        ...(title && { title })
+      });
+    }
+  }
+  return out;
+}
+
+/** `str`, for a nested object rather than a whole message. The readers above
+ *  take a `RawMessage` because that is what arrives; a `source` inside one has
+ *  the same shape without the `type` those insist on. */
+function strOf(o: Record<string, unknown>, key: string): string | undefined {
+  return typeof o[key] === "string" ? (o[key] as string) : undefined;
 }

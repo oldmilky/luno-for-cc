@@ -29,6 +29,17 @@ export interface StoredSession {
   /** Claude CLI session id used with `claude --resume`. Subscription-mode only. */
   resumeId?: string;
   /**
+   * How full the model's context was on this conversation's last request.
+   *
+   * Stored because `--resume` carries the conversation into the next process:
+   * reopening a chat and continuing it starts from the context it was left at,
+   * so the figure is still true rather than merely last known. A reader must
+   * check `resumeId` before believing it — without one the next turn opens a
+   * fresh CLI session, and this describes a conversation that will not be
+   * resumed. Absent on sessions written before the figure was kept.
+   */
+  context?: { used: number; window: number };
+  /**
    * Absolute path of the workspace folder this conversation belongs to.
    *
    * Sessions live in globalStorage, which is shared across every project, so
@@ -98,7 +109,17 @@ export interface HistoryEntry {
    *  would just repeat the title. */
   snippet: string;
   createdAt: number;
-  updatedAt: number;
+  /**
+   * When the user last wrote in this chat — what the list is ordered on and
+   * what the row shows.
+   *
+   * Deliberately not the stored `updatedAt`, which moves with *every* event:
+   * a streamed delta, a tool result, a background agent that outlives its
+   * turn. Ordering on that put whatever an agent touched last above the chat
+   * the user had just typed into, so the top of the list answered "what is the
+   * machine busy with" instead of "what was I doing".
+   */
+  lastUserAt: number;
   eventCount: number;
   /** What state this chat is in. Derived from the timeline here; the registry
    *  overwrites it with a live state when a conversation is mid-turn or parked
@@ -181,7 +202,7 @@ export class HistoryService {
           named,
           snippet,
           createdAt: s.createdAt,
-          updatedAt: s.updatedAt,
+          lastUserAt: deriveLastUserAt(s.timeline ?? []) ?? s.updatedAt,
           eventCount: s.timeline?.length ?? 0,
           status: deriveStatus(s.timeline ?? []),
           open: false
@@ -190,7 +211,7 @@ export class HistoryService {
         // ignore corrupt files
       }
     }
-    entries.sort((a, b) => b.updatedAt - a.updatedAt);
+    entries.sort((a, b) => b.lastUserAt - a.lastUserAt);
     return entries;
   }
 
@@ -263,6 +284,28 @@ export function deriveStatus(timeline: TimelineEvent[]): StoredStatus {
   // refuses to persist. Answering "done" would be a guess; "no-reply" is what
   // an empty conversation actually is.
   return "no-reply";
+}
+
+/**
+ * When the user last spoke, read off the timeline rather than off a stored
+ * field — so it holds for every session already on disk, including those
+ * written before the list ordered on it.
+ *
+ * An edited or rewound-into message is a new `user` event with a new `ts`, so
+ * a chat the user returns to rises again. That is the intent: this answers
+ * "when did I last say something here", not "when was this file written".
+ *
+ * Undefined only for a timeline with no user event at all — `save` refuses to
+ * persist one, so a caller falling back to `updatedAt` is covering a file from
+ * before that rule, not a live case.
+ */
+export function deriveLastUserAt(
+  timeline: TimelineEvent[]
+): number | undefined {
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    if (timeline[i].kind === "user") return timeline[i].ts;
+  }
+  return undefined;
 }
 
 /** Cleaned, single-line text of the first user message — the basis for both

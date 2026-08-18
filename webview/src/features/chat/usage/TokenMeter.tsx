@@ -141,7 +141,8 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
   const [accountStatus, setAccountStatus] = useState<AccountStatus>("never");
   // How full the model's context was on the last request. The CLI reports both
   // halves, so this is the one row here that can show a fraction we did not
-  // have to guess at.
+  // have to guess at. Owned by the host: it belongs to one conversation, and
+  // this component outlives the swap from one to another.
   const [context, setContext] = useState<{
     used: number;
     window: number;
@@ -168,12 +169,11 @@ export function TokenMeter({ events, streaming }: TokenMeterProps) {
         setLimits(m.limits ?? []);
         setUtil(m.utilization ?? null);
         setAccountStatus(m.accountStatus ?? "never");
-      } else if (
-        m.type === "tokenUsage" &&
-        m.contextTokens !== undefined &&
-        m.contextWindow
-      ) {
-        setContext({ used: m.contextTokens, window: m.contextWindow });
+      } else if (m.type === "contextUsage") {
+        // Assigned rather than merged, `null` included: the host says which
+        // conversation's figure this is, and a chat that has run no request
+        // must not keep showing the one before it.
+        setContext(m.context);
       }
     });
   }, []);

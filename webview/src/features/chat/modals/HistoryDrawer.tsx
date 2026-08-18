@@ -343,7 +343,7 @@ function HistoryItem({
           <span className={s.itemSnippet}>{session.snippet}</span>
         )}
         <span className={s.itemMeta}>
-          <span>{formatRelativeShort(session.updatedAt)}</span>
+          <span>{formatRelativeShort(session.lastUserAt)}</span>
           <span className={s.itemMetaDot}>·</span>
           <span>
             {session.eventCount} {session.eventCount === 1 ? "event" : "events"}
@@ -513,7 +513,10 @@ function groupByBucket(sessions: HistoryEntry[]): Bucket[] {
   };
 
   for (const entry of sessions) {
-    const t = entry.updatedAt;
+    // The same field the list is ordered on. Grouping on a second timestamp
+    // would interleave the buckets — a row sorted above another can land in an
+    // older group, and the headings stop describing what is under them.
+    const t = entry.lastUserAt;
     if (t >= today) buckets["Today"].push(entry);
     else if (t >= yesterday) buckets["Yesterday"].push(entry);
     else if (t >= sevenDaysAgo) buckets["Last 7 days"].push(entry);

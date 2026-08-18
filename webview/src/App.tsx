@@ -556,8 +556,12 @@ export function App() {
         }
         onClearPins={() => setPins([])}
         onInput={setInput}
-        onSubmit={(text) => {
-          send({ type: "prompt", text: withPinnedMentions(text, pins) });
+        onSubmit={(text, attachments) => {
+          send({
+            type: "prompt",
+            text: withPinnedMentions(text, pins),
+            ...(attachments.length > 0 && { attachments })
+          });
           setInput("");
         }}
         onCancel={() => {

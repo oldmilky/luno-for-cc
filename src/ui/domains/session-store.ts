@@ -67,6 +67,20 @@ export class SessionStore {
    *  when the session is. */
   name?: string;
 
+  /**
+   * How full the model's context was on this conversation's last request.
+   *
+   * Here rather than on the panel because it belongs to *this* session and has
+   * to die with it: the sidebar hands one surface to another conversation
+   * without remounting the webview, so a figure left behind is read as the new
+   * chat's own. Undefined means "this conversation has not run a request",
+   * which is a fact the meter has to be told rather than left to infer.
+   *
+   * Saved and restored with the session, like `resumeId` — and believed on the
+   * way back only when there is a `resumeId` to keep it true. See `adopt`.
+   */
+  context?: { used: number; window: number };
+
   constructor(
     private readonly post: Post,
     private readonly history: HistoryService,
@@ -93,6 +107,7 @@ export class SessionStore {
     this.attachListeners();
     this.resumeId = undefined;
     this.name = undefined;
+    this.context = undefined;
     this.checkpointService?.clear();
     this.checkpointService = undefined;
   }
@@ -129,6 +144,13 @@ export class SessionStore {
     this.session.title = stored.title;
     this.resumeId = stored.resumeId;
     this.name = stored.name;
+    // Only with a resume id behind it. `--resume` carries the conversation into
+    // the next process, so continuing this chat starts from the context it was
+    // left at and the stored figure is still true. Without one the next turn
+    // opens a fresh CLI session — the figure would then describe a conversation
+    // nothing is going to resume, and the meter would open on a number that was
+    // never about the chat in front of the user.
+    this.context = stored.resumeId ? stored.context : undefined;
 
     // The previous listener closure now points at a dead Session, so it has to
     // be re-attached rather than left alone.
@@ -171,50 +193,37 @@ export class SessionStore {
       // reaches the extension host's rejection channel — and under test it lands
       // after the temp storage is gone, failing a run whose every test passed.
       // Dropping one costs nothing: the next timeline event schedules another.
-      this.history
-        .save({
-          id: this.session.id,
-          title: deriveTitle(this.session.timeline),
-          name: this.name,
-          createdAt: this.session.createdAt,
-          updatedAt: Date.now(),
-          messages: this.session.messages,
-          timeline: this.session.timeline,
-          resumeId: this.resumeId,
-          ...this.settingsFor()
-        })
-        .catch(() => undefined);
+      this.history.save(this.record()).catch(() => undefined);
     }, SAVE_DEBOUNCE_MS);
   }
 
   /**
-   * Write the conversation as it stands right now under a new id, and answer
-   * with that id.
+   * Write now, dropping whatever was queued.
    *
-   * Exists for rewind. Truncating drops every event after the target from the
-   * timeline *and* from the file, and clears the CLI resume id along with it —
-   * so the branch the user rewound away from was unreachable, by any route.
-   * The copy keeps its `resumeId`, which is what makes reopening it resume the
-   * real CLI conversation rather than a transcript of one.
-   *
-   * Returns undefined when there is nothing worth keeping: `history.save`
-   * refuses a session with no user content, so a fork of one would be a
-   * history row pointing at a file that was never written.
+   * The debounce is right for a stream of timeline events and wrong for a
+   * change the user makes and then immediately looks at. Naming a chat re-read
+   * the history list from disk 400 ms before the name got there, so the row the
+   * user had just renamed came back with its old title.
    */
-  async forkCurrent(newId: string, name: string): Promise<string | undefined> {
-    if (!this.session.timeline.some((e) => e.kind === "user")) return undefined;
-    await this.history.save({
-      id: newId,
+  async saveNow(): Promise<void> {
+    this.cancelPendingSave();
+    await this.history.save(this.record()).catch(() => undefined);
+  }
+
+  /** The conversation as it stands, in the shape the store keeps it. */
+  private record(): StoredSession {
+    return {
+      id: this.session.id,
       title: deriveTitle(this.session.timeline),
-      name,
+      name: this.name,
       createdAt: this.session.createdAt,
       updatedAt: Date.now(),
-      messages: [...this.session.messages],
-      timeline: [...this.session.timeline],
+      messages: this.session.messages,
+      timeline: this.session.timeline,
       resumeId: this.resumeId,
+      context: this.context,
       ...this.settingsFor()
-    });
-    return newId;
+    };
   }
 
   /**

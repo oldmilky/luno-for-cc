@@ -6,7 +6,13 @@
 // below.
 // ─────────────────────────────────────────────────────────────
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent
+} from "react";
 import { AnimatePresence } from "framer-motion";
 import { Icon } from "../../../design/icons";
 import {
@@ -37,6 +43,12 @@ import {
 } from "./MentionPopover";
 import { SlashPopover } from "./SlashPopover";
 import { slashQuery } from "./slash-filter";
+import {
+  classifyAttachment,
+  toAttachmentBlock,
+  type AttachmentBlock,
+  type AttachmentKind
+} from "./attachments";
 import { SkillsPicker } from "../pickers/SkillsPicker";
 import { ModelPicker } from "../pickers/ModelPicker";
 import { EffortPicker } from "../pickers/EffortPicker";
@@ -50,7 +62,9 @@ import s from "./Composer.module.scss";
 export interface ComposerProps {
   value: string;
   onChange: (v: string) => void;
-  onSubmit: (text: string) => void;
+  /** @param attachments files picked or pasted, already in the API's block
+   *   shape. Empty for an ordinary message. */
+  onSubmit: (text: string, attachments: AttachmentBlock[]) => void;
   onCancel: () => void;
   busy: boolean;
   model: string;
@@ -72,6 +86,15 @@ export interface ComposerProps {
   pendingSettings?: ReadonlyArray<PendingSetting>;
   /** Modes the user's settings forbid — kept out of the picker entirely. */
   disabledModes?: ReadonlyArray<PermissionMode>;
+  /**
+   * This chat's own sent messages, oldest first — what ArrowUp walks back
+   * through on an empty composer.
+   *
+   * Text only, and the user's only: recalling a prompt is re-sending it, so
+   * anything the model said has no business in the list. Empty in inline edit
+   * mode, where the box already holds the one message being changed.
+   */
+  history?: ReadonlyArray<string>;
   /** External signal (from Cmd+U etc.) to focus the editor. */
   focusKey: number;
   /** When set, splice this code block at the caret then call onInserted. */
@@ -107,13 +130,43 @@ interface MentionState {
   query: string;
 }
 
-interface ImageAttachment {
+/**
+ * A file waiting above the composer.
+ *
+ * One shape for all four kinds rather than one per kind: the chip strip, the
+ * remove button and the submit path treat them identically, and the only thing
+ * that differs is what `toAttachmentBlock` makes of it at send time. `width`
+ * and `height` are zero for everything that is not an image, which is what the
+ * chip reads to decide whether it has dimensions to show.
+ */
+interface Attachment {
   id: string;
   name: string;
+  kind: AttachmentKind;
+  /** Bytes, as the file system reported them — shown on the chip so a 40 MB
+   *  PDF is visible before it is sent rather than after. */
+  size: number;
   dataUrl: string;
   width: number;
   height: number;
 }
+
+/** What each kind is called when the chip has to say it in words. `unsupported`
+ *  never reaches a chip — it is reported separately — but the map is total so
+ *  a new kind cannot be added without deciding its label. */
+const KIND_LABEL: Record<AttachmentKind, string> = {
+  image: "an image",
+  pdf: "a PDF",
+  text: "a text file",
+  unsupported: "unsupported"
+};
+
+const KIND_ICON: Record<AttachmentKind, "image" | "file"> = {
+  image: "image",
+  pdf: "file",
+  text: "file",
+  unsupported: "file"
+};
 
 const NO_MENTION: MentionState = { active: false, query: "" };
 
@@ -137,6 +190,7 @@ export function Composer({
   skills,
   pendingSettings = [],
   disabledModes = [],
+  history = [],
   focusKey,
   pendingInsert,
   onInserted,
@@ -153,13 +207,14 @@ export function Composer({
 }: ComposerProps) {
   const editorRef = useRef<RichEditorHandle | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { useCtrlEnterToSend } = useWebviewSettings();
   const [focused, setFocused] = useState(false);
   const [mention, setMention] = useState<MentionState>(NO_MENTION);
   const [slash, setSlash] = useState<MentionState>(NO_SLASH);
   const [commands, setCommands] = useState<SlashCommand[]>([]);
-  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
-  const [preview, setPreview] = useState<ImageAttachment | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [preview, setPreview] = useState<Attachment | null>(null);
   // The editor is mounted once with its persisted text; React shouldn't keep
   // re-pushing `value` into it (it owns its DOM after mount). We freeze the
   // initial value to avoid remount churn.
@@ -287,9 +342,63 @@ export function Composer({
   }, []);
 
   const handleEditorChange = (text: string) => {
+    // Typing ends the walk. What is in the box is the user's again, so the next
+    // ArrowUp starts from the newest message rather than resuming a tour they
+    // have already stepped off. The walk's own writes are exempt: they arrive
+    // here too, through the editor's change event.
+    if (!recallingRef.current) historyAt.current = null;
     onChange(text);
     refreshMention();
     refreshSlash(text);
+  };
+
+  /**
+   * Walk back through this chat's own sent messages, terminal style.
+   *
+   * Gated on an empty composer, which is the whole reason it can be a bare
+   * arrow key: with anything typed, ArrowUp is line navigation and stealing it
+   * would break editing a multi-line prompt. Stepping forward past the newest
+   * message empties the box again — the way out of the history is the same key
+   * that got you in.
+   */
+  const historyAt = useRef<number | null>(null);
+  /** True only while the walk is writing, so `handleEditorChange` can tell its
+   *  own writes from the user's and leave the position alone. */
+  const recallingRef = useRef(false);
+
+  const recall = (index: number | null) => {
+    const text = index === null ? "" : history[index];
+    recallingRef.current = true;
+    historyAt.current = index;
+    editorRef.current?.setText(text);
+    onChange(text);
+    recallingRef.current = false;
+    editorRef.current?.focus();
+  };
+
+  const handleEditorKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (inline || history.length === 0) return;
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    // A popover owns the arrows while it is open — it is choosing a row.
+    if (mention.active || slash.active) return;
+
+    const at = historyAt.current;
+    if (e.key === "ArrowUp") {
+      // The empty box gates *entering* the walk. Inside it the box is never
+      // empty, so from then on the walk itself is the gate.
+      if (at === null && (editorRef.current?.serialize() ?? "").trim() !== "") {
+        return;
+      }
+      e.preventDefault();
+      recall(Math.max(0, (at ?? history.length) - 1));
+      return;
+    }
+    // Down does nothing outside the walk: there is nothing ahead of the newest
+    // message, and the caret owns the key the rest of the time.
+    if (at === null) return;
+    e.preventDefault();
+    recall(at + 1 > history.length - 1 ? null : at + 1);
   };
 
   const handleSubmit = () => {
@@ -299,18 +408,22 @@ export function Composer({
     // police it, and the `busy` gate that used to sit here swallowed every
     // follow-up typed while the model was still talking.
     const text = (editorRef.current?.serialize() ?? "").trim();
-    const imageMd = attachments
-      .map((a) => `![${a.name}](${a.dataUrl})`)
-      .join("\n");
-    const combined = [imageMd, text].filter(Boolean).join("\n\n");
-    if (!combined) return;
-    onSubmit(combined);
+    // Blocks, not markdown in the prompt. A data URI written into the text is
+    // a wall of base64 the model reads as characters; a block is the file
+    // itself. The typed words go last, after what they are about — the
+    // reference's order, and the one that reads correctly.
+    const blocks = attachments
+      .map((a) => toAttachmentBlock(a.name, a.dataUrl))
+      .filter((b): b is AttachmentBlock => b !== null);
+    if (!text && blocks.length === 0) return;
+    onSubmit(text, blocks);
     // Don't clear in inline mode — the parent shows a confirmation modal,
     // and if the user cancels we want the text preserved so they can keep
     // editing without retyping.
     if (!inline) {
       editorRef.current?.clear();
       setAttachments([]);
+      setRefused([]);
     }
     setMention(NO_MENTION);
   };
@@ -324,6 +437,7 @@ export function Composer({
       // a text node).
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0) return;
+      editorRef.current?.recordUndoPoint();
       const range = sel.getRangeAt(0);
       const node = range.startContainer;
       if (node.nodeType !== Node.TEXT_NODE) return;
@@ -361,14 +475,86 @@ export function Composer({
     [onChange]
   );
 
-  const addImageAttachments = useCallback(async (files: File[]) => {
-    const added = await Promise.all(files.map(readImageAttachment));
-    setAttachments((prev) => [...prev, ...added]);
+  /** Files that were picked and cannot be sent, by name. */
+  const [refused, setRefused] = useState<string[]>([]);
+  /** Lit while a file is over the panel. */
+  const [dropping, setDropping] = useState(false);
+
+  /** The window listener below needs the handler defined further down, and a
+   *  `[]`-dep effect must not close over a stale one. */
+  const dropRef = useRef<(dt: DataTransfer | null) => Promise<void>>(
+    async () => {}
+  );
+
+  /**
+   * The whole panel is the drop target, not just this box.
+   *
+   * Reported from the installed extension: dragging a file in did nothing. The
+   * handlers were on the composer's own wrapper, which is a strip at the bottom
+   * of a tall panel — a drop anywhere else met no `dragover` that accepted it,
+   * so the browser refused the drag and no `drop` event ever fired. Nothing was
+   * broken about the handling; there was simply almost nowhere to drop.
+   *
+   * Bound on `window` rather than by wrapping the app in a div: the composer
+   * already owns the attachment state, and lifting that out to the shell would
+   * move it away from everything that reads it.
+   *
+   * Gated on the drag actually carrying files. A drag of selected text inside
+   * the chat is not an attachment, and claiming it would break selecting.
+   */
+  useEffect(() => {
+    if (inline) return;
+    const carriesFiles = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types ?? []).includes("Files");
+    const onOver = (e: DragEvent) => {
+      if (!carriesFiles(e)) return;
+      // The one that matters: without a prevented `dragover` the drop is
+      // rejected before any handler is consulted.
+      e.preventDefault();
+      setDropping(true);
+    };
+    const onLeave = (e: DragEvent) => {
+      if (e.relatedTarget === null) setDropping(false);
+    };
+    const onDropAnywhere = (e: DragEvent) => {
+      if (!carriesFiles(e)) return;
+      e.preventDefault();
+      void dropRef.current(e.dataTransfer);
+    };
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("drop", onDropAnywhere);
+    return () => {
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("drop", onDropAnywhere);
+    };
+  }, [inline]);
+
+  /**
+   * Take files from wherever they came — the paperclip, Ctrl+V, a drop — and
+   * hold them above the composer until the message goes.
+   *
+   * One path for all three sources on purpose: the picker was the third way in
+   * and the other two already existed, so anything that only knew about one of
+   * them would have been a third behaviour to keep in step.
+   */
+  const addFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
+    const read = await Promise.all(files.map(readAttachment));
+    // Refused files are held rather than dropped: the reference logs them to a
+    // console nobody opens, and a file that silently does not arrive is the
+    // worst outcome available. What the panel does with them is the next step.
+    setRefused((prev) => [
+      ...prev,
+      ...read.filter((a) => a.kind === "unsupported").map((a) => a.name)
+    ]);
+    const usable = read.filter((a) => a.kind !== "unsupported");
+    if (usable.length > 0) setAttachments((prev) => [...prev, ...usable]);
   }, []);
 
   const canSend = value.trim().length > 0 || attachments.length > 0;
   const mode = findMode(permissionMode);
-  const [dropping, setDropping] = useState(false);
 
   const wrapperCls = [
     s.wrapper,
@@ -381,48 +567,84 @@ export function Composer({
     .join(" ");
 
   /**
-   * Drop handler for both images and file paths.
+   * Drop handler: a file becomes an attachment, a path becomes a mention.
    *
-   * 1. If the DataTransfer carries any image file → embed it as a markdown
-   *    image (`![name](data:…)`). Lets users drop a screenshot in.
+   * Which one a drop is depends on what the agent can already reach. A path
+   * means the file is on disk where the `Read` tool can open it on demand, and
+   * a mention costs nothing until it does; an attachment spends the tokens up
+   * front. So a drop that resolves to a path is mentioned, and a drop that does
+   * not — a PDF from Downloads, a file dragged out of a browser — is attached,
+   * which is the case that used to do nothing at all.
    *
-   * 2. Otherwise we look for file references in priority order:
-   *    a) `text/uri-list` (the standard MIME type when dragging files from
-   *       OS file managers like Finder / Explorer / VS Code's tree view).
-   *    b) `application/vnd.code.uri-list` (VS Code's own drag format).
-   *    c) `e.dataTransfer.files` — name only when the host strips paths.
+   * **Images are the exception and always attach.** Dropping a picture is
+   * asking someone to look at it; a path to it is the wrong answer even when
+   * one exists.
    *
-   *    Each resolved path becomes a `re-mention` pill. The same path
-   *    serializes to `@basename` so the agent picks it up normally.
+   * The reference does both to every drop — attach *and* mention. That sends a
+   * workspace file twice, once as a whole text block and once as a pointer, and
+   * the pointer alone was already enough.
+   *
+   * Paths are read in priority order:
+   *   a) `text/uri-list` — the standard when dragging from Finder / Explorer /
+   *      the VS Code tree.
+   *   b) `application/vnd.code.uri-list` — VS Code's own format.
+   *   c) `dataTransfer.files` — names only, when the host strips paths.
    */
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    setDropping(false);
-    const dt = e.dataTransfer;
+  /**
+   * Splice a mention pill at the current caret position.
+   *
+   * Splices a pill straight into the editor's DOM, so the editor is told to
+   *  take an undo point first — it sees no input event for an edit made from
+   *  out here. */
+  const insertMentionAtCursor = (fullPath: string, basename: string) => {
+    editorRef.current?.recordUndoPoint();
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    const pill = makeMentionBadge(fullPath, basename);
+    range.insertNode(pill);
+    const space = document.createTextNode(" ");
+    pill.parentNode?.insertBefore(space, pill.nextSibling);
+    const r = document.createRange();
+    r.setStart(space, 1);
+    r.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  };
 
-    // 1) Image attach — collect every image file and show them as
-    // thumbnails above the editor. They're injected as markdown into the
-    // outgoing message at submit time, so the agent still receives the
-    // image data, but the editor itself stays clean (no giant data: URL
-    // pasted into the text).
-    const images = Array.from(dt.files).filter((f) =>
-      f.type.startsWith("image/")
-    );
+  const handleDrop = async (dt: DataTransfer | null) => {
+    setDropping(false);
+    if (!dt) return;
+    const dropped = Array.from(dt.files);
+
+    const images = dropped.filter((f) => f.type.startsWith("image/"));
     if (images.length > 0) {
-      await addImageAttachments(images);
+      await addFiles(images);
       return;
     }
 
-    // 2) Files-as-mentions
     const paths = collectDroppedPaths(dt);
-    if (paths.length === 0) return;
-    editorRef.current?.focus();
-    for (const p of paths) {
-      const basename = p.split("/").pop() || p;
-      insertMentionAtCursor(p, basename);
+    if (paths.length > 0) {
+      editorRef.current?.focus();
+      for (const p of paths) {
+        const basename = p.split("/").pop() || p;
+        insertMentionAtCursor(p, basename);
+      }
+      onChange(editorRef.current?.serialize() ?? "");
+      return;
     }
-    onChange(editorRef.current?.serialize() ?? "");
+
+    // Nothing the agent can reach by path — a PDF from Downloads, a file
+    // dragged out of a browser. Attaching is the only way it arrives, and
+    // `addFiles` reports whatever it cannot take.
+    await addFiles(dropped);
   };
+
+  // Kept current for the window listener, which is registered once.
+  useEffect(() => {
+    dropRef.current = handleDrop;
+  });
 
   /**
    * Replace the half-typed command with the one that was picked.
@@ -438,22 +660,6 @@ export function Composer({
     editorRef.current?.focus();
   };
 
-  /** Splice a mention pill at the current caret position. */
-  const insertMentionAtCursor = (fullPath: string, basename: string) => {
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
-    const range = sel.getRangeAt(0);
-    range.deleteContents();
-    const pill = makeMentionBadge(fullPath, basename);
-    range.insertNode(pill);
-    const space = document.createTextNode(" ");
-    pill.parentNode?.insertBefore(space, pill.nextSibling);
-    const r = document.createRange();
-    r.setStart(space, 1);
-    r.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(r);
-  };
 
   return (
     <div
@@ -470,7 +676,12 @@ export function Composer({
         if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
         setDropping(false);
       }}
-      onDrop={handleDrop}
+      // Kept beside the window listener rather than replaced by it: a drop on
+      // the composer itself must not depend on the effect having run.
+      onDrop={(e) => {
+        e.preventDefault();
+        void handleDrop(e.dataTransfer);
+      }}
     >
       <MentionPopover
         open={mention.active}
@@ -496,27 +707,55 @@ export function Composer({
         </div>
       )}
 
+      {/* Said out loud, which the reference does not do: it drops an
+          unsupported file with a `console.error` nobody opens. Naming the file
+          and the reason is the difference between "Word documents are not
+          supported" and a file that appears to have been attached and was
+          not. */}
+      {refused.length > 0 && (
+        <div className={s.refused} role="status">
+          <Icon name="info" size={12} />
+          <span>
+            {refused.join(", ")} — not supported. Images, PDFs and text files
+            can be attached; Word, Excel and PowerPoint cannot.
+          </span>
+          <button
+            type="button"
+            className={s.refusedDismiss}
+            onClick={() => setRefused([])}
+            aria-label="Dismiss"
+          >
+            <Icon name="x" size={10} />
+          </button>
+        </div>
+      )}
+
       {attachments.length > 0 && (
         <div className={s.attachments}>
           {attachments.map((a) => (
             <Tooltip
               key={a.id}
-              label={`Preview ${a.name}${a.width ? ` (${a.width}×${a.height})` : ""}`}
+              label={
+                a.kind === "image"
+                  ? `Preview ${a.name}${a.width ? ` (${a.width}×${a.height})` : ""}`
+                  : `${a.name} — sent as ${KIND_LABEL[a.kind]}`
+              }
             >
               <button
                 type="button"
-                onClick={() => setPreview(a)}
+                // Only an image has anything to preview. A PDF chip is a label,
+                // and a button that opens an empty lightbox is worse than one
+                // that does nothing.
+                onClick={a.kind === "image" ? () => setPreview(a) : undefined}
                 className={s.attachment}
               >
                 <span className={s.attachmentIcon}>
-                  <Icon name="file" size={12} />
+                  <Icon name={KIND_ICON[a.kind]} size={12} />
                 </span>
                 <span className={s.attachmentName}>{a.name}</span>
-                {a.width > 0 && (
-                  <span className={s.attachmentDims}>
-                    {a.width}×{a.height}
-                  </span>
-                )}
+                <span className={s.attachmentDims}>
+                  {a.width > 0 ? `${a.width}×${a.height}` : formatBytes(a.size)}
+                </span>
                 <span
                   role="button"
                   tabIndex={0}
@@ -575,9 +814,45 @@ export function Composer({
             if (path.startsWith(TERMINAL_PREFIX)) return;
             send({ type: "openFile", path });
           }}
-          onImagePaste={addImageAttachments}
+          onImagePaste={addFiles}
+          onKeyDown={handleEditorKeyDown}
         />
       </div>
+      {/* Beside the microphone, and inside the input for the same reason: both
+          controls put something *into* the message, so they belong where the
+          message is rather than in the toolbar of settings below it.
+
+          A hidden `<input type="file" multiple>` clicked from a button, which
+          is what the reference client does too — a webview can open the OS
+          picker itself, and routing it through the host would be a protocol
+          hop for nothing. `value` is cleared on change so picking the same
+          file twice in a row still fires. */}
+      {!inline && (
+        <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className={s.fileInput}
+            onChange={(e) => {
+              void addFiles(Array.from(e.target.files ?? []));
+              e.target.value = "";
+            }}
+            tabIndex={-1}
+            aria-hidden
+          />
+          <Tooltip label="Attach files — images, PDFs, text">
+            <button
+              type="button"
+              className={s.attachBtn}
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach files"
+            >
+              <Icon name="attach" size={14} />
+            </button>
+          </Tooltip>
+        </>
+      )}
       {/* Inside the input, not in the toolbar below it: dictation fills this
           box, and the control that fills it belongs where the text goes.
           Listening turns it into a stop — one control, two states, so a
@@ -665,8 +940,10 @@ export function Composer({
               aria-label="Insert editor selection"
               onClick={() => send({ type: "captureSelection" })}
             >
+              {/* Icon and chord, no word. The toolbar is the narrowest row in
+                  the panel and this control is the least often reached; the
+                  tooltip and the `aria-label` still say what it is. */}
               <Icon name="code" size={12} />
-              <span>Selection</span>
               <kbd className={s.kbd}>⌘U</kbd>
             </button>
           </Tooltip>
@@ -796,21 +1073,47 @@ export function Composer({
  * dimension-probe failures (corrupt SVG, etc.) and fall back to zero — the
  * chip just hides the size line in that case.
  */
-async function readImageAttachment(file: File): Promise<ImageAttachment> {
+async function readAttachment(file: File): Promise<Attachment> {
   const dataUrl = await new Promise<string>((res, rej) => {
     const r = new FileReader();
     r.onload = () => res(String(r.result));
     r.onerror = () => rej(r.error);
     r.readAsDataURL(file);
   });
-  const dims = await new Promise<{ width: number; height: number }>((res) => {
-    const img = new Image();
-    img.onload = () =>
-      res({ width: img.naturalWidth, height: img.naturalHeight });
-    img.onerror = () => res({ width: 0, height: 0 });
-    img.src = dataUrl;
-  });
-  return { id: newId(), name: file.name, dataUrl, ...dims };
+  // `File.type` is empty for most source files — the browser names a media
+  // type only for what it knows how to render — so the classifier is given the
+  // name as well and reads whichever of the two answers.
+  const kind = classifyAttachment(file.type, file.name);
+  // Measured only for images, and only so the chip can say `1920×1080`. An
+  // `Image` that never loads answers zero, which is the same answer a PDF
+  // gives, so nothing has to branch twice.
+  const dims =
+    kind === "image"
+      ? await new Promise<{ width: number; height: number }>((res) => {
+          const img = new Image();
+          img.onload = () =>
+            res({ width: img.naturalWidth, height: img.naturalHeight });
+          img.onerror = () => res({ width: 0, height: 0 });
+          img.src = dataUrl;
+        })
+      : { width: 0, height: 0 };
+  return {
+    id: newId(),
+    name: file.name,
+    kind,
+    size: file.size,
+    dataUrl,
+    ...dims
+  };
+}
+
+/** `48 kB`, `2.4 MB` — one decimal past a megabyte and none below it, because
+ *  `1.0 kB` is noise and `41.7 MB` is the number that stops someone sending a
+ *  file they did not mean to. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1000) return `${bytes} B`;
+  if (bytes < 1000 * 1000) return `${Math.round(bytes / 1000)} kB`;
+  return `${(bytes / 1000 / 1000).toFixed(1)} MB`;
 }
 
 function collectDroppedPaths(dt: DataTransfer): string[] {
@@ -844,10 +1147,14 @@ function collectDroppedPaths(dt: DataTransfer): string[] {
 
   if (out.length === 0) {
     for (const f of Array.from(dt.files)) {
-      // Webview File objects often only expose `name`. We still pass that
-      // along — the agent's file resolver can match by basename.
-      const p = (f as File & { path?: string }).path || f.name;
-      push(p);
+      // Only a real path. A `File` in a webview usually exposes nothing but
+      // `name`, and this used to fall back to that — which made every drop
+      // "a path", including files with no path at all. A bare basename is a
+      // mention that resolves to whatever the agent happens to find under that
+      // name, or to nothing; the file's own bytes are the better answer, and
+      // the caller attaches them when this comes back empty.
+      const p = (f as File & { path?: string }).path;
+      if (p) push(p);
     }
   }
 

@@ -39,6 +39,16 @@ import re from "../../../design/primitives/RichEditor.module.scss";
 interface UserMessageProps {
   id: string;
   text: string;
+  /**
+   * Files sent with this message, by name.
+   *
+   * Names only, and that is the whole design: the bytes went to the model as
+   * content blocks and were deliberately kept off the timeline, where a data
+   * URI would be megabytes of base64 in the stored session. Without this the
+   * bubble showed nothing at all — and for a screenshot sent with no words,
+   * nothing at all was the entire message.
+   */
+  attachments?: string[];
   canRewind?: boolean;
   messagesAfter?: number;
   onRewindRequest?: (turnId: string, messagesAfter: number) => void;
@@ -110,6 +120,7 @@ function pushTextOrImage(parts: Part[], slice: string) {
 export function UserMessage({
   id,
   text,
+  attachments,
   canRewind,
   messagesAfter = 0,
   onRewindRequest,
@@ -251,6 +262,16 @@ export function UserMessage({
               }
               return <MsgImage key={i} name={p.name} src={p.src} />;
             })}
+            {attachments && attachments.length > 0 && (
+              <div className={s.sentFiles}>
+                {attachments.map((name) => (
+                  <span key={name} className={s.sentFile}>
+                    <Icon name="attach" size={10} />
+                    {name}
+                  </span>
+                ))}
+              </div>
+            )}
             {overflowing && collapsed && <div className={s.fade} />}
           </div>
           <div className={s.footer}>

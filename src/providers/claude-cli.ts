@@ -695,17 +695,20 @@ export class ClaudeCliProvider implements ChatProvider {
   }
 
   async *stream(req: ProviderRequest): AsyncIterable<StreamDelta> {
-    const userText = lastUserText(req.messages);
-    if (!userText) {
+    const content = lastUserContent(req.messages);
+    if (content === null || (typeof content === "string" && !content)) {
       yield { type: "error", error: "No user message to send." };
       return;
     }
+    // Argv and the classifier want words; the CLI wants the content. A message
+    // that is only an attachment has none of the first and all of the second.
+    const userText = textOf(content);
 
     // Fresh per turn: a prior "allow edits this turn" must not leak into the next.
     this.autoAllowEdits = false;
 
     if (this.opts.sessionMode) {
-      yield* this.streamInSession(req, userText);
+      yield* this.streamInSession(req, content);
       return;
     }
 
@@ -729,7 +732,7 @@ export class ClaudeCliProvider implements ChatProvider {
     if (child.stdin) {
       const userMsg = JSON.stringify({
         type: "user",
-        message: { role: "user", content: userText }
+        message: { role: "user", content }
       });
       try {
         child.stdin.write(userMsg + "\n");
@@ -1070,7 +1073,7 @@ export class ClaudeCliProvider implements ChatProvider {
    */
   private async *streamInSession(
     req: ProviderRequest,
-    userText: string
+    content: string | ContentBlock[]
   ): AsyncIterable<StreamDelta> {
     // The task-type playbook is classified from the prompt, so it changes the
     // moment the conversation shifts subject — and it reaches the CLI as
@@ -1088,7 +1091,10 @@ export class ClaudeCliProvider implements ChatProvider {
     // replaced, which is the trade the paragraph above already makes.
     const live = this.session?.exited ? null : this.session;
     const taskType = live ? live.taskType : this.opts.taskType;
-    const args = buildArgs(userText, req.model, { ...this.opts, taskType });
+    const args = buildArgs(textOf(content), req.model, {
+      ...this.opts,
+      taskType
+    });
     let session: CliSession;
     try {
       session = this.ensureSession(args, req, taskType);
@@ -1156,7 +1162,7 @@ export class ClaudeCliProvider implements ChatProvider {
     if (!ended) {
       session.sink = push;
       session.busy = true;
-      const uuid = this.writeUserMessage(session, userText);
+      const uuid = this.writeUserMessage(session, content);
       if (!uuid) {
         session.sink = null;
         this.abortCurrent = null;
@@ -1883,7 +1889,7 @@ export class ClaudeCliProvider implements ChatProvider {
    */
   private writeUserMessage(
     session: CliSession,
-    userText: string
+    content: string | ContentBlock[]
   ): string | null {
     // The preamble travels as message text rather than in argv, which is
     // frozen at spawn — so it is part of the user message every other surface
@@ -1894,7 +1900,7 @@ export class ClaudeCliProvider implements ChatProvider {
     // repeating it buys tokens and noise on the other device and nothing else.
     const preamble = turnPreamble(this.opts);
     const moved = Boolean(preamble) && preamble !== session.preamble;
-    const sent = moved ? preamble + userText : userText;
+    const sent = moved ? withPreamble(preamble, content) : content;
     // Our own id on our own message. The CLI keeps it and returns it on the
     // replay, which is how the echo is recognised without guessing from the
     // text. Registered before the write, not after: the replay can be back
@@ -2128,16 +2134,49 @@ function offeredGrantLabel(
   return grant ? grantLabel(grant) : undefined;
 }
 
-function lastUserText(messages: Message[]): string {
+/**
+ * The newest user message's content, whole.
+ *
+ * Returns what was handed in rather than a flattening of it: an attached image
+ * or PDF is a block on this message, and the string this used to return dropped
+ * every block that was not text — so an attachment could be built anywhere in
+ * the host and would still never reach the CLI.
+ *
+ * `null` when there is no user message at all, which is a different thing from
+ * one carrying no words: a screenshot with nothing typed is a real turn.
+ */
+function lastUserContent(messages: Message[]): string | ContentBlock[] | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role !== "user") continue;
     if (typeof m.content === "string") return m.content;
-    const text = (m.content as ContentBlock[])
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("\n")
-      .trim();
-    if (text) return text;
+    const blocks = m.content;
+    if (blocks.length > 0) return blocks;
   }
-  return "";
+  return null;
+}
+
+/** The words in a content payload. What argv and the task classifier read —
+ *  neither has anywhere to put an image. */
+function textOf(content: string | ContentBlock[]): string {
+  if (typeof content === "string") return content;
+  return content
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .join("\n")
+    .trim();
+}
+
+/**
+ * Put the turn preamble in front of the user's own content.
+ *
+ * A string concatenation for a string, and a text block in front of the rest
+ * for an array — `preamble + blocks` would have stringified the array into
+ * `[object Object]` and sent that as the prompt.
+ */
+function withPreamble(
+  preamble: string,
+  content: string | ContentBlock[]
+): string | ContentBlock[] {
+  if (typeof content === "string") return preamble + content;
+  return [{ type: "text", text: preamble }, ...content];
 }

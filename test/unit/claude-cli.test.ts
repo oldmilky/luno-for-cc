@@ -2165,7 +2165,18 @@ describe("read-only shell commands", () => {
     "du -sh node_modules",
     "ls src | head -20",
     "cat a.txt | wc -l | sort",
-    "git status && git log --oneline -5"
+    "git status && git log --oneline -5",
+    // `2>&1` points one descriptor at another and opens no file. The `>` in it
+    // was read as a redirect to disk, so a read-only `git status` written the
+    // way agents habitually write it raised an approval card — in every mode,
+    // Bypass included.
+    "git status --short 2>&1 | head -20",
+    "ls -la 2>&1",
+    "rg TODO src 2>&1 | head",
+    // Asks which ignore rule covers a path. No writing form exists.
+    "git check-ignore -v .supernova/add/t",
+    // The command from the reported screenshot, whole.
+    'cd "c:/Users/pro26/Documents/GitHub/vanguard" && git status --short -uall .supernova 2>&1 | head -20; echo "---"; git check-ignore -v .supernova/add/t'
   ];
   for (const cmd of reads) {
     it(`allows ${cmd}`, () => {
@@ -2197,6 +2208,11 @@ describe("read-only shell commands", () => {
     "git checkout -- .",
     // An environment assignment changes what the command sees.
     "PATH=/tmp ls",
+    // A redirect that names a target still opens a file, however it is spelled
+    // — the descriptor-duplication exemption must not widen to these.
+    "ls 2> errors.log",
+    "ls &> both.log",
+    "git status > status.txt",
     ""
   ];
   for (const cmd of asks) {

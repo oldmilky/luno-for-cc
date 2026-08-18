@@ -445,7 +445,10 @@ export interface HistoryEntry {
   /** Longer cleaned preview of the first user message; "" when redundant. */
   snippet?: string;
   createdAt: number;
-  updatedAt: number;
+  /** When the user last wrote here — the order of the list and the time a row
+   *  shows. Not the last *activity*: a chat whose agents are still working is
+   *  not a chat the user was last in. */
+  lastUserAt: number;
   eventCount: number;
   status: ChatStatus;
   /** A conversation currently holds this session. Orthogonal to `status` — a
@@ -512,6 +515,27 @@ export interface CustomConnectorDraft {
   env?: Record<string, string>;
 }
 
+/**
+ * An attached file, in the shape the Anthropic API takes it.
+ *
+ * Mirrors the `image` and `document` members of `ContentBlock` in
+ * `src/core/types.ts`; the two halves share no types, so this is written out on
+ * both sides and `protocol-contract.test.ts` is what keeps them from drifting.
+ * Built by `features/chat/composer/attachments.ts`.
+ */
+export type AttachmentBlock =
+  | {
+      type: "image";
+      source: { type: "base64"; media_type: string; data: string };
+    }
+  | {
+      type: "document";
+      source:
+        | { type: "base64"; media_type: string; data: string }
+        | { type: "text"; media_type: "text/plain"; data: string };
+      title?: string;
+    };
+
 // ── Outbound (webview → extension) ────────────────────────────
 
 export type Outbound =
@@ -525,7 +549,19 @@ export type Outbound =
    *  the turn already running, where the CLI picks it up at the next tool
    *  boundary. It never interrupts — interrupting would stop every background
    *  agent with it. */
-  | { type: "prompt"; text: string }
+  | {
+      type: "prompt";
+      text: string;
+      /**
+       * Files the user attached, already in the API's own block shape.
+       *
+       * Built in the webview because that is where the files are — the picker,
+       * the clipboard and the drop target all live here, and the host would
+       * only be re-deriving what this side already knows. Sent ahead of the
+       * text and delivered to the model in that order.
+       */
+      attachments?: AttachmentBlock[];
+    }
   | { type: "cancel" }
   | {
       type: "permissionResponse";
@@ -886,19 +922,18 @@ export type Inbound =
       taskType: string;
     }
   | {
-      type: "tokenUsage";
-      inputTokens: number;
-      outputTokens: number;
-      cacheReadTokens?: number;
-      cacheCreatedTokens?: number;
-      costUsd?: number;
-      sessionId?: string;
-      /** Provider that reported the usage — webview shows it in the meter tooltip. */
-      source: "anthropic" | "claude-cli";
-      /** How full the model's context was on the last request, and how big it
-       *  is. Reported by the CLI, so unlike the plan caps these are exact. */
-      contextTokens?: number;
-      contextWindow?: number;
+      type: "contextUsage";
+      /**
+       * How full the model's context was on this conversation's last request,
+       * and how big it is. Reported by the CLI, so unlike the plan caps these
+       * are exact.
+       *
+       * `null` is the meaningful half: the sidebar swaps one conversation for
+       * another without remounting the meter, so a chat that has run no request
+       * has to clear the previous occupant's figure rather than say nothing and
+       * leave someone else's number on screen.
+       */
+      context: { used: number; window: number } | null;
     }
   | { type: "revertResult"; path: string; ok: boolean; error?: string }
   | { type: "connectorsList"; connectors: ConnectorView[] }

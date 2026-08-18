@@ -38,7 +38,14 @@ import {
 // TimelineEvent — no orchestrator changes needed.
 
 export type Group =
-  | { kind: "user"; id: string; text: string }
+  | {
+      kind: "user";
+      id: string;
+      text: string;
+      /** Names of the files sent with this message. The bytes are in the
+       *  message the model got, never on the timeline — see `Session.addUser`. */
+      attachments?: string[];
+    }
   | {
       kind: "turn";
       turnId: string;
@@ -231,7 +238,16 @@ export function groupEvents(events: TimelineEvent[]): GroupingResult {
   for (const e of events) {
     if (e.kind === "user") {
       finalizeTurn();
-      groups.push({ kind: "user", id: e.id, text: e.body ?? "" });
+      const names = (e.meta as { attachments?: unknown } | undefined)
+        ?.attachments;
+      groups.push({
+        kind: "user",
+        id: e.id,
+        text: e.body ?? "",
+        ...(Array.isArray(names) && names.length > 0 && {
+          attachments: names.filter((n): n is string => typeof n === "string")
+        })
+      });
       continue;
     }
 

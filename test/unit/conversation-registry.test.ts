@@ -186,8 +186,9 @@ function fakeContext() {
 }
 
 /** A stored conversation on disk, the way HistoryService writes one.
- *  `updatedAt` is what `list()` sorts on, so anything asserting *which* chat
- *  gets resumed has to set it rather than rely on tie-break order. */
+ *  The user event's `ts` is what `list()` sorts on, so anything asserting
+ *  *which* chat gets resumed has to set it rather than rely on tie-break
+ *  order. It moves with `updatedAt` here so a session reads as one moment. */
 function writeStoredSession(
   id: string,
   updatedAt = 2,
@@ -205,7 +206,7 @@ function writeStoredSession(
       createdAt: 1,
       updatedAt,
       messages: [{ role: "user", content: body }],
-      timeline: [{ id: "e1", ts: 1, kind: "user", title: "user", body }]
+      timeline: [{ id: "e1", ts: updatedAt, kind: "user", title: "user", body }]
     })
   );
 }
@@ -606,6 +607,35 @@ describe("naming a conversation", () => {
     // A live conversation owns its own name: writing the file underneath it
     // would be overwritten by its next save, and its tab would keep the old one.
     expect(panels[0].title).toBe("Refactoring");
+  });
+
+  it("shows an open chat's new name in the list it posts back", async () => {
+    // The reported bug. A live conversation persists its name through the
+    // debounced save, and the list is re-read from disk the moment the rename
+    // is handled — 400 ms before the name gets there. The row came back with
+    // its old title and stayed wrong until the drawer was closed and reopened.
+    writeStoredSession("stored-1");
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const sidebar = fakeTarget();
+    const host = registry.create();
+    registry.useSidebar(sidebar.target as never, host);
+    host.attach(sidebar.target as never);
+    sidebar.webview.route(() => registry.sidebarConversation() as never);
+    sidebar.webview.deliver({ type: "loadSession", id: "stored-1" });
+    await settle();
+
+    sidebar.webview.deliver({
+      type: "renameSession",
+      id: "stored-1",
+      name: "Bugs"
+    });
+    await settle();
+
+    const row = lastList(sidebar.webview.sent)?.find(
+      (r) => r.id === "stored-1"
+    );
+    expect(row?.title).toBe("Bugs");
+    expect(row?.named).toBe(true);
   });
 
   it("keeps the name when the conversation is reopened", async () => {

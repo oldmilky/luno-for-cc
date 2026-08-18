@@ -30,6 +30,32 @@ export type ContentBlock =
       tool_use_id: string;
       content: string;
       is_error?: boolean;
+    }
+  /**
+   * An attached image, as the API takes one.
+   *
+   * The reference client sends exactly these four media types and no others —
+   * `image/jpeg`, `image/png`, `image/gif`, `image/webp` — so anything else has
+   * to be refused before it gets here rather than sent and rejected upstream.
+   */
+  | {
+      type: "image";
+      source: { type: "base64"; media_type: string; data: string };
+    }
+  /**
+   * An attached document: a PDF as base64, or a text file as its own text.
+   *
+   * Two source shapes on one block because that is what the API defines and
+   * what the reference sends — a PDF travels as `base64`, and a text file is
+   * decoded first and travels as `text` with `media_type: "text/plain"`. The
+   * `title` is what the model calls the file when it refers to it.
+   */
+  | {
+      type: "document";
+      source:
+        | { type: "base64"; media_type: string; data: string }
+        | { type: "text"; media_type: "text/plain"; data: string };
+      title?: string;
     };
 
 /**

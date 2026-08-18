@@ -129,7 +129,11 @@ const GIT_READONLY_SUBCOMMANDS: ReadonlySet<string> = new Set([
   "for-each-ref",
   "verify-commit",
   "count-objects",
-  "version"
+  "version",
+  // Answers "would git ignore this path, and which rule says so". It has no
+  // writing form at all — unlike `branch`, `tag` or `config`, which are read-
+  // only only with the right flag and are deliberately left out for that.
+  "check-ignore"
 ]);
 
 /** True for tool names that run a shell command (`Bash`, and defensively any
@@ -253,6 +257,17 @@ const SHELL_READONLY_HEADS: ReadonlySet<string> = new Set([
 const SHELL_ESCAPE_HATCHES = /[>`]|\$\(|<\(|(?<!&)&(?!&)/;
 
 /**
+ * Redirects that only point one file descriptor at another — `2>&1`, `>&2`.
+ *
+ * Removed before the hatches above are tested, because they open no file and
+ * write nowhere: they are the shape `cmd 2>&1 | head` puts on almost every
+ * command an agent writes, and the `>` in them was refusing read-only `git
+ * status` as if it were a redirect to disk. A redirect that names a target
+ * (`> out`, `>> log`, `&> both`) does not match this and is still refused.
+ */
+const FD_DUPLICATION = /\d?>&\d/g;
+
+/**
  * True when every segment of a shell command only reads.
  *
  * Pipelines and `&&` chains are split and each segment checked on its own, so
@@ -266,7 +281,7 @@ const SHELL_ESCAPE_HATCHES = /[>`]|\$\(|<\(|(?<!&)&(?!&)/;
  * is only ever consulted when both said no.
  */
 export function isReadOnlyShellCommand(command: string): boolean {
-  const trimmed = command.trim();
+  const trimmed = command.trim().replace(FD_DUPLICATION, "");
   if (!trimmed || SHELL_ESCAPE_HATCHES.test(trimmed)) return false;
 
   const segments = trimmed.split(/\|\||&&|[;|]/);

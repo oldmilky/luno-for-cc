@@ -50,6 +50,7 @@ export function renderGroup(
         key={g.id}
         id={g.id}
         text={g.text}
+        attachments={g.attachments}
         canRewind
         messagesAfter={messagesAfter}
         onRewindRequest={onRewindRequest}

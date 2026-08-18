@@ -31,9 +31,34 @@ export class Session {
     this.userTurnHook = fn;
   }
 
-  async addUser(text: string): Promise<TimelineEvent> {
-    this.messages.push({ role: "user", content: text });
-    const ev = this.emit({ kind: "user", title: "User", body: text });
+  /**
+   * @param attachments files the user picked, already in the API's block
+   *   shape. They go into the message the model reads and **not** into the
+   *   timeline body: a data URI on the timeline is megabytes of base64 in the
+   *   stored session and a wall of characters in the chat. What the bubble
+   *   needs is the names, which ride in `meta`.
+   */
+  async addUser(
+    text: string,
+    attachments: ContentBlock[] = []
+  ): Promise<TimelineEvent> {
+    // Attachments first, the typed words last — the order the reference sends
+    // and the one that reads correctly: the instruction comes after what it is
+    // about.
+    this.messages.push({
+      role: "user",
+      content: attachments.length
+        ? [...attachments, { type: "text" as const, text }]
+        : text
+    });
+    const ev = this.emit({
+      kind: "user",
+      title: "User",
+      body: text,
+      ...(attachments.length && {
+        meta: { attachments: attachments.map(attachmentLabel) }
+      })
+    });
     // Awaited so checkpoint capture (and any other onUserTurn hooks)
     // settles before the orchestrator starts firing tool calls.
     await this.userTurnHook?.(ev.id);
@@ -167,4 +192,18 @@ export class Session {
     this.messages = newMessages;
     return this.timeline.slice();
   }
+}
+
+/**
+ * What an attachment is called on the timeline.
+ *
+ * The name the user picked when there is one, and the media type when there is
+ * not — a pasted screenshot has no filename, and "image/png" is a better label
+ * for it than nothing at all.
+ */
+function attachmentLabel(block: ContentBlock): string {
+  if (block.type === "document" && block.title) return block.title;
+  if (block.type === "image") return block.source.media_type;
+  if (block.type === "document") return block.source.media_type;
+  return block.type;
 }

@@ -196,7 +196,7 @@ export function CommandPalette({
         group: "History",
         icon: "history",
         title: sess.title || "Untitled chat",
-        subtitle: relTime(sess.updatedAt),
+        subtitle: relTime(sess.lastUserAt),
         action: () => {
           onLoadSession(sess.id);
           onClose();

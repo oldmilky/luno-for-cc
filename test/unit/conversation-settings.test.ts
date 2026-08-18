@@ -37,14 +37,33 @@ const spawned = vi.hoisted(
  */
 const stream = vi.hoisted(() => ({ deltas: [] as unknown[], hang: false }));
 
+/**
+ * What `hasLiveWork()` answered at each turn's spawn decision, one entry per
+ * turn.
+ *
+ * The real provider asks exactly there, and a `true` means "keep the process
+ * you have" — so an option that only exists in argv (effort, ultracode,
+ * thinking, disabled skills, and the permission mode) does not reach the CLI
+ * on that turn.
+ */
+const liveWorkAtSpawn = vi.hoisted(() => [] as boolean[]);
+
 /** Every `setContext` the registry published, in order. */
 const contexts = vi.hoisted(() => [] as { key: string; value: unknown }[]);
 
 vi.mock("../../src/providers/factory.js", () => ({
-  createProvider: (opts: { permissionMode: string; effort: string }) => {
+  createProvider: (opts: {
+    permissionMode: string;
+    effort: string;
+    hasLiveWork?: () => boolean;
+  }) => {
     let live = { ...opts };
     return {
       id: "fake",
+      /** What the host answers when the real provider asks whether it may
+       *  replace the process. Recorded at the moment a turn reaches the spawn
+       *  decision, which is the only moment the answer is acted on. */
+      askedHasLiveWork: () => opts.hasLiveWork?.() ?? false,
       updateOptions(patch: Record<string, unknown>) {
         live = { ...live, ...patch };
       },
@@ -59,6 +78,7 @@ vi.mock("../../src/providers/factory.js", () => ({
       disposeSession() {},
       async *stream() {
         spawned.push(live);
+        liveWorkAtSpawn.push(opts.hasLiveWork?.() ?? false);
         for (const d of stream.deltas) yield d;
         if (stream.hang) await new Promise(() => {});
       }
@@ -177,6 +197,7 @@ const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
 
 beforeEach(() => {
   spawned.length = 0;
+  liveWorkAtSpawn.length = 0;
   stream.deltas.length = 0;
   stream.hang = false;
   contexts.length = 0;
@@ -452,7 +473,11 @@ describe("per-conversation settings", () => {
 // CLI resume id. Between them that left no route back to the conversation as it
 // stood — the messages were gone from disk and the CLI session behind them was
 // unreachable. These pin the safety copy that makes it recoverable.
-describe("rewind keeps the branch it leaves", () => {
+// Rewinding used to copy the whole conversation into a second history row
+// before truncating. Stop → Rewind is a normal working rhythm, not an
+// exceptional event, so one chat became five or ten rows of itself and the
+// list stopped being usable. The copy is gone: a rewind rewrites one chat.
+describe("rewind leaves no second copy of the chat", () => {
   /** Every stored conversation on disk, newest content first read fresh. */
   function storedSessions(): Array<Record<string, unknown>> {
     const dir = path.join(storage, "sessions");
@@ -499,27 +524,15 @@ describe("rewind keeps the branch it leaves", () => {
 
     const ids = userEventIds(surface.webview.sent);
     surface.webview.deliver({ type: "rewindTo", turnId: ids[1] });
-    // Longer than the save debounce: both the fork and the truncated original
-    // land through it.
+    // Longer than the save debounce, so the truncated original has landed.
     await new Promise((r) => setTimeout(r, 800));
     return { host, ids };
   }
 
-  it("leaves the discarded branch on disk as its own chat", async () => {
+  it("writes one chat, not the rewound one plus a copy", async () => {
     const { host } = await threeTurnsThenRewind();
 
-    const fork = storedSessions().find((s) => s.id !== host.sessionId);
-    expect(fork).toBeDefined();
-    // The whole conversation, not the part that survived the rewind.
-    const timeline = fork!.timeline as Array<{ kind: string }>;
-    expect(timeline.filter((e) => e.kind === "user")).toHaveLength(3);
-  });
-
-  it("names the fork so the list does not show two identical rows", async () => {
-    const { host } = await threeTurnsThenRewind();
-
-    const fork = storedSessions().find((s) => s.id !== host.sessionId);
-    expect(String(fork!.name)).toContain("before rewind");
+    expect(storedSessions().map((s) => s.id)).toEqual([host.sessionId]);
   });
 
   it("truncates the conversation the user is still in", async () => {
@@ -530,9 +543,9 @@ describe("rewind keeps the branch it leaves", () => {
     expect(timeline.filter((e) => e.kind === "user")).toHaveLength(1);
   });
 
-  // A rewind to the newest turn discards nothing, and a history row per no-op
-  // buries the forks that matter.
-  it("does not fork when nothing would be lost", async () => {
+  // A rewind to the newest turn discards nothing at all. It had its own branch
+  // in the copying code, so it keeps its own case here.
+  it("writes no extra chat when nothing would be lost", async () => {
     const registry = new ConversationRegistry(fakeContext() as never);
     const surface = fakeTarget();
     const host = registry.create();
@@ -549,6 +562,375 @@ describe("rewind keeps the branch it leaves", () => {
     expect(
       storedSessions().filter((s) => s.id !== host.sessionId)
     ).toHaveLength(0);
+  });
+
+  // Editing a sent message truncates exactly the same way and copied the chat
+  // through the same helper, so removing it from one path and not the other
+  // would leave half the duplicates in place.
+  it("writes one chat when a sent message is edited", async () => {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = fakeTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
+
+    for (const text of ["first", "second"]) {
+      surface.webview.deliver({ type: "prompt", text });
+      await settle();
+    }
+    const ids = userEventIds(surface.webview.sent);
+
+    surface.webview.deliver({
+      type: "editAt",
+      turnId: ids[0],
+      text: "first, but different",
+      revertFiles: false
+    });
+    await new Promise((r) => setTimeout(r, 800));
+
+    expect(storedSessions().map((s) => s.id)).toEqual([host.sessionId]);
+  });
+});
+
+// How full the context is belongs to one conversation, and the meter showing it
+// sits in a tree the sidebar swap does not remount. Published rather than left
+// on screen, `null` included — that is the half that takes the previous
+// occupant's number off.
+describe("the context figure follows the conversation", () => {
+  const USAGE_DELTA = {
+    type: "usage",
+    usage: {
+      inputTokens: 12_000,
+      outputTokens: 400,
+      contextTokens: 41_060,
+      contextWindow: 200_000
+    }
+  };
+
+  /** What the surface was last told about the context, or undefined if never. */
+  function lastContext(
+    sent: { type?: string }[]
+  ): { used: number; window: number } | null | undefined {
+    const posts = sent.filter((m) => m.type === "contextUsage") as {
+      context: { used: number; window: number } | null;
+    }[];
+    return posts.at(-1)?.context;
+  }
+
+  function writeStoredSession(
+    id: string,
+    extra: Record<string, unknown> = {}
+  ): void {
+    const dir = path.join(storage, "sessions");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, `${id}.json`),
+      JSON.stringify({
+        id,
+        title: "Stored chat",
+        createdAt: 1,
+        updatedAt: 2,
+        messages: [{ role: "user", content: "hi" }],
+        timeline: [
+          { id: "e1", ts: 1, kind: "user", title: "user", body: "hi" }
+        ],
+        ...extra
+      })
+    );
+  }
+
+  /**
+   * The session file once the debounced write has landed.
+   *
+   * Polled rather than slept past: a fixed wait for a 400 ms debounce is the
+   * shape that goes red on a loaded machine and green on a quiet one, and this
+   * suite runs two projects at once.
+   */
+  async function storedFile(id: string): Promise<Record<string, unknown>> {
+    const file = path.join(storage, "sessions", `${id}.json`);
+    for (let i = 0; i < 40; i++) {
+      if (fs.existsSync(file)) {
+        const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as Record<
+          string,
+          unknown
+        >;
+        if (parsed.context) return parsed;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error(`no context was written for ${id}`);
+  }
+
+  /** A sidebar conversation that has run one turn reporting its context. */
+  async function chatWithAContextFigure() {
+    stream.deltas = [USAGE_DELTA];
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = fakeTarget();
+    const host = registry.create();
+    registry.useSidebar(surface.target as never, host);
+    host.attach(surface.target as never);
+    surface.webview.route(() => registry.sidebarConversation() as never);
+    surface.webview.deliver({ type: "prompt", text: "hello" });
+    await settle();
+    return { registry, surface, host };
+  }
+
+  it("publishes what the CLI reported for the chat that ran the turn", async () => {
+    const { surface } = await chatWithAContextFigure();
+
+    expect(lastContext(surface.webview.sent)).toEqual({
+      used: 41_060,
+      window: 200_000
+    });
+  });
+
+  it("clears it when the surface takes a different conversation", async () => {
+    // The reported bug: switching chats left the previous one's context on the
+    // meter, so the number read as belonging to the chat now on screen.
+    const { registry, surface } = await chatWithAContextFigure();
+    writeStoredSession("stored-elsewhere");
+
+    await registry.showInSidebar("stored-elsewhere");
+    await settle();
+
+    expect(lastContext(surface.webview.sent)).toBeNull();
+  });
+
+  it("clears it on New Chat", async () => {
+    const { registry, surface } = await chatWithAContextFigure();
+
+    registry.startNewSidebarConversation();
+    await settle();
+
+    expect(lastContext(surface.webview.sent)).toBeNull();
+  });
+
+  it("clears it when a stored chat is loaded into this conversation", async () => {
+    const { surface } = await chatWithAContextFigure();
+    writeStoredSession("stored-elsewhere");
+
+    surface.webview.deliver({ type: "loadSession", id: "stored-elsewhere" });
+    await settle();
+
+    expect(lastContext(surface.webview.sent)).toBeNull();
+  });
+
+  it("saves the figure with the conversation", async () => {
+    const { host } = await chatWithAContextFigure();
+
+    expect((await storedFile(host.sessionId)).context).toEqual({
+      used: 41_060,
+      window: 200_000
+    });
+  });
+
+  it("restores it for a chat that will be resumed", async () => {
+    // `--resume` carries the conversation into the next process, so the figure
+    // still describes what the model is holding — the meter can open on it
+    // rather than on nothing until the next turn reports.
+    writeStoredSession("resumable", {
+      resumeId: "cli-session-1",
+      context: { used: 128_000, window: 200_000 }
+    });
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = fakeTarget();
+    const host = registry.create();
+    host.attach(surface.target as never, { adoptSessionId: "resumable" });
+    surface.webview.route(() => host as never);
+    await settle();
+
+    expect(lastContext(surface.webview.sent)).toEqual({
+      used: 128_000,
+      window: 200_000
+    });
+  });
+
+  it("does not restore it for a chat with no resume id", async () => {
+    // Nothing will pick this conversation back up inside the CLI, so its next
+    // turn opens a fresh session and the stored figure describes a context the
+    // model is not holding. Showing it would be the same wrong number the swap
+    // used to leave behind, only older.
+    writeStoredSession("not-resumable", {
+      context: { used: 128_000, window: 200_000 }
+    });
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = fakeTarget();
+    const host = registry.create();
+    host.attach(surface.target as never, { adoptSessionId: "not-resumable" });
+    surface.webview.route(() => host as never);
+    await settle();
+
+    expect(lastContext(surface.webview.sent)).toBeNull();
+  });
+});
+
+// A question card is a permission prompt, and the host replays the prompts a
+// conversation still has open onto whichever surface takes it back. Which makes
+// "still open" the load-bearing word: an answered one replayed is a quiz the
+// user has already done, asked again.
+describe("an answered prompt is not raised a second time", () => {
+  const QUESTION = {
+    type: "permission_request",
+    permission: {
+      requestId: "req-1",
+      toolName: "AskUserQuestion",
+      toolUseId: "tu-1",
+      input: {
+        questions: [
+          {
+            question: "Which library?",
+            header: "Library",
+            options: [{ label: "date-fns" }, { label: "dayjs" }]
+          }
+        ]
+      },
+      suggestions: []
+    }
+  };
+
+  function prompts(sent: { type?: string }[]): { type?: string }[] {
+    return sent.filter((m) => m.type === "permissionRequest");
+  }
+
+  function writeStoredSession(id: string): void {
+    const dir = path.join(storage, "sessions");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, `${id}.json`),
+      JSON.stringify({
+        id,
+        title: "Stored chat",
+        createdAt: 1,
+        updatedAt: 2,
+        messages: [{ role: "user", content: "hi" }],
+        timeline: [{ id: "e1", ts: 1, kind: "user", title: "user", body: "hi" }]
+      })
+    );
+  }
+
+  /** A sidebar conversation parked on a question, the way a real one is: the
+   *  turn is still open, because the CLI is blocked on the answer. */
+  async function chatParkedOnAQuestion() {
+    stream.deltas = [QUESTION];
+    stream.hang = true;
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = fakeTarget();
+    const host = registry.create();
+    registry.useSidebar(surface.target as never, host);
+    host.attach(surface.target as never);
+    surface.webview.route(() => registry.sidebarConversation() as never);
+    surface.webview.deliver({ type: "prompt", text: "brainstorm this" });
+    await settle();
+    return { registry, surface, host };
+  }
+
+  /** Away to another chat and back — the swap that replays the live state. */
+  async function switchAwayAndBack(
+    registry: InstanceType<typeof ConversationRegistry>,
+    sessionId: string
+  ) {
+    writeStoredSession("somewhere-else");
+    await registry.showInSidebar("somewhere-else");
+    await settle();
+    await registry.showInSidebar(sessionId);
+    await settle();
+  }
+
+  it("raises the question once while it waits", async () => {
+    const { surface } = await chatParkedOnAQuestion();
+
+    expect(prompts(surface.webview.sent)).toHaveLength(1);
+  });
+
+  it("puts an unanswered question back when the chat returns", async () => {
+    // The other half of the same mechanism, and the reason it cannot simply be
+    // deleted: the CLI is still blocked on this one, so a surface that does not
+    // get it back is a turn nobody can unblock.
+    const { registry, surface, host } = await chatParkedOnAQuestion();
+
+    await switchAwayAndBack(registry, host.sessionId);
+
+    expect(prompts(surface.webview.sent)).toHaveLength(2);
+  });
+
+  it("does not put back one the user has already answered", async () => {
+    const { registry, surface, host } = await chatParkedOnAQuestion();
+    surface.webview.deliver({
+      type: "permissionResponse",
+      requestId: "req-1",
+      behavior: "allow",
+      updatedInput: {
+        questions: QUESTION.permission.input.questions,
+        answers: { "Which library?": "date-fns" }
+      }
+    });
+    await settle();
+
+    await switchAwayAndBack(registry, host.sessionId);
+
+    expect(prompts(surface.webview.sent)).toHaveLength(1);
+  });
+});
+
+// `ensureSession` will not replace a running CLI process while the host says
+// there is live work in it, because a replacement takes every background agent
+// with it. Everything that only exists in argv — effort, ultracode, thinking,
+// disabled skills, and the permission mode — therefore waits for a turn that
+// finds the process idle. Which turn is that?
+describe("what the host says about live work when a turn asks for a process", () => {
+  async function twoTurns() {
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = fakeTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
+
+    surface.webview.deliver({ type: "prompt", text: "first" });
+    await settle();
+    surface.webview.deliver({ type: "prompt", text: "second" });
+    await settle();
+    return { host, surface };
+  }
+
+  it("says no live work on an ordinary turn, so an argv change can land", async () => {
+    await twoTurns();
+
+    // Both turns. If either says `true`, a permission mode the user picked mid
+    // conversation never reaches the CLI on that turn — the process keeps the
+    // mode it was spawned with and goes on prompting.
+    expect(liveWorkAtSpawn).toEqual([false, false]);
+  });
+
+  it("still says yes while a background agent is inside the process", async () => {
+    // The other half, and the reason this cannot simply be `false`: an agent
+    // launched by an earlier turn lives in the process and dies with it, 10 ms
+    // after a replacement. That one is worth deferring an argv change for.
+    stream.deltas = [
+      {
+        type: "task",
+        task: {
+          phase: "started",
+          taskId: "task-1",
+          toolUseId: "toolu_1",
+          subagentType: "Explore",
+          description: "Find the callers",
+          prompt: "Search src for callers."
+        }
+      }
+    ];
+    const registry = new ConversationRegistry(fakeContext() as never);
+    const surface = fakeTarget();
+    const host = registry.create();
+    host.attach(surface.target as never);
+    surface.webview.route(() => host as never);
+
+    surface.webview.deliver({ type: "prompt", text: "launch an agent" });
+    await settle();
+    stream.deltas = [];
+    surface.webview.deliver({ type: "prompt", text: "and now change effort" });
+    await settle();
+
+    expect(liveWorkAtSpawn.at(-1)).toBe(true);
   });
 });
 

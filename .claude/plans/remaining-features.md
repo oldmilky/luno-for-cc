@@ -16,8 +16,7 @@ is below, corrected where the code disagreed with them.
 Closed over 2026-07-27, listed because both audits still name several of them as
 open: the `luno.chatFocused` context key (Shift+Tab could not fire at all),
 `luno.maxTokens` (read and ignored), the dead base system prompt, checkpoint
-persistence across a reload, `@`-mention paths inside a worktree, a
-non-destructive rewind that keeps the discarded branch, `test/` inside the type
+persistence across a reload, `@`-mention paths inside a worktree, `test/` inside the type
 gate, editor diagnostics and the selection reaching the model, autosave,
 `.gitignore` in file search, an output channel with `LUNO: Show Logs`, declared
 workspace trust, the slash-command popover, and the compaction marker with a
@@ -256,6 +255,17 @@ default no.
 - **README screenshots** — five were deleted and never re-shot. Deliberately
   deferred until the functional layer settles; `.vscodeignore` already keeps
   images out of the VSIX.
+
+## Reversed on purpose — do not re-add
+
+**Rewind no longer keeps the branch it discards** (2026-08-17). It used to copy
+the whole conversation into a second history row before truncating. Stop →
+Rewind is a normal working rhythm rather than an exceptional event, so a single
+chat accumulated five to ten rows of itself and the list stopped being usable —
+the cost of the safety copy was paid every time, the benefit almost never.
+Removed from both truncating paths, `rewindTo` and `editAt`; `forkCurrent` and
+`forkName` went with it. A rewind is now destructive, which is what both
+confirmation modals had been saying all along.
 
 ## Deliberately not chasing
 

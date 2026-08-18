@@ -24,6 +24,7 @@ import {
   useRef,
   useState
 } from "react";
+import { UndoStack } from "./undo-stack";
 import s from "./RichEditor.module.scss";
 
 export interface CodeInsert {
@@ -42,6 +43,10 @@ export interface RichEditorHandle {
    *  The DOM is the source of truth after mount, so a caller that needs to put
    *  text *in* has no other way to reach it. */
   setText(text: string): void;
+  /** Record the current state before the caller mutates the editor's DOM
+   *  itself. Anything spliced in from outside is invisible to undo without
+   *  it — the editor sees no `beforeinput` for an edit it did not make. */
+  recordUndoPoint(): void;
 }
 
 export interface RichEditorProps {
@@ -69,6 +74,15 @@ export interface RichEditorProps {
    * attachment chips above the composer).
    */
   onImagePaste?: (files: File[]) => void;
+  /**
+   * First look at every key, before this editor acts on any of it.
+   *
+   * The primitive owns what editing means — Enter, Backspace at a pill, the
+   * formatting chords it refuses. What a key means to the *surface* around it
+   * is not its business, so a caller that wants one calls `preventDefault` and
+   * the editor stands down.
+   */
+  onKeyDown?: (e: KeyboardEvent<HTMLDivElement>) => void;
   placeholder?: string;
 }
 
@@ -86,6 +100,7 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(
       onOpenBadge,
       onOpenMention,
       onImagePaste,
+      onKeyDown,
       useCtrlEnterToSend = false,
       placeholder = "Ask, edit, or plan anything. Type @ to mention a file. ⌘U to insert selection."
     },
@@ -93,6 +108,7 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(
   ) {
     const ref = useRef<HTMLDivElement>(null);
     const [isEmpty, setIsEmpty] = useState(initialText.trim().length === 0);
+    const undo = useRef(new UndoStack());
 
     // Mount: render the initial markdown (parsing fenced blocks back into rich
     // code blocks so a reload preserves what the user already had).
@@ -163,13 +179,25 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(
       clear: () => {
         if (!ref.current) return;
         ref.current.innerHTML = "";
+        // The history belonged to a message that has been sent. Undoing back
+        // into it would put a sent message back in the box.
+        undo.current.reset();
         setIsEmpty(true);
         onChange("");
       },
       serialize: () => (ref.current ? serialize(ref.current) : ""),
+      /** Take the state before an edit the caller is about to make itself —
+       *  a mention pill spliced in from the composer, say. Without it that
+       *  edit is invisible to undo. */
+      recordUndoPoint: () => {
+        if (ref.current) undo.current.record(ref.current);
+      },
       setText: (text: string) => {
         const el = ref.current;
         if (!el) return;
+        // Recorded, not reset: recalling a previous message with ArrowUp is an
+        // edit like any other, and Ctrl+Z should put back what was there.
+        undo.current.record(el);
         el.innerHTML = "";
         if (text) renderInitial(el, text);
         const next = serialize(el);
@@ -184,6 +212,31 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(
       const text = serialize(ref.current);
       setIsEmpty(text.trim().length === 0);
       onChange(text);
+    };
+
+    /**
+     * Take the state before an edit that is about to happen.
+     *
+     * Called on `beforeinput` rather than `input` — by the time `input` fires
+     * the edit is already in the DOM, and what an undo stack needs is the
+     * state it is undoing *to*.
+     */
+    const recordBeforeEdit = () => {
+      if (ref.current) undo.current.record(ref.current);
+    };
+
+    /** Step the history and republish, since the DOM moved without an edit
+     *  event to announce it. */
+    const stepHistory = (direction: "undo" | "redo"): boolean => {
+      const el = ref.current;
+      if (!el) return false;
+      const moved =
+        direction === "undo" ? undo.current.undo(el) : undo.current.redo(el);
+      if (!moved) return false;
+      const text = serialize(el);
+      setIsEmpty(text.trim().length === 0);
+      onChange(text);
+      return true;
     };
 
     /**
@@ -224,11 +277,15 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(
     const handleCut = (e: ClipboardEvent<HTMLDivElement>) => {
       const text = serializeSelectionIfRich();
       if (text === null || !text) return; // plain text → native cut runs
+      // `beforeinput` does not fire for a clipboard action this handler
+      // prevents, so the state before it is taken here or the edit is not
+      // undoable.
+      recordBeforeEdit();
       e.preventDefault();
       e.clipboardData.setData("text/plain", text);
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed) {
-        sel.getRangeAt(0).deleteContents();
+        deleteSelectionUndoable(() => sel.getRangeAt(0).deleteContents());
         if (ref.current) {
           const out = serialize(ref.current);
           setIsEmpty(out.trim().length === 0);
@@ -246,6 +303,7 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(
     const handlePaste = (e: ClipboardEvent<HTMLDivElement>) => {
       const editor = ref.current;
       if (!editor) return;
+      recordBeforeEdit();
 
       // Clipboard images (Cmd+V of a screenshot, image copied from a browser,
       // etc.) — pull them out before the browser embeds them inline. We walk
@@ -309,6 +367,35 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(
     const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
       if (e.nativeEvent.isComposing) return;
 
+      // The owner gets first refusal — it is the only one that knows what the
+      // surrounding surface wants from a key. Anything it handles is done.
+      onKeyDown?.(e);
+      if (e.defaultPrevented) return;
+
+      // Chromium runs bold/italic/underline itself in any contenteditable, and
+      // this one is plain text: the tags land in the DOM, survive on screen,
+      // and are dropped on the way out because `serialize` walks text nodes.
+      // Measured — Ctrl+B then italic then underline left
+      // `<b><i><u>plain text</u></i></b>` in the editor and sent `plain text`.
+      // Formatting the user cannot see the effect of is worse than none.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        const k = e.key.toLowerCase();
+        if (k === "b" || k === "i" || k === "u") {
+          e.preventDefault();
+          return;
+        }
+        // Undo and redo are this editor's, not the browser's and not the
+        // host's. Swallowed whether or not there is anything to step to: in a
+        // VS Code webview an unclaimed Ctrl+Z reaches the workbench, and what
+        // it does there is not what the person pressing it meant.
+        if (k === "z" || k === "y") {
+          e.preventDefault();
+          const redo = k === "y" || e.shiftKey;
+          stepHistory(redo ? "redo" : "undo");
+          return;
+        }
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
         // Newline inside a code body; submit otherwise.
         if (cursorInsideCodeBody()) return;
@@ -350,6 +437,7 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(
           suppressContentEditableWarning
           spellCheck={false}
           onInput={handleInput}
+          onBeforeInput={recordBeforeEdit}
           onKeyDown={handleKeyDown}
           onClick={handleClick}
           onCopy={handleCopy}
@@ -683,11 +771,52 @@ function insertParsedAtSelection(container: HTMLElement, text: string): void {
   const trailingSpace = document.createTextNode(" ");
   fragment.appendChild(trailingSpace);
 
-  range.insertNode(fragment);
-  range.setStartAfter(trailingSpace);
-  range.collapse(true);
-  sel?.removeAllRanges();
-  sel?.addRange(range);
+  // Serialised and re-parsed by `insertHTML` rather than inserted as nodes,
+  // which is what puts the edit on the undo stack. The caret lands after the
+  // inserted run on its own — `insertHTML` leaves it there.
+  const holder = document.createElement("div");
+  holder.appendChild(fragment.cloneNode(true));
+  insertHtmlUndoable(holder.innerHTML, () => {
+    range.insertNode(fragment);
+    range.setStartAfter(trailingSpace);
+    range.collapse(true);
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  });
+}
+
+/**
+ * Insert nodes so that Ctrl+Z can take them back out again.
+ *
+ * `range.insertNode` and `range.deleteContents` are invisible to the browser's
+ * undo stack. Mixing them with ordinary typing — which *is* on that stack —
+ * leaves the two out of step, and an undo then splices fragments of different
+ * states together: measured, a composer holding `keep PASTED ` came back from
+ * one Ctrl+Z as `PASTED hello world`, a string that never existed.
+ *
+ * `execCommand` is the only API that writes into that stack. It is soft-
+ * deprecated and has no replacement for this; the webview is always Chromium,
+ * which still implements both commands. The Range path stays as the fallback
+ * for the day it does not, because a paste that cannot be undone is still
+ * better than a paste that does not happen.
+ */
+function insertHtmlUndoable(html: string, fallback: () => void): void {
+  try {
+    if (document.execCommand("insertHTML", false, html)) return;
+  } catch {
+    // falls through
+  }
+  fallback();
+}
+
+/** Delete the selection the same way, and for the same reason. */
+function deleteSelectionUndoable(fallback: () => void): void {
+  try {
+    if (document.execCommand("delete")) return;
+  } catch {
+    // falls through
+  }
+  fallback();
 }
 
 function buildFragmentFromMarkdown(text: string): DocumentFragment {
@@ -912,7 +1041,14 @@ function handleBackspaceAtBoundary(container: HTMLElement | null): boolean {
     prev.nodeType === Node.ELEMENT_NODE &&
     (prev as HTMLElement).classList.contains(BADGE_CLASS)
   ) {
-    prev.remove();
+    // Selected and then deleted, rather than removed from the DOM: a node that
+    // simply disappears is not on the undo stack, and Backspace is the one
+    // edit a user expects Ctrl+Z to take back.
+    const kill = document.createRange();
+    kill.selectNode(prev);
+    sel.removeAllRanges();
+    sel.addRange(kill);
+    deleteSelectionUndoable(() => prev.remove());
     return true;
   }
   return false;

@@ -9,6 +9,7 @@ import { Session } from "../core/session.js";
 import { Orchestrator } from "../core/orchestrator.js";
 import { DeltaQueue } from "../core/delta-queue.js";
 import {
+  ContentBlock,
   isTerminalTaskStatus,
   PermissionMode,
   PermissionBehavior,
@@ -60,8 +61,8 @@ import { buildWebviewHtml } from "./webview-html.js";
 import {
   asStringArray,
   cleanSelection,
+  cliSessionName,
   compactionSummary,
-  forkName,
   subagentTitle,
   worktreeName
 } from "./conversation-format.js";
@@ -72,6 +73,7 @@ import {
   num,
   obj,
   oneOf,
+  readAttachments,
   str,
   type HandlerTable,
   type InboundType,
@@ -367,7 +369,21 @@ export class ConversationHost {
    *  another conversation while it happened. */
   private busy = false;
   private streamed = "";
-  private pendingRequest?: unknown;
+  /**
+   * Approval prompts nobody has answered yet, by request id.
+   *
+   * A map rather than the newest one, because `show()` replays these onto a
+   * surface that was showing another conversation: holding one meant a second
+   * prompt overwrote the first, and the first was then unanswerable from a
+   * surface that never got it back. A background agent asking while the main
+   * turn is already parked is the ordinary way two are outstanding.
+   *
+   * An entry leaves the moment the prompt stops needing an answer — answered
+   * here, withdrawn by the CLI, or the turn ended. Leaving it is what put an
+   * already-answered question card back on screen every time the user switched
+   * chats and switched back.
+   */
+  private readonly pendingRequests = new Map<string, unknown>();
   /** Every approval this turn has asked for, by id. Read only when the user
    *  answers with "always", and cleared with the turn. */
   private readonly askedPermissions = new Map<
@@ -633,11 +649,16 @@ export class ConversationHost {
    * Persisted immediately rather than on the next turn: a chat named and then
    * left alone is the normal case — the user names it precisely so they can
    * walk away from it.
+   *
+   * Immediately means *awaited*, not scheduled. The caller re-reads the history
+   * list from disk the moment this returns, and a debounced write lands 400 ms
+   * after that — which is how the drawer kept showing the old title until it was
+   * reopened.
    */
-  setName(name: string | undefined): void {
+  async setName(name: string | undefined): Promise<void> {
     this.sessions.name = name && name.length > 0 ? name : undefined;
     this.refreshSurface();
-    this.scheduleSave();
+    await this.sessions.saveNow();
   }
 
   /**
@@ -686,7 +707,7 @@ export class ConversationHost {
     } else if (m.type === "turnEnd") {
       this.busy = false;
       this.streamed = "";
-      this.pendingRequest = undefined;
+      this.pendingRequests.clear();
       this.askedPermissions.clear();
     } else if (m.type === "delta" && m.delta?.type === "text") {
       this.streamed += m.delta.text ?? "";
@@ -696,23 +717,24 @@ export class ConversationHost {
       const kind = (msg as { event?: { kind?: string } }).event?.kind;
       if (kind === "assistant" || kind === "tool_call") this.streamed = "";
     } else if (m.type === "permissionRequest") {
-      const request = (msg as { request?: unknown }).request;
-      this.pendingRequest = request;
-      // Kept by id as well, because "always allow" has to derive the grant
-      // from what the CLI actually asked for. Taking the webview's word for
-      // what it was showing would make the panel the authority on what it is
-      // being granted, and parallel tool calls mean the newest request is not
-      // necessarily the one being answered.
-      const asked = request as PermissionRequestPayload | undefined;
-      if (asked?.requestId) this.askedPermissions.set(asked.requestId, asked);
+      // Kept twice, for two different jobs. `pendingRequests` is what a surface
+      // taking this conversation back is shown; `askedPermissions` is what
+      // "always allow" derives the grant from, because taking the webview's
+      // word for what it was showing would make the panel the authority on
+      // what it is being granted. The second outlives the first: a prompt is
+      // answered, and only then is the grant read off it.
+      const asked = (msg as { request?: unknown }).request as
+        PermissionRequestPayload | undefined;
+      if (asked?.requestId) {
+        this.pendingRequests.set(asked.requestId, asked);
+        this.askedPermissions.set(asked.requestId, asked);
+      }
     } else if (m.type === "permissionResolved") {
       // Matched by id: a withdrawn request must not take a *different* prompt
       // off the surface with it. Answering the phone's question while another
       // card waits here is an ordinary thing to do.
       const gone = (msg as { requestId?: string }).requestId;
-      const held = (this.pendingRequest as { requestId?: string } | undefined)
-        ?.requestId;
-      if (gone && gone === held) this.pendingRequest = undefined;
+      if (gone) this.pendingRequests.delete(gone);
     }
   }
 
@@ -733,6 +755,28 @@ export class ConversationHost {
    */
   get hasLiveWork(): boolean {
     return this.activeTurn !== undefined || this.subagents.openCount > 0;
+  }
+
+  /**
+   * Whether replacing the CLI process would destroy work — asked by a turn
+   * that is about to be given one.
+   *
+   * Deliberately **not** `hasLiveWork`. That one counts the active turn, and
+   * the turn asking this question *is* the active turn: it has written nothing
+   * to the process yet, so replacing it beforehand costs nothing. Answering
+   * `hasLiveWork` here was true on every single turn, so `ensureSession` always
+   * took the "defer" branch — and every option that exists only in argv
+   * (effort, ultracode, thinking, disabled skills, and **the permission
+   * mode**) never reached the CLI for as long as the conversation stayed open.
+   * Picking Bypass mid-chat left the process in the mode it was spawned with,
+   * still asking, with only the pending marker on the chip to say so.
+   *
+   * Background agents are the thing worth keeping: they live inside the
+   * process, outlive the turn that launched them, and a replacement takes them
+   * with it 10 ms later — measured.
+   */
+  get replacementWouldCostWork(): boolean {
+    return this.subagents.openCount > 0;
   }
 
   /** Whether some surface is currently showing this conversation. */
@@ -795,11 +839,11 @@ export class ConversationHost {
         delta: { type: "text", text: this.streamed }
       });
     }
-    if (this.pendingRequest) {
-      void webview.postMessage({
-        type: "permissionRequest",
-        request: this.pendingRequest
-      });
+    // Every prompt still waiting, not just the newest: each one blocks the CLI
+    // until it is answered, and one this surface never gets back is one nobody
+    // can answer.
+    for (const request of this.pendingRequests.values()) {
+      void webview.postMessage({ type: "permissionRequest", request });
     }
     // The live half of every card this conversation still has open. The surface
     // just cleared what the previous occupant left there, and these outlive a
@@ -816,6 +860,16 @@ export class ConversationHost {
       type: "remoteControl",
       status: this.remoteControl
     });
+    // Same reasoning, same swap: the meter keeps whatever context figure it was
+    // last given, and `null` is what takes the previous chat's off screen.
+    void webview.postMessage({
+      type: "contextUsage",
+      context: this.sessions.context ?? null
+    });
+    // The limits panel is account-wide, but it is only as fresh as the last
+    // thing that pushed it. Refreshed on the swap so the meter is right when
+    // the user opens it, rather than whenever a turn last happened to end.
+    void broadcastUsage(this.post, this.shared.rateLimits);
     this.refreshSurface();
   }
 
@@ -860,7 +914,10 @@ export class ConversationHost {
       fallbackModels: config.get<string[]>("fallbackModels", []),
       maxBudgetUsd: config.get<number>("maxBudgetUsd", 0),
       safeMode: config.get<boolean>("safeMode", false),
-      sessionName: this.session.title
+      // Not `session.title` raw. That is the *stored* title — `"Untitled"` on a
+      // fresh chat — and since 2.1.224 this name is the address another session
+      // sends a message to, not just what `/resume` prints.
+      sessionName: cliSessionName(this.name, deriveTitle(this.session.timeline))
     };
   }
 
@@ -988,6 +1045,7 @@ export class ConversationHost {
       // composer shows the defaults while the turn would use something else.
       void this.publishAuthState();
       void broadcastUsage(this.post, this.shared.rateLimits);
+      this.publishContext();
       // The bridge outlives the surface: reloading the panel must not make a
       // conversation the user's phone is connected to look disconnected.
       if (this.remoteControl.state !== "off") {
@@ -1163,6 +1221,7 @@ export class ConversationHost {
     this.releaseSessionProvider();
     this.orchestrator = undefined;
     this.post({ type: "reset", sessionId: this.session.id });
+    this.publishContext();
   }
 
   async sendUserMessage(text: string) {
@@ -1385,7 +1444,7 @@ export class ConversationHost {
   private readonly handlers: HandlerTable = {
     // ── Chat + turn lifecycle ──────────────────────────────────
     prompt: async (m) => {
-      await this.handlePrompt(String(m.text ?? ""));
+      await this.handlePrompt(String(m.text ?? ""), readAttachments(m));
     },
     cancel: () => this.abortTurn(),
     // Through the registry, never straight to `newSession`: this button used to
@@ -1397,6 +1456,13 @@ export class ConversationHost {
       const behavior = oneOf(m, "behavior", ["allow", "deny"] as const);
       if (!requestId || !behavior) return;
       this.awaitingApproval = false;
+      // This prompt has been answered, so it is no longer part of what a
+      // surface has to be shown when it takes this conversation back. Nothing
+      // else retires it: the CLI sends `permission_resolved` only when *it*
+      // withdraws a request, never for one the user answered here — so without
+      // this the card came back, already answered, on every switch away and
+      // back for the rest of the turn.
+      this.pendingRequests.delete(requestId);
       this.refreshSurface();
       if (behavior === "allow" && m.always === true) {
         await this.grantFromRequest(
@@ -1923,6 +1989,19 @@ export class ConversationHost {
     }
   }
 
+  /**
+   * Tell the surface how full *this* conversation's context is.
+   *
+   * Sent on every path that changes which conversation the surface is showing,
+   * and sent even when there is no figure — `null` is what clears the previous
+   * occupant's. The meter lives in a tree the sidebar swap does not remount, so
+   * silence there reads as "still the same number", which is how one chat came
+   * to show another's context.
+   */
+  private publishContext(): void {
+    this.post({ type: "contextUsage", context: this.sessions.context ?? null });
+  }
+
   /** The stored chats, each told whether a conversation is open on it. Only
    *  the registry knows that, so the annotation happens here rather than in the
    *  file store. */
@@ -1940,13 +2019,16 @@ export class ConversationHost {
    * A live conversation owns its own name — writing the file underneath it
    * would be overwritten by its next save — so it is asked to rename itself.
    * Only a chat nobody holds is patched on disk, and `updatedAt` is left alone
-   * there: naming a chat is not working in it, and bumping it would reorder the
-   * list under the user's cursor.
+   * there: naming a chat is not working in it, and that field is what says when
+   * it last was.
+   *
+   * Both branches are awaited because the caller re-publishes the list straight
+   * after, and a name still in flight publishes as the old one.
    */
   private async renameConversation(id: string, name: string): Promise<void> {
     const live = this.shared.conversationFor(id);
     if (live) {
-      live.setName(name);
+      await live.setName(name);
       return;
     }
     const stored = await this.history.load(id);
@@ -1994,6 +2076,9 @@ export class ConversationHost {
       title: stored.title,
       sessionId: this.session.id
     });
+    // `adopt` dropped the figure with the conversation it belonged to; this is
+    // what tells the meter, which is not remounted by a load either.
+    this.publishContext();
   }
 
   // ── Models / skills / search ─────────────────────────────────
@@ -2002,7 +2087,6 @@ export class ConversationHost {
 
   private async rewindTo(turnId: string) {
     this.abortTurn();
-    await this.forkBeforeTruncating(turnId);
     // Truncate the conversation and clear the UI FIRST. File restore (below)
     // can be slow or throw on a large/dirty tree, and its rejection used to
     // be swallowed by the fire-and-forget message handler — which silently
@@ -2012,6 +2096,11 @@ export class ConversationHost {
     // regardless of what happens during file restore.
     const surviving = this.session.truncateAt(turnId);
     this.resumeId = undefined;
+    // The figure measured a conversation that no longer exists, and dropping
+    // the resume id means the next turn starts a CLI session that has not
+    // reported one yet.
+    this.sessions.context = undefined;
+    this.publishContext();
     this.releaseSessionProvider();
 
     // If the user is rewinding to a proceeded plan revision, unlock it so
@@ -2064,41 +2153,10 @@ export class ConversationHost {
     }
   }
 
-  /**
-   * Keep the branch a rewind is about to discard.
-   *
-   * Rewinding truncated the timeline, rewrote the file and dropped `resumeId`,
-   * which between them left no way back to the conversation as it stood — not
-   * the messages, not the CLI session behind them. The copy goes into history
-   * as its own chat, so the user can open it and carry on from where they were.
-   *
-   * Skipped when nothing after the target would be lost: a rewind to the last
-   * turn is a no-op, and a history row per no-op is clutter that makes the real
-   * forks harder to find.
-   */
-  private async forkBeforeTruncating(turnId: string): Promise<void> {
-    const timeline = this.session.timeline;
-    const idx = timeline.findIndex((e) => e.id === turnId);
-    if (idx === -1 || idx === timeline.length - 1) return;
-
-    try {
-      const forkId = await this.sessions.forkCurrent(
-        `${this.session.id}-fork-${Date.now()}`,
-        forkName(this.sessions.name, timeline)
-      );
-      if (forkId) await this.publishHistory();
-    } catch (err) {
-      // A rewind the user asked for must still happen. Losing the safety copy
-      // is worth saying out loud, but not worth refusing the operation over.
-      logError("[luno] could not fork before rewind:", err);
-    }
-  }
-
   private async editAt(turnId: string, text: string, revertFiles: boolean) {
     const trimmed = text.trim();
     if (!trimmed) return;
     this.abortTurn();
-    await this.forkBeforeTruncating(turnId);
     if (revertFiles && this.checkpoints?.hasCheckpoint(turnId)) {
       try {
         await this.checkpoints.restore(turnId);
@@ -2108,20 +2166,37 @@ export class ConversationHost {
     }
     const surviving = this.session.truncateAt(turnId);
     this.resumeId = undefined;
+    // Same as a rewind: this truncates too, and the figure it leaves behind
+    // measured the conversation as it was before the edit.
+    this.sessions.context = undefined;
+    this.publishContext();
     this.releaseSessionProvider();
     this.post({ type: "rewind", events: surviving });
     await this.handlePrompt(trimmed);
   }
 
-  private async handlePrompt(text: string) {
+  private async handlePrompt(text: string, attachments: ContentBlock[] = []) {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    // An attachment with nothing typed is a message. "Look at this" is the
+    // whole of what a screenshot says, and refusing it for having no words was
+    // the old string-only path speaking.
+    if (!trimmed && attachments.length === 0) return;
     // Sending never queues. A turn already in flight takes the message as an
     // addition: the CLI picks it off stdin at the next tool boundary and
     // continues the same turn, which is what makes a correction land while the
     // work it corrects is still happening rather than after it.
-    if (this.activeTurn && (await this.steerIntoRunningTurn(trimmed))) return;
-    await this.runTurnReportingFailure(trimmed);
+    //
+    // Steering carries text and nothing else: `steer` writes a plain message
+    // into a process mid-turn, and an attachment belongs to a turn that is
+    // being *opened*. A message with one starts its own.
+    if (
+      attachments.length === 0 &&
+      this.activeTurn &&
+      (await this.steerIntoRunningTurn(trimmed))
+    ) {
+      return;
+    }
+    await this.runTurnReportingFailure(trimmed, attachments);
   }
 
   /**
@@ -2144,9 +2219,12 @@ export class ConversationHost {
     return true;
   }
 
-  private async runTurnReportingFailure(text: string): Promise<void> {
+  private async runTurnReportingFailure(
+    text: string,
+    attachments: ContentBlock[] = []
+  ): Promise<void> {
     try {
-      await this.runPromptTurn(text);
+      await this.runPromptTurn(text, attachments);
     } catch (err) {
       // Surface pre-stream failures instead of letting the submit vanish.
       const message = err instanceof Error ? err.message : String(err);
@@ -2261,8 +2339,10 @@ export class ConversationHost {
       thinking: this.settings.thinking,
       sessionMode: true,
       // Replacing the process to pick up a new effort would kill every agent in
-      // it, and nobody flips a chip meaning that. Read fresh on every turn.
-      hasLiveWork: () => this.hasLiveWork,
+      // it, and nobody flips a chip meaning that. Read fresh on every turn —
+      // and read as `replacementWouldCostWork`, which excludes the turn doing
+      // the asking. See that getter for what answering `hasLiveWork` here cost.
+      hasLiveWork: () => this.replacementWouldCostWork,
       onSettingsPending: (pending) => {
         this.pendingSettings = pending;
         void this.publishAuthState();
@@ -2384,7 +2464,7 @@ export class ConversationHost {
     this.publishRemoteControl({ state: "off" });
   }
 
-  private async runPromptTurn(text: string) {
+  private async runPromptTurn(text: string, attachments: ContentBlock[] = []) {
     await saveDirtyEditors();
     // Resolved once and used for everything downstream. In an isolated
     // conversation this is the worktree, not the folder VS Code has open, and a
@@ -2519,7 +2599,7 @@ export class ConversationHost {
     const orchestrator = this.orchestrator;
     const turn = (async () => {
       try {
-        await orchestrator.turn(text);
+        await orchestrator.turn(text, attachments);
       } finally {
         this.activeProvider = undefined;
         this.awaitingApproval = false;
@@ -2714,22 +2794,20 @@ export class ConversationHost {
     if (d.type === "model" && d.model) {
       this.models.record(requestedModel, d.model);
     }
-    // Usage deltas are the authoritative token counts reported by the
-    // CLI. Re-publish them as a typed `tokenUsage` event so the
-    // TokenMeter doesn't need to parse the raw delta envelope.
+    // The CLI reports how full the context was with its usage delta. Recorded
+    // on the session before it is published, because the meter is not remounted
+    // when this conversation is swapped off the surface and back on — the value
+    // has to be restorable, not merely broadcast once.
     if (d.type === "usage" && d.usage) {
-      this.post({
-        type: "tokenUsage",
-        inputTokens: d.usage.inputTokens,
-        outputTokens: d.usage.outputTokens,
-        cacheReadTokens: d.usage.cacheReadTokens,
-        cacheCreatedTokens: d.usage.cacheCreatedTokens,
-        costUsd: d.usage.costUsd,
-        sessionId: d.usage.sessionId,
-        source: "claude-cli",
-        contextTokens: d.usage.contextTokens,
-        contextWindow: d.usage.contextWindow
-      });
+      const { contextTokens, contextWindow } = d.usage;
+      if (contextTokens !== undefined && contextWindow) {
+        this.sessions.context = { used: contextTokens, window: contextWindow };
+        this.publishContext();
+        // Its own save rather than riding on the turn's timeline events: the
+        // usage delta can be the last thing a turn says, and the figure is only
+        // worth storing if it survives the window closing after it.
+        this.scheduleSave();
+      }
     }
     // Compaction is the one thing that changes what the model remembers
     // without the user doing anything, so it goes on the timeline rather

@@ -92,6 +92,39 @@
   padding: 10px 12px 4px;
 }
 
+// A refusal, not an error: nothing failed, the file is simply not something
+// the model can be given. Warm rather than red, and dismissible — it has been
+// read once it has been read.
+.refused {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  margin: 8px 12px 0;
+  border: 1px solid var(--warn-soft);
+  border-radius: var(--round-sm);
+  background: var(--s2);
+  color: var(--t2);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+.refusedDismiss {
+  flex: none;
+  margin-left: auto;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--round-sm);
+  background: transparent;
+  color: var(--t3);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--s3);
+    color: var(--t1);
+  }
+}
+
 .attachment {
   display: inline-flex;
   align-items: center;
@@ -364,10 +397,12 @@
   padding: 0 10px 8px;
 }
 
-.micBtn {
+// The shape both in-input controls share. A placeholder rather than one class
+// extending the other: stylelint refuses `@extend .someClass`, and the shared
+// thing here is a shape, not one button pretending to be the other.
+%input-corner-button {
   position: absolute;
   top: 8px;
-  right: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -387,6 +422,35 @@
     background: var(--s3);
     color: var(--t1);
   }
+}
+
+.micBtn {
+  @extend %input-corner-button;
+
+  right: 8px;
+}
+
+// The paperclip sits one slot to the left of the microphone. Same box, same
+// hover, one offset — two controls that both put something into the message
+// read as a pair only if nothing else about them differs.
+.attachBtn {
+  @extend %input-corner-button;
+
+  right: 40px;
+}
+
+// Never `display: none`: a file input that is not in the layout cannot be
+// clicked open by script in every engine, and it still has to be reachable.
+// Taken out of the tab order by `tabIndex` on the element instead — the button
+// beside it is what the keyboard uses.
+.fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  opacity: 0;
+  pointer-events: none;
 }
 
 // Lit while the microphone is open. The accent is the same one the send button

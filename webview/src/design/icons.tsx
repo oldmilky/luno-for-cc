@@ -50,6 +50,7 @@ import { LayersIcon } from "@solar-icons/react/linear/layers";
 import { LockIcon } from "@solar-icons/react/linear/lock";
 import { LogoutIcon } from "@solar-icons/react/linear/logout";
 import { MagnifierIcon } from "@solar-icons/react/linear/magnifier";
+import { GalleryIcon } from "@solar-icons/react/linear/gallery";
 import { MenuDotsIcon } from "@solar-icons/react/linear/menu-dots";
 import { PaletteIcon } from "@solar-icons/react/linear/palette";
 import { PaperclipIcon } from "@solar-icons/react/linear/paperclip";
@@ -111,6 +112,7 @@ const SOLAR = {
   edit: PenNewSquareIcon,
   code: CodeIcon,
   attach: PaperclipIcon,
+  image: GalleryIcon,
   dots: MenuDotsIcon,
   history: HistoryIcon,
   bolt: BoltIcon,
